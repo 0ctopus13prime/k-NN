@@ -15,6 +15,7 @@ import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.query.KNNQueryResult;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.store.IndexInputWithBuffer;
+import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -129,9 +130,9 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      */
-    public static native void writeIndex(long indexAddress, String indexPath);
+    public static native void writeIndex(long indexAddress, IndexOutputWithBuffer output);
 
     /**
      * Writes a faiss index.
@@ -139,9 +140,9 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      */
-    public static native void writeBinaryIndex(long indexAddress, String indexPath);
+    public static native void writeBinaryIndex(long indexAddress, IndexOutputWithBuffer output);
 
     /**
      * Writes a faiss index.
@@ -149,9 +150,9 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      */
-    public static native void writeByteIndex(long indexAddress, String indexPath);
+    public static native void writeByteIndex(long indexAddress, IndexOutputWithBuffer output);
 
     /**
      * Create an index for the native library with a provided template index
@@ -159,7 +160,7 @@ class FaissService {
      * @param ids array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
      * @param dim dimension of the vector to be indexed
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      * @param templateIndex empty template index
      * @param parameters additional build time parameters
      */
@@ -167,7 +168,7 @@ class FaissService {
         int[] ids,
         long vectorsAddress,
         int dim,
-        String indexPath,
+        IndexOutputWithBuffer output,
         byte[] templateIndex,
         Map<String, Object> parameters
     );
@@ -178,7 +179,7 @@ class FaissService {
      * @param ids array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
      * @param dim dimension of the vector to be indexed
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      * @param templateIndex empty template index
      * @param parameters additional build time parameters
      */
@@ -186,7 +187,7 @@ class FaissService {
         int[] ids,
         long vectorsAddress,
         int dim,
-        String indexPath,
+        IndexOutputWithBuffer output,
         byte[] templateIndex,
         Map<String, Object> parameters
     );
@@ -197,7 +198,7 @@ class FaissService {
      * @param ids array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
      * @param dim dimension of the vector to be indexed
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      * @param templateIndex empty template index
      * @param parameters additional build time parameters
      */
@@ -205,7 +206,7 @@ class FaissService {
         int[] ids,
         long vectorsAddress,
         int dim,
-        String indexPath,
+        IndexOutputWithBuffer output,
         byte[] templateIndex,
         Map<String, Object> parameters
     );

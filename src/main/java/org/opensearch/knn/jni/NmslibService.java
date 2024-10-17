@@ -15,6 +15,7 @@ import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.query.KNNQueryResult;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.store.IndexInputWithBuffer;
+import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -48,10 +49,10 @@ class NmslibService {
      * @param ids array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
      * @param dim dimension of the vector to be indexed
-     * @param indexPath path to save index file to
+     * @param output KDY TODO
      * @param parameters parameters to build index
      */
-    public static native void createIndex(int[] ids, long vectorsAddress, int dim, String indexPath, Map<String, Object> parameters);
+    public static native void createIndex(int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, Map<String, Object> parameters);
 
     /**
      * Load an index into memory
