@@ -144,6 +144,9 @@ namespace knn_jni {
         virtual jlong CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                 jmethodID methodID, jvalue* args) = 0;
 
+        virtual void CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                               jmethodID methodID, jvalue* args) = 0;
+
         // --------------------------------------------------------------------------
     };
 
@@ -200,6 +203,7 @@ namespace knn_jni {
         jfieldID GetFieldID(JNIEnv * env, jclass clazz, const char *name, const char *sig) final;
         jint CallNonvirtualIntMethodA(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, jvalue *args) final;
         jlong CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jclass clazz, jmethodID methodID, jvalue* args) final;
+        void CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz, jmethodID methodID, jvalue* args) final;
         void * GetPrimitiveArrayCritical(JNIEnv * env, jarray array, jboolean *isCopy) final;
         void ReleasePrimitiveArrayCritical(JNIEnv * env, jarray array, void *carray, jint mode) final;
 

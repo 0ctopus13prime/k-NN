@@ -17,15 +17,14 @@
 namespace knn_jni {
 namespace stream {
 
-
-
 /**
  * NmslibIOReader implementation delegating NativeEngineIndexInputMediator to read bytes.
  */
 class NmslibOpenSearchIOReader final : public similarity::NmslibIOReader {
  public:
   explicit NmslibOpenSearchIOReader(NativeEngineIndexInputMediator *_mediator)
-      : mediator(_mediator) {
+      : similarity::NmslibIOReader(),
+        mediator(_mediator) {
   }
 
   void read(char *bytes, size_t len) final {
@@ -43,6 +42,23 @@ class NmslibOpenSearchIOReader final : public similarity::NmslibIOReader {
   NativeEngineIndexInputMediator *mediator;
 };  // class NmslibOpenSearchIOReader
 
+
+class NmslibOpenSearchIOWriter final : public similarity::NmslibIOWriter {
+ public:
+  explicit NmslibOpenSearchIOWriter(NativeEngineIndexOutputMediator *_mediator)
+      : similarity::NmslibIOWriter(),
+        mediator(_mediator) {
+  }
+
+  void write(char *bytes, size_t len) final {
+    if (len > 0) {
+      mediator->writeBytes((uint8_t *) bytes, len);
+    }
+  }
+
+ private:
+  NativeEngineIndexOutputMediator *mediator;
+};  // class NmslibOpenSearchIOWriter
 
 
 }

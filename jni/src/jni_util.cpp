@@ -573,6 +573,11 @@ jlong knn_jni::JNIUtil::CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jcl
   return env->CallNonvirtualLongMethodA(obj, clazz, methodID, args);
 }
 
+void knn_jni::JNIUtil::CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                                 jmethodID methodID, jvalue* args) {
+  return env->CallNonvirtualVoidMethodA(obj, clazz, methodID, args);
+}
+
 void * knn_jni::JNIUtil::GetPrimitiveArrayCritical(JNIEnv * env, jarray array, jboolean *isCopy) {
     return env->GetPrimitiveArrayCritical(array, isCopy);
 }

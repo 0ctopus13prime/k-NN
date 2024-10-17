@@ -24,8 +24,6 @@
 namespace knn_jni {
 namespace stream {
 
-
-
 /**
  * A glue component inheriting IOReader to be passed down to Faiss library.
  * This will then indirectly call the mediator component and eventually read required bytes from Lucene's IndexInput.
@@ -54,6 +52,35 @@ class FaissOpenSearchIOReader final : public faiss::IOReader {
  private:
   NativeEngineIndexInputMediator *mediator;
 };  // class FaissOpenSearchIOReader
+
+
+/**
+ *  TODO
+ */
+class FaissOpenSearchIOWriter final : public faiss::IOWriter {
+ public:
+  explicit FaissOpenSearchIOWriter(NativeEngineIndexOutputMediator *_mediator)
+      : faiss::IOWriter(),
+        mediator(_mediator) {
+    name = "FaissOpenSearchIOWriter";
+  }
+
+  size_t operator()(const void *ptr, size_t size, size_t nitems) final {
+    const auto writeBytes = size * nitems;
+    if (writeBytes > 0) {
+      mediator->writeBytes((uint8_t *) ptr, writeBytes);
+    }
+    return nitems;
+  }
+
+  // return a file number that can be memory-mapped
+  int filedescriptor() final {
+    throw std::runtime_error("filedescriptor() is not supported in FaissOpenSearchIOWriter.");
+  }
+
+ private:
+  NativeEngineIndexOutputMediator *mediator;
+};  // class FaissOpenSearchIOWriter
 
 
 

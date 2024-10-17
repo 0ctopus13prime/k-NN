@@ -26,7 +26,6 @@
 
 #include <jni.h>
 #include <string>
-#include <istream>
 
 #include "hnswquery.h"
 #include "method/hnsw.h"
@@ -39,25 +38,25 @@ const similarity::LabelType DEFAULT_LABEL = -1;
 
 void knn_jni::nmslib_wrapper::CreateIndex(knn_jni::JNIUtilInterface *jniUtil, JNIEnv *env, jintArray idsJ,
                                           jlong vectorsAddressJ, jint dimJ,
-                                          jstring indexPathJ, jobject parametersJ) {
+                                          jobject output, jobject parametersJ) {
 
-  if (idsJ == nullptr) {
+  if (idsJ == nullptr) [[unlikely]] {
     throw std::runtime_error("IDs cannot be null");
   }
 
-  if (vectorsAddressJ <= 0) {
+  if (vectorsAddressJ <= 0) [[unlikely]] {
     throw std::runtime_error("VectorsAddress cannot be less than 0");
   }
 
-  if (dimJ <= 0) {
+  if (dimJ <= 0) [[unlikely]] {
     throw std::runtime_error("Vectors dimensions cannot be less than or equal to 0");
   }
 
-  if (indexPathJ == nullptr) {
-    throw std::runtime_error("Index path cannot be null");
+  if (output == nullptr) [[unlikely]] {
+    throw std::runtime_error("Index output stream cannot be null");
   }
 
-  if (parametersJ == nullptr) {
+  if (parametersJ == nullptr) [[unlikely]] {
     throw std::runtime_error("Parameters cannot be null");
   }
 
@@ -89,9 +88,6 @@ void knn_jni::nmslib_wrapper::CreateIndex(knn_jni::JNIUtilInterface *jniUtil, JN
   }
 
   jniUtil->DeleteLocalRef(env, parametersJ);
-
-  // Get the path to save the index
-  std::string indexPathCpp(jniUtil->ConvertJavaStringToCppString(env, indexPathJ));
 
   // Get space type for this index
   jobject spaceTypeJ = knn_jni::GetJObjectFromMapOrThrow(parametersCpp, knn_jni::SPACE_TYPE);
@@ -174,7 +170,15 @@ void knn_jni::nmslib_wrapper::CreateIndex(knn_jni::JNIUtilInterface *jniUtil, JN
                                                                                   *(space),
                                                                                   dataset));
     index->CreateIndex(similarity::AnyParams(indexParameters));
-    index->SaveIndex(indexPathCpp);
+
+    knn_jni::stream::NativeEngineIndexOutputMediator mediator {jniUtil, env, output};
+    knn_jni::stream::NmslibOpenSearchIOWriter writer {&mediator};
+
+    if (auto hnswFloatIndex = dynamic_cast<similarity::Hnsw<float> *>(index.get())) {
+      hnswFloatIndex->SaveIndexWithStream(writer);
+    } else {
+      throw std::runtime_error("We only support similarity::Hnsw<float> in NMSLIB.");
+    }
 
     for (auto &it : dataset) {
       delete it;

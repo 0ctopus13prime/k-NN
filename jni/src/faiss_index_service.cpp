@@ -9,7 +9,6 @@
 
 #include "faiss_index_service.h"
 #include "faiss_methods.h"
-#include "faiss/index_factory.h"
 #include "faiss/Index.h"
 #include "faiss/IndexBinary.h"
 #include "faiss/IndexHNSW.h"
@@ -17,8 +16,7 @@
 #include "faiss/IndexIVFFlat.h"
 #include "faiss/IndexBinaryIVF.h"
 #include "faiss/IndexIDMap.h"
-#include "faiss/index_io.h"
-#include <algorithm>
+
 #include <string>
 #include <vector>
 #include <memory>
@@ -55,7 +53,7 @@ void SetExtraParameters(knn_jni::JNIUtilInterface * jniUtil, JNIEnv *env,
     }
 }
 
-IndexService::IndexService(std::unique_ptr<FaissMethods> faissMethods) : faissMethods(std::move(faissMethods)) {}
+IndexService::IndexService(std::unique_ptr<FaissMethods> _faissMethods) : faissMethods(std::move(_faissMethods)) {}
 
 void IndexService::allocIndex(faiss::Index * index, size_t dim, size_t numVectors) {
     if(auto * indexHNSWSQ = dynamic_cast<faiss::IndexHNSWSQ *>(index)) {
@@ -143,20 +141,20 @@ void IndexService::insertToIndex(
 }
 
 void IndexService::writeIndex(
-        std::string indexPath,
+        faiss::IOWriter* writer,
         jlong idMapAddress
     ) {
     std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (idMapAddress));
 
     try {
         // Write the index to disk
-        faissMethods->writeIndex(idMap.get(), indexPath.c_str());
+        faissMethods->writeIndex(idMap.get(), writer);
     } catch(std::exception &e) {
         throw std::runtime_error("Failed to write index to disk");
     }
 }
 
-BinaryIndexService::BinaryIndexService(std::unique_ptr<FaissMethods> faissMethods) : IndexService(std::move(faissMethods)) {}
+BinaryIndexService::BinaryIndexService(std::unique_ptr<FaissMethods> _faissMethods) : IndexService(std::move(_faissMethods)) {}
 
 void BinaryIndexService::allocIndex(faiss::Index * index, size_t dim, size_t numVectors) {
     if(auto * indexBinaryHNSW = dynamic_cast<faiss::IndexBinaryHNSW *>(index)) {
@@ -179,7 +177,7 @@ jlong BinaryIndexService::initIndex(
     // Create index using Faiss factory method
     std::unique_ptr<faiss::IndexBinary> index(faissMethods->indexBinaryFactory(dim, indexDescription.c_str()));
     // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
-    if(threadCount != 0) {
+    if (threadCount != 0) {
         omp_set_num_threads(threadCount);
     }
 
@@ -187,7 +185,7 @@ jlong BinaryIndexService::initIndex(
     SetExtraParameters<faiss::IndexBinary, faiss::IndexBinaryIVF, faiss::IndexBinaryHNSW>(jniUtil, env, parameters, index.get());
 
     // Check that the index does not need to be trained
-    if(!index->is_trained) {
+    if (!index->is_trained) {
         throw std::runtime_error("Index is not trained");
     }
 
@@ -215,8 +213,8 @@ void BinaryIndexService::insertToIndex(
     std::vector<uint8_t> * inputVectors = reinterpret_cast<std::vector<uint8_t>*>(vectorsAddress);
 
     // The number of vectors can be int here because a lucene segment number of total docs never crosses INT_MAX value
-    int numVectors = (int) (inputVectors->size() / (uint64_t) (dim / 8));
-    if(numVectors == 0) {
+    const int numVectors = (int) (inputVectors->size() / (uint64_t) (dim / 8));
+    if (numVectors == 0) {
         throw std::runtime_error("Number of vectors cannot be 0");
     }
 
@@ -225,7 +223,7 @@ void BinaryIndexService::insertToIndex(
     }
 
     // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
-    if(threadCount != 0) {
+    if (threadCount != 0) {
         omp_set_num_threads(threadCount);
     }
 
@@ -236,28 +234,26 @@ void BinaryIndexService::insertToIndex(
 }
 
 void BinaryIndexService::writeIndex(
-        std::string indexPath,
+        faiss::IOWriter* writer,
         jlong idMapAddress
     ) {
-
     std::unique_ptr<faiss::IndexBinaryIDMap> idMap (reinterpret_cast<faiss::IndexBinaryIDMap *> (idMapAddress));
 
     try {
         // Write the index to disk
-        faissMethods->writeIndexBinary(idMap.get(), indexPath.c_str());
+        faissMethods->writeIndexBinary(idMap.get(), writer);
     } catch(std::exception &e) {
         throw std::runtime_error("Failed to write index to disk");
     }
 }
 
-ByteIndexService::ByteIndexService(std::unique_ptr<FaissMethods> faissMethods) : IndexService(std::move(faissMethods)) {}
+ByteIndexService::ByteIndexService(std::unique_ptr<FaissMethods> _faissMethods) : IndexService(std::move(_faissMethods)) {}
 
 void ByteIndexService::allocIndex(faiss::Index * index, size_t dim, size_t numVectors) {
-    if(auto * indexHNSWSQ = dynamic_cast<faiss::IndexHNSWSQ *>(index)) {
+    if (auto * indexHNSWSQ = dynamic_cast<faiss::IndexHNSWSQ *>(index)) {
         if(auto * indexScalarQuantizer = dynamic_cast<faiss::IndexScalarQuantizer *>(indexHNSWSQ->storage)) {
             indexScalarQuantizer->codes.reserve(indexScalarQuantizer->code_size * numVectors);
         }
-        return;
     }
 }
 
@@ -275,7 +271,7 @@ jlong ByteIndexService::initIndex(
     std::unique_ptr<faiss::Index> index(faissMethods->indexFactory(dim, indexDescription.c_str(), metric));
 
     // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
-    if(threadCount != 0) {
+    if (threadCount != 0) {
         omp_set_num_threads(threadCount);
     }
 
@@ -283,7 +279,7 @@ jlong ByteIndexService::initIndex(
     SetExtraParameters<faiss::Index, faiss::IndexIVF, faiss::IndexHNSW>(jniUtil, env, parameters, index.get());
 
     // Check that the index does not need to be trained
-    if(!index->is_trained) {
+    if (!index->is_trained) {
         throw std::runtime_error("Index is not trained");
     }
 
@@ -311,17 +307,17 @@ void ByteIndexService::insertToIndex(
     auto *inputVectors = reinterpret_cast<std::vector<int8_t>*>(vectorsAddress);
 
     // The number of vectors can be int here because a lucene segment number of total docs never crosses INT_MAX value
-    int numVectors = inputVectors->size() / dim;
-    if(numVectors == 0) {
+    const int numVectors = inputVectors->size() / dim;
+    if (numVectors == 0) [[unlikely]] {
         throw std::runtime_error("Number of vectors cannot be 0");
     }
 
-    if (numIds != numVectors) {
+    if (numIds != numVectors) [[unlikely]] {
         throw std::runtime_error("Number of IDs does not match number of vectors");
     }
 
     // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
-    if(threadCount != 0) {
+    if (threadCount != 0) {
         omp_set_num_threads(threadCount);
     }
 
@@ -329,36 +325,38 @@ void ByteIndexService::insertToIndex(
 
     // Add vectors in batches by casting int8 vectors into float with a batch size of 1000 to avoid additional memory spike.
     // Refer to this github issue for more details https://github.com/opensearch-project/k-NN/issues/1659#issuecomment-2307390255
-    int batchSize = 1000;
+    const int batchSize = 1024;
     std::vector <float> inputFloatVectors(batchSize * dim);
     std::vector <int64_t> floatVectorsIds(batchSize);
-    int id = 0;
     auto iter = inputVectors->begin();
 
-    for (int id = 0; id < numVectors; id += batchSize) {
-        if (numVectors - id < batchSize) {
-            batchSize = numVectors - id;
-        }
+    for (int i = 0, round = numVectors / batchSize, numVectors = dim * batchSize ; i < round ; ++i) {
+      std::memcpy(floatVectorsIds.data(), &ids[i * batchSize], batchSize);
+      for (int j = 0; j < numVectors ; ++j) {
+        inputFloatVectors[j] = static_cast<float>(*iter++);
+      }
+      idMap->add_with_ids(batchSize, inputFloatVectors.data(), floatVectorsIds.data());
+    }
 
-        for (int i = 0; i < batchSize; ++i) {
-            floatVectorsIds[i] = ids[id + i];
-            for (int j = 0; j < dim; ++j, ++iter) {
-                inputFloatVectors[i * dim + j] = static_cast<float>(*iter);
-            }
-        }
-        idMap->add_with_ids(batchSize, inputFloatVectors.data(), floatVectorsIds.data());
+    if ((numVectors % batchSize) > 0) {
+      const auto left = numVectors % batchSize;
+      std::memcpy(floatVectorsIds.data(), &ids[(numVectors / batchSize) * batchSize], left);
+      for (int i = 0 ; i < dim * left ; ++i) {
+        inputFloatVectors[i] = static_cast<float>(*iter++);
+      }
+      idMap->add_with_ids(left, inputFloatVectors.data(), floatVectorsIds.data());
     }
 }
 
 void ByteIndexService::writeIndex(
-        std::string indexPath,
+        faiss::IOWriter* writer,
         jlong idMapAddress
     ) {
     std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (idMapAddress));
 
     try {
         // Write the index to disk
-        faissMethods->writeIndex(idMap.get(), indexPath.c_str());
+        faissMethods->writeIndex(idMap.get(), writer);
     } catch(std::exception &e) {
         throw std::runtime_error("Failed to write index to disk");
     }

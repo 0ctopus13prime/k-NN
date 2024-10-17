@@ -22,8 +22,6 @@
 namespace knn_jni {
 namespace stream {
 
-
-
 /**
  * This class contains Java IndexInputWithBuffer reference and calls its API to copy required bytes into a read buffer.
  */
@@ -75,11 +73,11 @@ class NativeEngineIndexInputMediator {
   }
 
   int64_t remainingBytes() {
-      return jni_interface->CallNonvirtualLongMethodA(env,
-                                                      indexInput,
-                                                      getIndexInputWithBufferClass(jni_interface, env),
-                                                      remainingBytesMethod,
-                                                      nullptr);
+    return jni_interface->CallNonvirtualLongMethodA(env,
+                                                    indexInput,
+                                                    getIndexInputWithBufferClass(jni_interface, env),
+                                                    remainingBytesMethod,
+                                                    nullptr);
   }
 
  private:
@@ -116,6 +114,86 @@ class NativeEngineIndexInputMediator {
   jmethodID copyBytesMethod;
   jmethodID remainingBytesMethod;
 }; // class NativeEngineIndexInputMediator
+
+
+
+/**
+ * TODO
+ */
+class NativeEngineIndexOutputMediator {
+ public:
+  NativeEngineIndexOutputMediator(JNIUtilInterface *_jni_interface,
+                                  JNIEnv *_env,
+                                  jobject _indexOutput)
+      : jni_interface(_jni_interface),
+        env(_env),
+        indexOutput(_indexOutput),
+        bufferArray((jbyteArray) (_jni_interface->GetObjectField(_env,
+                                                                 _indexOutput,
+                                                                 getBufferFieldId(_jni_interface, _env)))),
+        writeBytesMethod(getWriteBytesMethod(_jni_interface, _env)),
+        bufferLength(jni_interface->GetJavaBytesArrayLength(env, bufferArray)) {
+  }
+
+  void writeBytes(uint8_t *source, size_t nbytes) {
+    auto jclazz = getIndexOutputWithBufferClass(jni_interface, env);
+
+    auto left = nbytes;
+    while (left > 0) {
+      const auto writeBytes = std::min(bufferLength, left);
+
+      // === Critical Section Start ===
+
+      // Get primitive array pointer, no copy is happening in OpenJDK.
+      auto primitiveArray =
+          (jbyte *) jni_interface->GetPrimitiveArrayCritical(env, bufferArray, nullptr);
+
+      // Copy Java bytes to C++ destination address.
+      std::memcpy(primitiveArray, source, writeBytes);
+
+      // Release the acquired primitive array pointer.
+      // JNI_ABORT tells JVM to directly free memory without copying back to Java byte[].
+      // Since we're merely copying data, we don't need to copying back.
+      jni_interface->ReleasePrimitiveArrayCritical(env, bufferArray, primitiveArray, JNI_ABORT);
+
+      // === Critical Section End ===
+
+      jvalue args {.i = (int32_t) writeBytes};
+      jni_interface->CallNonvirtualVoidMethodA(env, indexOutput, jclazz, writeBytesMethod, &args);
+
+      source += writeBytes;
+      left -= writeBytes;
+    }
+  }
+
+ private:
+  static jclass getIndexOutputWithBufferClass(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jclass INDEX_OUTPUT_WITH_BUFFER_CLASS =
+        jni_interface->FindClassFromJNIEnv(env, "org/opensearch/knn/index/store/IndexOutputWithBuffer");
+    return INDEX_OUTPUT_WITH_BUFFER_CLASS;
+  }
+
+  static jmethodID getWriteBytesMethod(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jmethodID WRITE_METHOD_ID =
+        jni_interface->GetMethodID(env, getIndexOutputWithBufferClass(jni_interface, env), "writeBytes", "(I)V");
+    return WRITE_METHOD_ID;
+  }
+
+  static jfieldID getBufferFieldId(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jfieldID BUFFER_FIELD_ID =
+        jni_interface->GetFieldID(env, getIndexOutputWithBufferClass(jni_interface, env), "buffer", "[B");
+    return BUFFER_FIELD_ID;
+  }
+
+  JNIUtilInterface *jni_interface;
+  JNIEnv *env;
+
+  // `IndexOutputWithBuffer` instance having `IndexOutput` instance obtained from `Directory` for reading.
+  jobject indexOutput;
+  jbyteArray bufferArray;
+  jmethodID writeBytesMethod;
+  size_t bufferLength;
+};  // NativeEngineIndexOutputMediator
 
 
 
