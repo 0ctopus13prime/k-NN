@@ -132,15 +132,20 @@ class NativeEngineIndexOutputMediator {
                                                                  _indexOutput,
                                                                  getBufferFieldId(_jni_interface, _env)))),
         writeBytesMethod(getWriteBytesMethod(_jni_interface, _env)),
-        bufferLength(jni_interface->GetJavaBytesArrayLength(env, bufferArray)) {
+        bufferLength(jni_interface->GetJavaBytesArrayLength(env, bufferArray)),
+        nextWriteIndex() {
+  }
+
+  ~NativeEngineIndexOutputMediator() {
+    if (nextWriteIndex > 0) {
+      callWriteBytesInIndexOutput();
+    }
   }
 
   void writeBytes(uint8_t *source, size_t nbytes) {
-    auto jclazz = getIndexOutputWithBufferClass(jni_interface, env);
-
     auto left = nbytes;
     while (left > 0) {
-      const auto writeBytes = std::min(bufferLength, left);
+      const auto writeBytes = std::min(bufferLength - nextWriteIndex, left);
 
       // === Critical Section Start ===
 
@@ -149,21 +154,24 @@ class NativeEngineIndexOutputMediator {
           (jbyte *) jni_interface->GetPrimitiveArrayCritical(env, bufferArray, nullptr);
 
       // Copy Java bytes to C++ destination address.
-      std::memcpy(primitiveArray, source, writeBytes);
+      std::memcpy(primitiveArray + nextWriteIndex, source, writeBytes);
 
       // Release the acquired primitive array pointer.
-      // JNI_ABORT tells JVM to directly free memory without copying back to Java byte[].
-      // Since we're merely copying data, we don't need to copying back.
-      jni_interface->ReleasePrimitiveArrayCritical(env, bufferArray, primitiveArray, JNI_ABORT);
+      // JNI_COMMIT tells JVM to copy back the content, but do not free the elems pointer which is pointing to the .
+      // original buffer. However, most OpenJDK just return its underlying buffer pointer rather than creating a
+      // intermediate buffer.
+      jni_interface->ReleasePrimitiveArrayCritical(env, bufferArray, primitiveArray, JNI_COMMIT);
 
       // === Critical Section End ===
 
-      jvalue args {.i = (int32_t) writeBytes};
-      jni_interface->CallNonvirtualVoidMethodA(env, indexOutput, jclazz, writeBytesMethod, &args);
+      nextWriteIndex += writeBytes;
+      if (nextWriteIndex >= bufferLength) {
+        callWriteBytesInIndexOutput();
+      }
 
       source += writeBytes;
       left -= writeBytes;
-    }
+    }  // End while
   }
 
  private:
@@ -185,6 +193,13 @@ class NativeEngineIndexOutputMediator {
     return BUFFER_FIELD_ID;
   }
 
+  void callWriteBytesInIndexOutput() {
+    auto jclazz = getIndexOutputWithBufferClass(jni_interface, env);
+    jvalue args {.i = nextWriteIndex};
+    jni_interface->CallNonvirtualVoidMethodA(env, indexOutput, jclazz, writeBytesMethod, &args);
+    nextWriteIndex = 0;
+  }
+
   JNIUtilInterface *jni_interface;
   JNIEnv *env;
 
@@ -193,6 +208,7 @@ class NativeEngineIndexOutputMediator {
   jbyteArray bufferArray;
   jmethodID writeBytesMethod;
   size_t bufferLength;
+  int32_t nextWriteIndex;
 };  // NativeEngineIndexOutputMediator
 
 
