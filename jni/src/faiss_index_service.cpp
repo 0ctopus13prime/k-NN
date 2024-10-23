@@ -121,7 +121,7 @@ void IndexService::insertToIndex(
 
     // The number of vectors can be int here because a lucene segment number of total docs never crosses INT_MAX value
     int numVectors = (int) (inputVectors->size() / (uint64_t) dim);
-    if(numVectors == 0) {
+    if (numVectors == 0) {
         throw std::runtime_error("Number of vectors cannot be 0");
     }
 
@@ -151,6 +151,17 @@ void IndexService::writeIndex(
         faissMethods->writeIndex(idMap.get(), writer);
     } catch(std::exception &e) {
         throw std::runtime_error("Failed to write index to disk");
+    }
+}
+
+void IndexService::writeIndexLegacy(const std::string& path, jlong idMapAddress) {
+  std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (idMapAddress));
+
+    try {
+        // Write the index to disk
+        faissMethods->writeIndexLegacy(idMap.get(), path);
+    } catch(std::exception &e) {
+      throw std::runtime_error("Failed to write index to disk");
     }
 }
 

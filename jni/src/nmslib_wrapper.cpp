@@ -29,6 +29,7 @@
 
 #include "hnswquery.h"
 #include "method/hnsw.h"
+#include "method/hnsw_distfunc_opt.cc"
 
 std::string TranslateSpaceType(const std::string &spaceType);
 
@@ -161,7 +162,10 @@ void knn_jni::nmslib_wrapper::CreateIndex(knn_jni::JNIUtilInterface *jniUtil, JN
     // This is not the ideal approach, please refer this gh issue for long term solution:
     // https://github.com/opensearch-project/k-NN/issues/1600
     //commons::freeVectorData(vectorsAddressJ);
-    delete inputVectors;
+
+    // TMP
+    // delete inputVectors;
+    // TMP
 
     std::unique_ptr<similarity::Index<float>> index;
     index.reset(similarity::MethodFactoryRegistry<float>::Instance().CreateMethod(false,
@@ -176,6 +180,156 @@ void knn_jni::nmslib_wrapper::CreateIndex(knn_jni::JNIUtilInterface *jniUtil, JN
 
     if (auto hnswFloatIndex = dynamic_cast<similarity::Hnsw<float> *>(index.get())) {
       hnswFloatIndex->SaveIndexWithStream(writer);
+    } else {
+      throw std::runtime_error("We only support similarity::Hnsw<float> in NMSLIB.");
+    }
+
+    for (auto &it : dataset) {
+      delete it;
+    }
+  } catch (...) {
+    for (auto &it : dataset) {
+      delete it;
+    }
+
+    jniUtil->ReleaseIntArrayElements(env, idsJ, idsCpp, JNI_ABORT);
+    throw;
+  }
+}
+
+void knn_jni::nmslib_wrapper::CreateIndexLegacy(knn_jni::JNIUtilInterface *jniUtil, JNIEnv *env, jintArray idsJ,
+                                          jlong vectorsAddressJ, jint dimJ,
+                                          const std::string& path, jobject parametersJ) {
+
+  if (idsJ == nullptr) [[unlikely]] {
+    throw std::runtime_error("IDs cannot be null");
+  }
+
+  if (vectorsAddressJ <= 0) [[unlikely]] {
+    throw std::runtime_error("VectorsAddress cannot be less than 0");
+  }
+
+  if (dimJ <= 0) [[unlikely]] {
+    throw std::runtime_error("Vectors dimensions cannot be less than or equal to 0");
+  }
+
+  if (parametersJ == nullptr) [[unlikely]] {
+    throw std::runtime_error("Parameters cannot be null");
+  }
+
+  // Handle parameters
+  auto parametersCpp = jniUtil->ConvertJavaMapToCppMap(env, parametersJ);
+  std::vector<std::string> indexParameters;
+
+  // Algorithm parameters will be in a sub map
+  if (parametersCpp.find(knn_jni::PARAMETERS) != parametersCpp.end()) {
+    jobject subParametersJ = parametersCpp[knn_jni::PARAMETERS];
+    auto subParametersCpp = jniUtil->ConvertJavaMapToCppMap(env, subParametersJ);
+
+    if (subParametersCpp.find(knn_jni::EF_CONSTRUCTION) != subParametersCpp.end()) {
+      auto efConstruction = jniUtil->ConvertJavaObjectToCppInteger(env, subParametersCpp[knn_jni::EF_CONSTRUCTION]);
+      indexParameters.push_back(knn_jni::EF_CONSTRUCTION_NMSLIB + "=" + std::to_string(efConstruction));
+    }
+
+    if (subParametersCpp.find(knn_jni::M) != subParametersCpp.end()) {
+      auto m = jniUtil->ConvertJavaObjectToCppInteger(env, subParametersCpp[knn_jni::M]);
+      indexParameters.push_back(knn_jni::M_NMSLIB + "=" + std::to_string(m));
+    }
+
+    jniUtil->DeleteLocalRef(env, subParametersJ);
+  }
+
+  if (parametersCpp.find(knn_jni::INDEX_THREAD_QUANTITY) != parametersCpp.end()) {
+    auto indexThreadQty = jniUtil->ConvertJavaObjectToCppInteger(env, parametersCpp[knn_jni::INDEX_THREAD_QUANTITY]);
+    indexParameters.push_back(knn_jni::INDEX_THREAD_QUANTITY + "=" + std::to_string(indexThreadQty));
+  }
+
+  jniUtil->DeleteLocalRef(env, parametersJ);
+
+  // Get space type for this index
+  jobject spaceTypeJ = knn_jni::GetJObjectFromMapOrThrow(parametersCpp, knn_jni::SPACE_TYPE);
+  std::string spaceTypeCpp(jniUtil->ConvertJavaObjectToCppString(env, spaceTypeJ));
+  spaceTypeCpp = TranslateSpaceType(spaceTypeCpp);
+
+  std::unique_ptr<similarity::Space<float>> space;
+  space.reset(similarity::SpaceFactoryRegistry<float>::Instance().CreateSpace(spaceTypeCpp, similarity::AnyParams()));
+
+  // Get number of ids and vectors and dimension
+  auto *inputVectors = reinterpret_cast<std::vector<float> *>(vectorsAddressJ);
+  int dim = (int) dimJ;
+  // The number of vectors can be int here because a lucene segment number of total docs never crosses INT_MAX value
+  int numVectors = (int) (inputVectors->size() / (uint64_t) dim);
+  if (numVectors == 0) {
+    throw std::runtime_error("Number of vectors cannot be 0");
+  }
+
+  int numIds = jniUtil->GetJavaIntArrayLength(env, idsJ);
+  if (numIds != numVectors) {
+    throw std::runtime_error("Number of IDs does not match number of vectors");
+  }
+
+  // Read dataset
+  similarity::ObjectVector dataset;
+  dataset.reserve(numVectors);
+  int *idsCpp;
+  try {
+    // Read in data set
+    idsCpp = jniUtil->GetIntArrayElements(env, idsJ, nullptr);
+    size_t vectorSizeInBytes = dim * sizeof(float);
+    // vectorPointer needs to be unsigned long long, this will ensure that out of range doesn't happen for this pointer
+    // when the values of numVectors * dim becomes very large.
+    // Example: for 10M vectors of 1536 dim vectorPointer max value will be ~15.3B which is already > range of ints.
+    // keeping it unsigned long long we will never go above the range.
+    unsigned long long vectorPointer = 0;
+
+    // Allocate a large buffer that will contain all the vectors. Allocating the objects in one large buffer as
+    // opposed to individually will prevent heap fragmentation. We have observed that allocating individual
+    // objects causes RSS to rise throughout the lifetime of a process
+    // (see https://github.com/opensearch-project/k-NN/issues/772 and
+    // https://github.com/opensearch-project/k-NN/issues/72). This is because, in typical systems, small
+    // allocations will reside on some kind of heap managed by an allocator. Once freed, the allocator does not
+    // always return the memory to the OS. If the heap gets fragmented, this will cause the allocator
+    // to ask for more memory, causing RSS to grow. On large allocations (> 128 kb), most allocators will
+    // internally use mmap. Once freed, unmap will be called, which will immediately return memory to the OS
+    // which in turn prevents RSS from growing out of control. Wrap with a smart pointer so that buffer will be
+    // freed once variable goes out of scope. For reference, the code that specifies the layout of the buffer can be
+    // found: https://github.com/nmslib/nmslib/blob/v2.1.1/similarity_search/include/object.h#L61-L75
+    std::unique_ptr<char[]> objectBuffer
+        (new char[(similarity::ID_SIZE + similarity::LABEL_SIZE + similarity::DATALENGTH_SIZE + vectorSizeInBytes)
+            * numVectors]);
+    char *ptr = objectBuffer.get();
+    for (int i = 0; i < numVectors; i++) {
+      dataset.push_back(new similarity::Object(ptr));
+
+      memcpy(ptr, &idsCpp[i], similarity::ID_SIZE);
+      ptr += similarity::ID_SIZE;
+      memcpy(ptr, &DEFAULT_LABEL, similarity::LABEL_SIZE);
+      ptr += similarity::LABEL_SIZE;
+      memcpy(ptr, &vectorSizeInBytes, similarity::DATALENGTH_SIZE);
+      ptr += similarity::DATALENGTH_SIZE;
+
+      memcpy(ptr, &(inputVectors->at(vectorPointer)), vectorSizeInBytes);
+      ptr += vectorSizeInBytes;
+      vectorPointer += dim;
+    }
+    jniUtil->ReleaseIntArrayElements(env, idsJ, idsCpp, JNI_ABORT);
+
+    // Releasing the vectorsAddressJ memory as that is not required once we have created the index.
+    // This is not the ideal approach, please refer this gh issue for long term solution:
+    // https://github.com/opensearch-project/k-NN/issues/1600
+    //commons::freeVectorData(vectorsAddressJ);
+    // delete inputVectors;
+
+    std::unique_ptr<similarity::Index<float>> index;
+    index.reset(similarity::MethodFactoryRegistry<float>::Instance().CreateMethod(false,
+                                                                                  "hnsw",
+                                                                                  spaceTypeCpp,
+                                                                                  *(space),
+                                                                                  dataset));
+    index->CreateIndex(similarity::AnyParams(indexParameters));
+
+    if (auto hnswFloatIndex = dynamic_cast<similarity::Hnsw<float> *>(index.get())) {
+      hnswFloatIndex->SaveIndex(path);
     } else {
       throw std::runtime_error("We only support similarity::Hnsw<float> in NMSLIB.");
     }
@@ -331,7 +485,14 @@ jobjectArray knn_jni::nmslib_wrapper::QueryIndex(knn_jni::JNIUtilInterface *jniU
       query = new similarity::HNSWQuery<float>(*(indexWrapper->space), queryObject.get(), kJ, queryEfSearch);
     }
 
-    indexWrapper->index->Search(query);
+     // indexWrapper->index->Search(query);
+    // TMP
+    if (auto hnswFloatIndex = dynamic_cast<similarity::Hnsw<float> *>(indexWrapper->index.get())) {
+      hnswFloatIndex->Search(query, -1);
+    } else {
+      throw std::runtime_error("We only support similarity::Hnsw<float> in NMSLIB.");
+    }
+    // TMP
     neighbors.reset(query->Result()->Clone());
   } catch (...) {
     if (query != nullptr) {

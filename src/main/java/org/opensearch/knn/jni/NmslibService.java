@@ -29,7 +29,7 @@ import java.util.Map;
  *      src/main/java/org/opensearch/knn/index/KNNQueryResult.java
  *      src/main/java/org/opensearch/knn/common/KNNConstants.java
  */
-class NmslibService {
+public class NmslibService {
 
     static {
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
@@ -52,7 +52,13 @@ class NmslibService {
      * @param output KDY TODO
      * @param parameters parameters to build index
      */
-    public static native void createIndex(int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, Map<String, Object> parameters);
+    public static native void createIndex(
+        int[] ids,
+        long vectorsAddress,
+        int dim,
+        IndexOutputWithBuffer output,
+        Map<String, Object> parameters
+    );
 
     /**
      * Load an index into memory
@@ -92,4 +98,12 @@ class NmslibService {
      */
     public static native void initLibrary();
 
+    // TMP
+    public static native void kdyBench(
+        long numDocs,
+        int dim,
+        String dataPath, int[] ids, Map<String, Object> parameters,
+        IndexOutputWithBuffer indexOutputWithBuffer, String fullPath
+    );
+    // TMP
 }

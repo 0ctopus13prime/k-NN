@@ -12,6 +12,8 @@
 #include "org_opensearch_knn_jni_FaissService.h"
 
 #include <jni.h>
+#include <fstream>
+#include <chrono>
 
 #include <vector>
 
@@ -472,3 +474,74 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
     }
     return nullptr;
 }
+
+// TMP
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_kdyBench
+    (JNIEnv * env, jclass cls, jlong numData, jint dim, jstring inputDataPathJ, jobject parameters, jobject indexOutput,
+     jstring fullPathj) {
+    auto indexAddress = Java_org_opensearch_knn_jni_FaissService_initIndex(
+        env, cls, numData, dim, parameters);
+    std::unique_ptr<knn_jni::faiss_wrapper::FaissMethods> faissMethods(
+        new knn_jni::faiss_wrapper::FaissMethods());
+    knn_jni::faiss_wrapper::IndexService indexService(std::move(faissMethods));
+
+    const std::string dataPath = jniUtil.ConvertJavaStringToCppString(env, inputDataPathJ);
+    std::ifstream in (dataPath);
+    std::string line;
+    std::vector<float> vectors;
+    int64_t id = 0;
+    std::vector<int64_t> ids;
+    while (std::getline(in, line)) {
+      int s = 1;
+      for (int i = s ; i < line.size() ; ) {
+        while (line[i] != ',' && line[i] != ']') {
+          ++i;
+        }
+        while (s < line.size() && line[s] == ' ') {
+          ++s;
+        }
+        std::string value = line.substr(s, (i - s));
+        const float fvalue = std::stod(value);
+        vectors.push_back(fvalue);
+        s = ++i;
+      }
+
+      ids.push_back(id++);
+    }
+
+    std::cout << dim << ", " << numData << ", " << ids.size() << ", " << vectors.size() << std::endl;
+
+    indexService.insertToIndex(dim, numData, 1,
+                               (int64_t) (&vectors),
+                               ids,
+                               indexAddress);
+    std::cout << "Insert to index is done!" << std::endl;
+
+    // Using stream
+    auto start = std::chrono::high_resolution_clock::now();
+    knn_jni::faiss_wrapper::WriteIndex(&jniUtil, env, indexOutput, indexAddress, &indexService);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::micro> duration = end - start;
+    std::cout << "Stream file version -> Execution time: " << duration.count() << " microseconds" << std::endl;
+
+    // Using file stream
+//    const std::string destPath = jniUtil.ConvertJavaStringToCppString(env, fullPathj);
+//    auto start = std::chrono::high_resolution_clock::now();
+//    knn_jni::faiss_wrapper::WriteIndexKdy(&jniUtil, env, destPath, indexAddress, &indexService);
+//    auto end = std::chrono::high_resolution_clock::now();
+//    std::chrono::duration<double, std::micro> duration = end - start;
+//    std::cout << "Kdy Hybrid Stream file version -> Execution time: "
+//              << duration.count() << " microseconds" << std::endl;
+
+    // Using fstream
+//    const std::string destPath = jniUtil.ConvertJavaStringToCppString(env, fullPathj);
+//    auto start = std::chrono::high_resolution_clock::now();
+//    knn_jni::faiss_wrapper::WriteIndexLegacy(&jniUtil, env, destPath, indexAddress, &indexService);
+//    auto end = std::chrono::high_resolution_clock::now();
+//    std::chrono::duration<double, std::micro> duration = end - start;
+//    std::cout << "Legacy file version -> Execution time: " << duration.count() << " microseconds" << std::endl;
+
+
+  std::cout << "Writing index is done!" << std::endl;
+}
+// TMP

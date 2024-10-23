@@ -33,6 +33,10 @@ void FaissMethods::writeIndex(const faiss::Index* idx, faiss::IOWriter* writer) 
     faiss::write_index(idx, writer);
 }
 
+void FaissMethods::writeIndexLegacy(const faiss::Index* idx, const std::string& path) {
+  faiss::write_index(idx, path.c_str());
+}
+
 void FaissMethods::writeIndexBinary(const faiss::IndexBinary* idx, faiss::IOWriter* writer) {
     faiss::write_index_binary(idx, writer);
 }

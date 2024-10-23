@@ -67,6 +67,14 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_NmslibService_free
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_NmslibService_initLibrary
   (JNIEnv *, jclass);
 
+// TMP
+/*
+ * Class:     org_opensearch_knn_jni_NmslibService
+ * Method:    kdyBench
+ * Signature: (JILjava/lang/String;Ljava/util/List;Ljava/util/Map;Lorg/opensearch/knn/index/store/IndexOutputWithBuffer;Ljava/lang/String;)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_NmslibService_kdyBench
+    (JNIEnv *, jclass, jlong, jint, jstring, jintArray, jobject, jobject, jstring);// TMP
 #ifdef __cplusplus
 }
 #endif

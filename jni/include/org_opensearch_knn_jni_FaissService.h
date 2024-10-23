@@ -268,6 +268,16 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
   (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
+// TMP
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    kdyBench
+ * Signature: (JILjava/lang/String;Ljava/util/Map;Lorg/opensearch/knn/index/store/IndexOutputWithBuffer;Ljava/lang/String;)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_kdyBench
+    (JNIEnv *, jclass, jlong, jint, jstring, jobject, jobject, jstring);
+// TMP
+
 #ifdef __cplusplus
 }
 #endif

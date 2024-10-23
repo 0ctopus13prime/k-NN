@@ -16,6 +16,10 @@
 #include "jni_util.h"
 #include "nmslib_wrapper.h"
 
+// TMP
+#include <chrono>
+// TMP
+
 static knn_jni::JNIUtil jniUtil;
 static const jint KNN_NMSLIB_JNI_VERSION = JNI_VERSION_1_1;
 
@@ -100,4 +104,55 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_NmslibService_initLibrary(JNI
   } catch (...) {
     jniUtil.CatchCppExceptionAndThrowJava(env);
   }
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_NmslibService_kdyBench
+    (JNIEnv * env, jclass cls, jlong numData, jint dim, jstring inputDataPathJ, jintArray ids,
+     jobject parameters, jobject indexOutput, jstring fullPathj) {
+  const std::string dataPath = jniUtil.ConvertJavaStringToCppString(env, inputDataPathJ);
+  std::ifstream in (dataPath);
+  std::string line;
+  std::vector<float> vectors;
+  while (std::getline(in, line)) {
+    int s = 1;
+    for (int i = s ; i < line.size() ; ) {
+      while (line[i] != ',' && line[i] != ']') {
+        ++i;
+      }
+      while (s < line.size() && line[s] == ' ') {
+        ++s;
+      }
+      std::string value = line.substr(s, (i - s));
+      const float fvalue = std::stod(value);
+      vectors.push_back(fvalue);
+      s = ++i;
+    }
+  }
+
+  std::cout << dim << ", " << numData << ", " << vectors.size() << std::endl;
+
+  // Stream
+  try {
+    auto start = std::chrono::high_resolution_clock::now();
+    knn_jni::nmslib_wrapper::CreateIndex(&jniUtil, env, ids, (jlong) &vectors,
+                                         dim, indexOutput, parameters);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::micro> duration = end - start;
+    std::cout << "Stream file version -> Execution time: " << duration.count() << " microseconds" << std::endl;
+  } catch (...) {
+    jniUtil.CatchCppExceptionAndThrowJava(env);
+  }
+
+  // File based.
+//  try {
+//    const std::string fullPath = jniUtil.ConvertJavaStringToCppString(env, fullPathj);
+//    auto start = std::chrono::high_resolution_clock::now();
+//    knn_jni::nmslib_wrapper::CreateIndexLegacy(&jniUtil, env, ids, (jlong) &vectors,
+//                                         dim, fullPath, parameters);
+//    auto end = std::chrono::high_resolution_clock::now();
+//    std::chrono::duration<double, std::micro> duration = end - start;
+//    std::cout << "Stream file version -> Execution time: " << duration.count() << " microseconds" << std::endl;
+//  } catch (...) {
+//    jniUtil.CatchCppExceptionAndThrowJava(env);
+//  }
 }

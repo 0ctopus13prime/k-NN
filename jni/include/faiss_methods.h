@@ -37,6 +37,8 @@ public:
 
     virtual void writeIndex(const faiss::Index* idx, faiss::IOWriter* writer);
 
+    virtual void writeIndexLegacy(const faiss::Index* idx, const std::string& path);
+
     virtual void writeIndexBinary(const faiss::IndexBinary* idx, faiss::IOWriter* writer);
 
     virtual ~FaissMethods() = default;

@@ -7,18 +7,29 @@ package org.opensearch.knn.index.codec.nativeindex;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.store.MMapDirectory;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.codec.transfer.OffHeapVectorTransfer;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
+import org.opensearch.knn.jni.FaissService;
 import org.opensearch.knn.jni.JNIService;
+import org.opensearch.knn.jni.NmslibService;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import static org.opensearch.knn.common.KNNVectorUtil.intListToArray;
@@ -133,4 +144,105 @@ final class MemOptimizedNativeIndexBuildStrategy implements NativeIndexBuildStra
             );
         }
     }
+
+    // TMP
+    public static void main(String... args) throws IOException {
+        //
+        // FAISS
+        //
+
+        final String dataPath = "/Users/kdooyong/tmp/writing-layer/print_perf/data.json";
+        final String tmpDirectory = "tmp-" + UUID.randomUUID();
+        final Directory directory = new MMapDirectory(Path.of(tmpDirectory));
+        final int numData = 10000;
+        final int dim = 128;
+        Map<String, Object> parameters = new HashMap<>();
+        /*
+            {
+               name=hnsw,
+               data_type=float,
+               index_description=HNSW16, flat,
+               spaceType=l2,
+               parameters={ef_search=100, ef_construction=100, encoder={name=flat, parameters={}}},
+               indexThreadQty=1
+            }
+         */
+
+        parameters.put("name", "hnsw");
+        parameters.put("data_type", "float");
+        parameters.put("index_description", "HNSW16,Flat");
+        parameters.put("spaceType", "l2");
+
+        Map<String, Object> innerParameters = new HashMap<>();
+        innerParameters.put("ef_search", 10);
+        innerParameters.put("ef_construction", 100);
+
+        Map<String, Object> encoderParameters = new HashMap<>();
+        encoderParameters.put("name", "flat");
+        encoderParameters.put("parameters", Collections.emptyMap());
+        innerParameters.put("encoder", encoderParameters);
+        parameters.put("parameters", innerParameters);
+
+        parameters.put("indexThreadQty", 1);
+
+        final String fullPath = tmpDirectory + "/output";
+
+        try (final IndexOutput indexOuptut = directory.createOutput("output", IOContext.DEFAULT)) {
+            System.out.println("Output : " + tmpDirectory + "/output");
+            IndexOutputWithBuffer indexOutputWithBuffer = new IndexOutputWithBuffer(indexOuptut);
+            FaissService.kdyBench(numData, dim, dataPath, parameters, indexOutputWithBuffer, fullPath);
+//            NmslibService.kdyBench(numData, dim, dataPath, parameters, indexOutputWithBuffer);
+        }
+        System.out.println("OUT!!!!!!!!");
+    }
+
+//    public static void main(String... args) throws IOException {
+//        //
+//        // NMSLIB
+//        //
+//
+//        final String dataPath = "/Users/kdooyong/tmp/writing-layer/print_perf/data.json";
+//        final String tmpDirectory = "tmp-" + UUID.randomUUID();
+//        final Directory directory = new MMapDirectory(Path.of(tmpDirectory));
+//        final int numData = 10000;
+//        final int[] ids = new int[numData];
+//        for (int i = 0 ; i < numData ; ++i) {
+//            ids[i] = i;
+//        }
+//        final int dim = 128;
+//        Map<String, Object> parameters = new HashMap<>();
+//
+//        /*
+//         * ################# Key: [name]: [hnsw]
+//         * ################# Key: [data_type]: [float]
+//         * ################# Key: [spaceType]: [l2]
+//         * ################# Key: [parameters]: [{ef_construction=100, m=16}]
+//         * ################# Key: [indexThreadQty]: [1]
+//         */
+//
+//        parameters.put("name", "hnsw");
+//        parameters.put("data_type", "float");
+//        parameters.put("spaceType", "l2");
+//
+//        Map<String, Object> innerParameters = new HashMap<>();
+//        innerParameters.put("ef_construction", 100);
+//        innerParameters.put("m", 16);
+//        parameters.put("parameters", innerParameters);
+//
+//        parameters.put("indexThreadQty", 1);
+//
+//        final String fullPath = tmpDirectory + "/output";
+//
+//        try (final IndexOutput indexOuptut = directory.createOutput("output", IOContext.DEFAULT)) {
+//            System.out.println("Output : " + tmpDirectory + "/output");
+//            IndexOutputWithBuffer indexOutputWithBuffer = new IndexOutputWithBuffer(indexOuptut);
+//            NmslibService.kdyBench(numData, dim, dataPath, ids, parameters, indexOutputWithBuffer, fullPath);
+//        } catch (Exception e) {
+//            System.out.println("===================");
+//            e.printStackTrace();
+//            System.out.println("===================");
+//        }
+//        System.out.println("OUT!!!!!!!!");
+//    }
+    // TMP
 }

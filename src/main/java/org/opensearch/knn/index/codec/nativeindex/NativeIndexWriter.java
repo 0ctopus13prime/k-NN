@@ -139,8 +139,13 @@ public class NativeIndexWriter {
         );
         try (IndexOutput output = state.directory.createOutput(engineFileName, state.context)) {
             final IndexOutputWithBuffer indexOutputWithBuffer = new IndexOutputWithBuffer(output);
-            final BuildIndexParams nativeIndexParams =
-                indexParams(fieldInfo, indexOutputWithBuffer, knnEngine, knnVectorValues, totalLiveDocs);
+            final BuildIndexParams nativeIndexParams = indexParams(
+                fieldInfo,
+                indexOutputWithBuffer,
+                knnEngine,
+                knnVectorValues,
+                totalLiveDocs
+            );
             indexBuilder.buildAndWriteIndex(nativeIndexParams);
             CodecUtil.writeFooter(output);
         }

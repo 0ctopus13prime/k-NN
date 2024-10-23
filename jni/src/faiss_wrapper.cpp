@@ -183,6 +183,19 @@ void knn_jni::faiss_wrapper::WriteIndex(knn_jni::JNIUtilInterface * jniUtil, JNI
     indexService->writeIndex(&writer, index_ptr);
 }
 
+void knn_jni::faiss_wrapper::WriteIndexKdy(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env,
+                                           const std::string& path, jlong index_ptr, IndexService* indexService) {
+
+  knn_jni::stream::KdyFaissIOWriter writer {path};
+
+  // Create index
+  indexService->writeIndex(&writer, index_ptr);
+}
+
+void knn_jni::faiss_wrapper::WriteIndexLegacy(knn_jni::JNIUtilInterface *jniUtil, JNIEnv *env, const std::string& path, jlong indexAddr, IndexService *indexService) {
+  indexService->writeIndexLegacy(path, indexAddr);
+}
+
 void knn_jni::faiss_wrapper::CreateIndexFromTemplate(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jintArray idsJ,
                                                      jlong vectorsAddressJ, jint dimJ, jobject output,
                                                      jbyteArray templateIndexJ, jobject parametersJ) {

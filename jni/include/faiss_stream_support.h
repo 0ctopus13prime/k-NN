@@ -21,6 +21,10 @@
 #include <iostream>
 #include <cstring>
 
+// TMP
+#include <fstream>
+// TMP
+
 namespace knn_jni {
 namespace stream {
 
@@ -82,6 +86,36 @@ class FaissOpenSearchIOWriter final : public faiss::IOWriter {
   NativeEngineIndexOutputMediator *mediator;
 };  // class FaissOpenSearchIOWriter
 
+
+
+// TMP
+class KdyFaissIOWriter final : public faiss::IOWriter {
+ public:
+  explicit KdyFaissIOWriter(const std::string& _path)
+      : faiss::IOWriter(),
+        path(_path),
+        stream(_path, std::ios::binary) {
+    name = "FaissOpenSearchIOWriter";
+  }
+
+  size_t operator()(const void *ptr, size_t size, size_t nitems) final {
+    const auto writeBytes = size * nitems;
+    if (writeBytes > 0) {
+      stream.write((char*) ptr, writeBytes);
+    }
+    return nitems;
+  }
+
+  // return a file number that can be memory-mapped
+  int filedescriptor() final {
+    throw std::runtime_error("filedescriptor() is not supported in KdyFaissIOWriter.");
+  }
+
+ private:
+  std::string path;
+  std::ofstream stream;
+};  // class FaissOpenSearchIOWriter
+// TMP
 
 
 }

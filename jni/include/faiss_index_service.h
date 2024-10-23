@@ -66,6 +66,8 @@ public:
      */
     virtual void writeIndex(faiss::IOWriter* writer, jlong idMapAddress);
 
+    virtual void writeIndexLegacy(const std::string& path, jlong idMapAddress);
+
     virtual ~IndexService() = default;
 
 protected:

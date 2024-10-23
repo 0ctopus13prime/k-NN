@@ -19,6 +19,10 @@
 #include <iostream>
 #include <cstring>
 
+// TMP
+#include <chrono>
+// TMP
+
 namespace knn_jni {
 namespace stream {
 
@@ -149,7 +153,8 @@ class NativeEngineIndexOutputMediator {
 
       // === Critical Section Start ===
 
-      // Get primitive array pointer, no copy is happening in OpenJDK.
+      // Get primitive array pointer. At least OpenJDK does not return an intermediate array while some JDK
+      // implementations can return a temporary buffer according to JNI spec.
       auto primitiveArray =
           (jbyte *) jni_interface->GetPrimitiveArrayCritical(env, bufferArray, nullptr);
 
