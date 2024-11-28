@@ -18,8 +18,10 @@ import org.apache.lucene.store.IndexInput;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
+import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
 import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.index.util.IndexUtil;
+import org.opensearch.knn.index.util.PartialLoadingContext;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.training.TrainingDataConsumer;
@@ -111,6 +113,10 @@ public interface NativeMemoryLoadStrategy<T extends NativeMemoryAllocation, U ex
                 JNIService.setSharedIndexState(indexAddress, sharedIndexState.getSharedIndexStateAddress(), knnEngine);
             }
 
+            final IndexInputThreadLocalGetter indexInputThreadLocalGetter =
+                new IndexInputThreadLocalGetter(indexEntryContext.getDirectory(), vectorFileName);
+            final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter);
+
             return new NativeMemoryAllocation.IndexAllocation(
                 executor,
                 indexAddress,
@@ -119,7 +125,8 @@ public interface NativeMemoryLoadStrategy<T extends NativeMemoryAllocation, U ex
                 vectorFileName,
                 indexEntryContext.getOpenSearchIndexName(),
                 sharedIndexState,
-                IndexUtil.isBinaryIndex(knnEngine, indexEntryContext.getParameters())
+                IndexUtil.isBinaryIndex(knnEngine, indexEntryContext.getParameters()),
+                partialLoadingContext
             );
         }
 

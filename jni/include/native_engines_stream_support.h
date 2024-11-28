@@ -32,33 +32,38 @@ class NativeEngineIndexInputMediator {
   // Expect IndexInputWithBuffer is given as `_indexInput`.
   NativeEngineIndexInputMediator(JNIUtilInterface *_jni_interface,
                                  JNIEnv *_env,
-                                 jobject _indexInput)
+                                 jobject _indexInputWithBuffer)
       : jni_interface(knn_jni::util::ParameterCheck::require_non_null(
-          _jni_interface, "jni_interface")),
+      _jni_interface, "jni_interface")),
         env(knn_jni::util::ParameterCheck::require_non_null(_env, "env")),
-        indexInput(knn_jni::util::ParameterCheck::require_non_null(_indexInput, "indexInput")),
+        indexInputWithBuffer(knn_jni::util::ParameterCheck::require_non_null(_indexInputWithBuffer,
+                                                                             "indexInputWithBuffer")),
         bufferArray((jbyteArray) (_jni_interface->GetObjectField(_env,
-                                                                 _indexInput,
+                                                                 _indexInputWithBuffer,
                                                                  getBufferFieldId(_jni_interface, _env)))),
+        indexInput(_jni_interface->GetObjectField(_env,
+                                                  _indexInputWithBuffer,
+                                                  getIndexInputFieldId(_jni_interface, _env))),
         copyBytesMethod(getCopyBytesMethod(_jni_interface, _env)),
-        remainingBytesMethod(getRemainingBytesMethod(_jni_interface, _env)) {
+        remainingBytesMethod(getRemainingBytesMethod(_jni_interface, _env)),
+        seekMethod(getSeekMethod(_jni_interface, _env)),
+        filePointerGetterMethod(getFilePointerMethod(_jni_interface, _env)) {
   }
 
-  void copyBytes(int64_t nbytes, uint8_t * RESTRICT destination) {
+  void copyBytes(int64_t nbytes, uint8_t *RESTRICT destination) {
     auto jclazz = getIndexInputWithBufferClass(jni_interface, env);
 
     while (nbytes > 0) {
       // Call `copyBytes` to read bytes as many as possible.
-      jvalue args;
-      args.j = nbytes;
+      jvalue args {.j = nbytes};
       const auto readBytes =
-          jni_interface->CallNonvirtualIntMethodA(env, indexInput, jclazz, copyBytesMethod, &args);
+          jni_interface->CallNonvirtualIntMethodA(env, indexInputWithBuffer, jclazz, copyBytesMethod, &args);
       jni_interface->HasExceptionInStack(env, "Reading bytes via IndexInput has failed.");
 
       // === Critical Section Start ===
 
       // Get primitive array pointer, no copy is happening in OpenJDK.
-      jbyte * RESTRICT primitiveArray =
+      auto* RESTRICT primitiveArray =
           (jbyte *) jni_interface->GetPrimitiveArrayCritical(env, bufferArray, nullptr);
 
       // Copy Java bytes to C++ destination address.
@@ -77,9 +82,20 @@ class NativeEngineIndexInputMediator {
     }  // End while
   }
 
+  void copyBytesWithOffset(int64_t offset, int64_t nbytes, uint8_t *RESTRICT destination) {
+//    std::cout << "NEIIM::copyBytesWithOffset "
+//              << "offset=" << offset
+//              << ", nbytes=" << nbytes
+//              << ", destination=[" << ((uint64_t) destination) << ']'
+//              << std::endl;
+
+    seek(offset);
+    copyBytes(nbytes, destination);
+  }
+
   int64_t remainingBytes() {
     auto bytes = jni_interface->CallNonvirtualLongMethodA(env,
-                                                          indexInput,
+                                                          indexInputWithBuffer,
                                                           getIndexInputWithBufferClass(jni_interface, env),
                                                           remainingBytesMethod,
                                                           nullptr);
@@ -87,7 +103,40 @@ class NativeEngineIndexInputMediator {
     return bytes;
   }
 
- private:
+  int64_t getOffset() {
+    auto offset = jni_interface->CallLongMethodA(env,
+                                                 indexInput,
+                                                 filePointerGetterMethod,
+                                                 nullptr);
+    jni_interface->HasExceptionInStack(env, "Getting offset has failed.");
+    return offset;
+  }
+
+  void seek(const int64_t offset) {
+    jvalue args{.j = offset};
+    jni_interface->CallVoidMethodA(env, indexInput, seekMethod, &args);
+    jni_interface->HasExceptionInStack(env, "Seek method has failed.");
+  }
+
+  static jclass getIndexInputClass(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jclass INDEX_INPUT_CLASS =
+        jni_interface->FindClassFromJNIEnv(env, "org/apache/lucene/store/IndexInput");
+    return INDEX_INPUT_CLASS;
+  }
+
+  static jmethodID getSeekMethod(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jmethodID SEEK_METHOD_ID =
+        jni_interface->GetMethodID(env, getIndexInputClass(jni_interface, env), "seek", "(J)V");
+    return SEEK_METHOD_ID;
+  }
+
+  static jmethodID getFilePointerMethod(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jmethodID GET_FILE_POINTER_METHOD_ID =
+        jni_interface->GetMethodID(env, getIndexInputClass(jni_interface, env),
+                                   "getFilePointer", "()J");
+    return GET_FILE_POINTER_METHOD_ID;
+  }
+
   static jclass getIndexInputWithBufferClass(JNIUtilInterface *jni_interface, JNIEnv *env) {
     static jclass INDEX_INPUT_WITH_BUFFER_CLASS =
         jni_interface->FindClassFromJNIEnv(env, "org/opensearch/knn/index/store/IndexInputWithBuffer");
@@ -112,14 +161,24 @@ class NativeEngineIndexInputMediator {
     return BUFFER_FIELD_ID;
   }
 
+  static jfieldID getIndexInputFieldId(JNIUtilInterface *jni_interface, JNIEnv *env) {
+    static jfieldID INDEX_INPUT_FIELD_ID =
+        jni_interface->GetFieldID(env, getIndexInputWithBufferClass(jni_interface, env),
+                                  "indexInput", "Lorg/apache/lucene/store/IndexInput;");
+    return INDEX_INPUT_FIELD_ID;
+  }
+
   JNIUtilInterface *jni_interface;
   JNIEnv *env;
 
   // `IndexInputWithBuffer` instance having `IndexInput` instance obtained from `Directory` for reading.
-  jobject indexInput;
+  jobject indexInputWithBuffer;
   jbyteArray bufferArray;
+  jobject indexInput;
   jmethodID copyBytesMethod;
   jmethodID remainingBytesMethod;
+  jmethodID seekMethod;
+  jmethodID filePointerGetterMethod;
 }; // class NativeEngineIndexInputMediator
 
 
@@ -145,7 +204,7 @@ class NativeEngineIndexOutputMediator {
         nextWriteIndex() {
   }
 
-  void writeBytes(const uint8_t * RESTRICT source, size_t nbytes) {
+  void writeBytes(const uint8_t *RESTRICT source, size_t nbytes) {
     auto left = nbytes;
     while (left > 0) {
       const auto writeBytes = std::min(bufferLength - nextWriteIndex, left);
@@ -153,7 +212,7 @@ class NativeEngineIndexOutputMediator {
       // === Critical Section Start ===
 
       // Get primitive array pointer, no copy is happening in OpenJDK.
-      jbyte * RESTRICT primitiveArray =
+      jbyte *RESTRICT primitiveArray =
           (jbyte *) jni_interface->GetPrimitiveArrayCritical(env, bufferArray, nullptr);
 
       // Copy the given bytes to Java byte[] address.
@@ -209,7 +268,7 @@ class NativeEngineIndexOutputMediator {
     auto jclazz = getIndexOutputWithBufferClass(jni_interface, env);
     // Initializing the first integer parameter of `writeBytes`.
     // `i` represents an integer parameter.
-    jvalue args {.i = nextWriteIndex};
+    jvalue args{.i = nextWriteIndex};
     jni_interface->CallNonvirtualVoidMethodA(env, indexOutput, jclazz, writeBytesMethod, &args);
     jni_interface->HasExceptionInStack(env, "Writing bytes via IndexOutput has failed.");
     nextWriteIndex = 0;

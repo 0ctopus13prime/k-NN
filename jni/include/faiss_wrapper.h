@@ -15,6 +15,7 @@
 #include "jni_util.h"
 #include "faiss_index_service.h"
 #include "faiss_stream_support.h"
+#include "partial_loading_context.h"
 #include <jni.h>
 
 namespace knn_jni {
@@ -51,7 +52,7 @@ namespace knn_jni {
         // Loads an index with a reader implemented IOReader
         //
         // Returns a pointer of the loaded index
-        jlong LoadIndexWithStream(faiss::IOReader* ioReader);
+        jlong LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader);
 
         // Load a binary index from indexPathJ into memory.
         //
@@ -83,8 +84,13 @@ namespace knn_jni {
          *
          * Return an array of KNNQueryResults
          */
-        jobjectArray QueryIndex(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong indexPointerJ,
-                                jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jintArray parentIdsJ);
+        jobjectArray QueryIndex(knn_jni::JNIUtilInterface * jniUtil,
+                                JNIEnv * env,
+                                jlong indexPointerJ,
+                                jobject partial_loading_ctx_j,
+                                jfloatArray queryVectorJ,
+                                jint kJ,
+                                jobject methodParamsJ, jintArray parentIdsJ);
 
         /**
          *  Execute a query against the index located in memory at indexPointerJ along with Filters
@@ -94,9 +100,16 @@ namespace knn_jni {
          *
          * Return an array of KNNQueryResults
         */
-        jobjectArray QueryIndex_WithFilter(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong indexPointerJ,
-                                           jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jlongArray filterIdsJ,
-                                           jint filterIdsTypeJ, jintArray parentIdsJ);
+        jobjectArray QueryIndex_WithFilter(knn_jni::JNIUtilInterface * jniUtil,
+                                           JNIEnv * env,
+                                           jlong indexPointerJ,
+                                           jobject partial_loading_ctx_j,
+                                           jfloatArray queryVectorJ,
+                                           jint kJ,
+                                           jobject methodParamsJ,
+                                           jlongArray filterIdsJ,
+                                           jint filterIdsTypeJ,
+                                           jintArray parentIdsJ);
 
         // Execute a query against the binary index located in memory at indexPointerJ along with Filters
         //

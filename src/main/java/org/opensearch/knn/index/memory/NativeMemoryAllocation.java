@@ -19,6 +19,8 @@ import org.opensearch.common.concurrent.RefCountedReleasable;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
 import org.opensearch.knn.index.query.KNNWeight;
+import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
+import org.opensearch.knn.index.util.PartialLoadingContext;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.engine.KNNEngine;
 
@@ -100,6 +102,10 @@ public interface NativeMemoryAllocation {
         return true;
     }
 
+    default PartialLoadingContext getPartialLoadingContext() {
+        throw new UnsupportedOperationException("getPartialLoadingContext is not supported");
+    }
+
     /**
      * Represents native indices loaded into memory. Because these indices are backed by files, they should be
      * freed when file is deleted.
@@ -121,6 +127,8 @@ public interface NativeMemoryAllocation {
         @Getter
         private final boolean isBinaryIndex;
         private final RefCountedReleasable<IndexAllocation> refCounted;
+        @Getter
+        private final PartialLoadingContext partialLoadingContext;
 
         /**
          * Constructor
@@ -140,7 +148,7 @@ public interface NativeMemoryAllocation {
             String vectorFileName,
             String openSearchIndexName
         ) {
-            this(executorService, memoryAddress, sizeKb, knnEngine, vectorFileName, openSearchIndexName, null, false);
+            this(executorService, memoryAddress, sizeKb, knnEngine, vectorFileName, openSearchIndexName, null, false, null);
         }
 
         /**
@@ -162,7 +170,8 @@ public interface NativeMemoryAllocation {
             String vectorFileName,
             String openSearchIndexName,
             SharedIndexState sharedIndexState,
-            boolean isBinaryIndex
+            boolean isBinaryIndex,
+            PartialLoadingContext partialLoadingContext
         ) {
             this.executor = executorService;
             this.closed = false;
@@ -175,6 +184,7 @@ public interface NativeMemoryAllocation {
             this.sharedIndexState = sharedIndexState;
             this.isBinaryIndex = isBinaryIndex;
             this.refCounted = new RefCountedReleasable<>("IndexAllocation-Reference", this, this::closeInternal);
+            this.partialLoadingContext = partialLoadingContext;
         }
 
         protected void closeInternal() {

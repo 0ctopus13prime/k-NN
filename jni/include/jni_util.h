@@ -139,8 +139,14 @@ namespace knn_jni {
 
         virtual void ReleasePrimitiveArrayCritical(JNIEnv * env, jarray array, void *carray, jint mode) = 0;
 
-        virtual jint CallNonvirtualIntMethodA(JNIEnv *env, jobject obj, jclass clazz,
-                                              jmethodID methodID, jvalue *args) = 0;
+        virtual jlong CallLongMethodA(JNIEnv * env, jobject obj, jmethodID methodID, jvalue* args) = 0;
+
+        virtual jint CallIntMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) = 0;
+
+        virtual void CallVoidMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) = 0;
+
+        virtual jint CallNonvirtualIntMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                              jmethodID methodID, jvalue* args) = 0;
 
         virtual jlong CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                 jmethodID methodID, jvalue* args) = 0;
@@ -148,6 +154,12 @@ namespace knn_jni {
         virtual void CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                jmethodID methodID, jvalue* args) = 0;
 
+        virtual jobject NewGlobalRef(JNIEnv *env, jobject lobj) = 0;
+
+        virtual void DeleteGlobalRef(JNIEnv *env, jobject gref) = 0;
+
+        virtual jobject CallNonvirtualObjectMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                                    jmethodID methodID, jvalue* args) = 0;
         // --------------------------------------------------------------------------
     };
 
@@ -202,11 +214,18 @@ namespace knn_jni {
         jclass FindClassFromJNIEnv(JNIEnv * env, const char *name) final;
         jmethodID GetMethodID(JNIEnv * env, jclass clazz, const char *name, const char *sig) final;
         jfieldID GetFieldID(JNIEnv * env, jclass clazz, const char *name, const char *sig) final;
+        jlong CallLongMethodA(JNIEnv * env, jobject obj, jmethodID methodID, jvalue* args) final;
+        jint CallIntMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) final;
+        void CallVoidMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) final;
         jint CallNonvirtualIntMethodA(JNIEnv *env, jobject obj, jclass clazz, jmethodID methodID, jvalue *args) final;
         jlong CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jclass clazz, jmethodID methodID, jvalue* args) final;
         void CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz, jmethodID methodID, jvalue* args) final;
         void * GetPrimitiveArrayCritical(JNIEnv * env, jarray array, jboolean *isCopy) final;
         void ReleasePrimitiveArrayCritical(JNIEnv * env, jarray array, void *carray, jint mode) final;
+        jobject NewGlobalRef(JNIEnv *env, jobject lobj) final;
+        void DeleteGlobalRef(JNIEnv *env, jobject gref) final;
+        jobject CallNonvirtualObjectMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                            jmethodID methodID, jvalue* args) final;
 
     private:
         std::unordered_map<std::string, jclass> cachedClasses;

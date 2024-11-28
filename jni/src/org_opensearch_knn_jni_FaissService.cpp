@@ -18,6 +18,7 @@
 #include "faiss_wrapper.h"
 #include "jni_util.h"
 #include "faiss_stream_support.h"
+#include "partial_loading_context.h"
 
 static knn_jni::JNIUtil jniUtil;
 static const jint KNN_FAISS_JNI_VERSION = JNI_VERSION_1_1;
@@ -332,13 +333,18 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_setSharedIndexSt
     }
 }
 
-JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryIndex(JNIEnv * env, jclass cls,
+JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryIndex(JNIEnv * env,
+                                                                                   jclass cls,
                                                                                    jlong indexPointerJ,
-                                                                                   jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jintArray parentIdsJ)
+                                                                                   jobject partial_loading_ctx_j,
+                                                                                   jfloatArray queryVectorJ,
+                                                                                   jint kJ,
+                                                                                   jobject methodParamsJ,
+                                                                                   jintArray parentIdsJ)
 {
     try {
-        return knn_jni::faiss_wrapper::QueryIndex(&jniUtil, env, indexPointerJ, queryVectorJ, kJ, methodParamsJ, parentIdsJ);
-
+        return knn_jni::faiss_wrapper::QueryIndex(
+            &jniUtil, env, indexPointerJ, partial_loading_ctx_j, queryVectorJ, kJ, methodParamsJ, parentIdsJ);
     } catch (...) {
         jniUtil.CatchCppExceptionAndThrowJava(env);
     }
@@ -348,12 +354,14 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryInd
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryIndexWithFilter
   (JNIEnv * env, jclass cls, jlong indexPointerJ, jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jlongArray filteredIdsJ, jint filterIdsTypeJ,  jintArray parentIdsJ) {
 
-      try {
-          return knn_jni::faiss_wrapper::QueryIndex_WithFilter(&jniUtil, env, indexPointerJ, queryVectorJ, kJ, methodParamsJ, filteredIdsJ, filterIdsTypeJ, parentIdsJ);
-      } catch (...) {
-          jniUtil.CatchCppExceptionAndThrowJava(env);
-      }
-      return nullptr;
+//      try {
+//          return knn_jni::faiss_wrapper::QueryIndex_WithFilter(
+//              &jniUtil, env, indexPointerJ, queryVectorJ, kJ, methodParamsJ, filteredIdsJ, filterIdsTypeJ, parentIdsJ);
+//      } catch (...) {
+//          std::cout << "EEEEEEEEEEEEEEEEEEEEEEEE" << std::endl;
+//          jniUtil.CatchCppExceptionAndThrowJava(env);
+//      }
+//      return nullptr;
 
 }
 

@@ -11,11 +11,11 @@
 
 #include "jni_util.h"
 
-#include <jni.h>
 #include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <iostream>
 
 
 void knn_jni::JNIUtil::Initialize(JNIEnv *env) {
@@ -81,7 +81,7 @@ void knn_jni::JNIUtil::ThrowJavaException(JNIEnv* env, const char* type, const c
     if (newExcCls != nullptr) {
         env->ThrowNew(newExcCls, message);
     }
-    // If newExcCls isn't found, NoClassDefFoundError will be thrown
+    // If newExcCls isn't found,= NoClassDefFoundError will be thrown
 }
 
 void knn_jni::JNIUtil::HasExceptionInStack(JNIEnv* env) {
@@ -90,6 +90,7 @@ void knn_jni::JNIUtil::HasExceptionInStack(JNIEnv* env) {
 
 void knn_jni::JNIUtil::HasExceptionInStack(JNIEnv* env, const char* message) {
     if (env->ExceptionCheck() == JNI_TRUE) {
+//        std::cout << "!!!!!!!!!!!!!!!!!! env->ExceptionCheck() == JNI_TRUE, message=[" << message << std::endl;
         throw std::runtime_error(message);
     }
 }
@@ -226,6 +227,19 @@ std::vector<float> knn_jni::JNIUtil::Convert2dJavaObjectArrayToCppFloatVector(JN
     std::vector<float> vect;
     Convert2dJavaObjectArrayAndStoreToFloatVector(env, array2dJ, dim, &vect);
     return vect;
+}
+
+jobject knn_jni::JNIUtil::NewGlobalRef(JNIEnv *env, jobject lobj) {
+    return env->NewGlobalRef(lobj);
+}
+
+void knn_jni::JNIUtil::DeleteGlobalRef(JNIEnv *env, jobject gref) {
+    return env->DeleteGlobalRef(gref);
+}
+
+jobject knn_jni::JNIUtil::CallNonvirtualObjectMethodA(JNIEnv * env, jobject obj, jclass clazz,
+                                                      jmethodID methodID, jvalue* args) {
+    return env->CallNonvirtualObjectMethodA(obj, clazz, methodID, args);
 }
 
 void knn_jni::JNIUtil::Convert2dJavaObjectArrayAndStoreToFloatVector(JNIEnv *env, jobjectArray array2dJ,
@@ -563,6 +577,18 @@ jfieldID knn_jni::JNIUtil::GetFieldID(JNIEnv * env, jclass clazz, const char *na
     return env->GetFieldID(clazz, name, sig);
 }
 
+jlong knn_jni::JNIUtil::CallLongMethodA(JNIEnv * env, jobject obj, jmethodID methodID, jvalue* args) {
+    return env->CallLongMethodA(obj, methodID, args);
+}
+
+jint knn_jni::JNIUtil::CallIntMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) {
+    return env->CallIntMethodA(obj, methodID, args);
+}
+
+void knn_jni::JNIUtil::CallVoidMethodA(JNIEnv *env, jobject obj, jmethodID methodID, jvalue *args) {
+    env->CallVoidMethodA(obj, methodID, args);
+}
+
 jint knn_jni::JNIUtil::CallNonvirtualIntMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                 jmethodID methodID, jvalue* args) {
     return env->CallNonvirtualIntMethodA(obj, clazz, methodID, args);
@@ -570,12 +596,12 @@ jint knn_jni::JNIUtil::CallNonvirtualIntMethodA(JNIEnv * env, jobject obj, jclas
 
 jlong knn_jni::JNIUtil::CallNonvirtualLongMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                   jmethodID methodID, jvalue* args) {
-  return env->CallNonvirtualLongMethodA(obj, clazz, methodID, args);
+    return env->CallNonvirtualLongMethodA(obj, clazz, methodID, args);
 }
 
 void knn_jni::JNIUtil::CallNonvirtualVoidMethodA(JNIEnv * env, jobject obj, jclass clazz,
                                                  jmethodID methodID, jvalue* args) {
-  return env->CallNonvirtualVoidMethodA(obj, clazz, methodID, args);
+    return env->CallNonvirtualVoidMethodA(obj, clazz, methodID, args);
 }
 
 void * knn_jni::JNIUtil::GetPrimitiveArrayCritical(JNIEnv * env, jarray array, jboolean *isCopy) {

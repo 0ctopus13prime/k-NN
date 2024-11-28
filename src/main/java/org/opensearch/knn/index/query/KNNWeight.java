@@ -140,6 +140,7 @@ public class KNNWeight extends Weight {
          * This improves the recall.
          */
         if (isFilteredExactSearchPreferred(cardinality)) {
+            System.out.println("------------ isFilteredExactSearchPreferred=" + true);
             return doExactSearch(context, filterBitSet, k);
         }
         Map<Integer, Float> docIdsToScoreMap = doANNSearch(context, filterBitSet, cardinality, k);
@@ -147,6 +148,7 @@ public class KNNWeight extends Weight {
         // This is required if there are no native engine files or if approximate search returned
         // results less than K, though we have more than k filtered docs
         if (isExactSearchRequire(context, cardinality, docIdsToScoreMap.size())) {
+            System.out.println("----------- isExactSearchRequire=" + true);
             final BitSet docs = filterWeight != null ? filterBitSet : null;
             return doExactSearch(context, docs, k);
         }
@@ -334,6 +336,7 @@ public class KNNWeight extends Weight {
                 } else {
                     results = JNIService.queryIndex(
                         indexAllocation.getMemoryAddress(),
+                        indexAllocation.getPartialLoadingContext(),
                         knnQuery.getQueryVector(),
                         k,
                         knnQuery.getMethodParameters(),
@@ -366,6 +369,12 @@ public class KNNWeight extends Weight {
         if (results.length == 0) {
             log.debug("[KNN] Query yielded 0 results");
             return Collections.emptyMap();
+        }
+
+        System.out.println("!!!!!!!!!!!!!!!!!!! Got results - " + results);
+        for (int i = 0 ; i < results.length ; ++i) {
+            System.out.println("@@@@@@@@@ id -> " + results[i].getId());
+            System.out.println("@@@@@@@@@ score -> " + results[i].getScore());
         }
 
         if (quantizedVector != null) {

@@ -561,12 +561,13 @@ public class KNNSettings {
     }
 
     public static boolean isFaissAVX512Disabled() {
-        return Booleans.parseBoolean(
-            Objects.requireNonNullElse(
-                KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
-                KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
-            ).toString()
-        );
+//        return Booleans.parseBoolean(
+//            Objects.requireNonNullElse(
+//                KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
+//                KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
+//            ).toString()
+//        );
+        return false;
     }
 
     public static Integer getFilteredExactSearchThreshold(final String indexName) {

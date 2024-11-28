@@ -16,9 +16,11 @@ import org.opensearch.common.Nullable;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.query.KNNQueryResult;
+import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
 import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 import org.opensearch.knn.index.util.IndexUtil;
+import org.opensearch.knn.index.util.PartialLoadingContext;
 
 import java.util.Locale;
 import java.util.Map;
@@ -274,6 +276,7 @@ public class JNIService {
      */
     public static KNNQueryResult[] queryIndex(
         long indexPointer,
+        PartialLoadingContext partialLoadingContext,
         float[] queryVector,
         int k,
         @Nullable Map<String, ?> methodParameters,
@@ -302,7 +305,7 @@ public class JNIService {
                     parentIds
                 );
             }
-            return FaissService.queryIndex(indexPointer, queryVector, k, methodParameters, parentIds);
+            return FaissService.queryIndex(indexPointer, partialLoadingContext, queryVector, k, methodParameters, parentIds);
         }
         throw new IllegalArgumentException(
             String.format(Locale.ROOT, "QueryIndex not supported for provided engine : %s", knnEngine.getName())

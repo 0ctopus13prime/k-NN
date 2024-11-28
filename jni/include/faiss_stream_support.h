@@ -31,8 +31,7 @@ namespace stream {
  * A glue component inheriting IOReader to be passed down to Faiss library.
  * This will then indirectly call the mediator component and eventually read required bytes from Lucene's IndexInput.
  */
-class FaissOpenSearchIOReader final : public faiss::IOReader {
- public:
+struct FaissOpenSearchIOReader final : public faiss::IOReader {
   explicit FaissOpenSearchIOReader(NativeEngineIndexInputMediator *_mediator)
       : faiss::IOReader(),
         mediator(knn_jni::util::ParameterCheck::require_non_null(_mediator, "mediator")) {
@@ -52,7 +51,6 @@ class FaissOpenSearchIOReader final : public faiss::IOReader {
     throw std::runtime_error("filedescriptor() is not supported in FaissOpenSearchIOReader.");
   }
 
- private:
   NativeEngineIndexInputMediator *mediator;
 };  // class FaissOpenSearchIOReader
 
