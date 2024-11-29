@@ -248,7 +248,8 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_loadIndex(JNIEn
 
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_loadIndexWithStream(JNIEnv * env,
                                                                                      jclass cls,
-                                                                                     jobject readStream)
+                                                                                     jobject readStream,
+                                                                                     jobject partialLoadingCtx)
 {
     try {
         // Create a mediator locally.
@@ -258,9 +259,12 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_loadIndexWithSt
         // Wrap the mediator with a glue code inheriting IOReader.
         knn_jni::stream::FaissOpenSearchIOReader faissOpenSearchIOReader {&mediator};
 
+        // Create a partial loading context
+        knn_jni::partial_loading::PartialLoadingContext partial_loading_context {&jniUtil, env, partialLoadingCtx};
+
         // Pass IOReader to Faiss for loading vector index.
         return knn_jni::faiss_wrapper::LoadIndexWithStream(
-                 &faissOpenSearchIOReader);
+                 &faissOpenSearchIOReader, &partial_loading_context);
     } catch (...) {
         jniUtil.CatchCppExceptionAndThrowJava(env);
     }

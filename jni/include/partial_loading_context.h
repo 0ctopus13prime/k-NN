@@ -36,6 +36,23 @@ struct PartialLoadingContext {
     mediator = knn_jni::stream::NativeEngineIndexInputMediator(jni_interface_, env_, index_input_with_buffer);
   }
 
+  std::string getMMapFilePathIfAvailable() {
+    static jmethodID GET_MMAP_FILE_PATH_IF_AVAILABLE_METHOD_ID =
+        jni_interface_->GetMethodID(env_,
+                                    getPartialContextClass(jni_interface_, env_),
+                                    "getMMapFilePathIfAvailable",
+                                    "()Ljava/lang/String;");
+    jobject file_path = jni_interface_->CallNonvirtualObjectMethodA(
+        env_, partial_loading_context_, getPartialContextClass(jni_interface_, env_),
+        GET_MMAP_FILE_PATH_IF_AVAILABLE_METHOD_ID, nullptr);
+
+    if (file_path) {
+      return jni_interface_->ConvertJavaStringToCppString(env_, (jstring) file_path);
+    }
+
+    return std::string{};
+  }
+
   static jobject getIndexInputWithBuffer(JNIUtilInterface *jni_interface,
                                          JNIEnv *env,
                                          jobject index_input_thread_local_getter) {

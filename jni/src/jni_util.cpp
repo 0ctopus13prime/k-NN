@@ -90,7 +90,7 @@ void knn_jni::JNIUtil::HasExceptionInStack(JNIEnv* env) {
 
 void knn_jni::JNIUtil::HasExceptionInStack(JNIEnv* env, const char* message) {
     if (env->ExceptionCheck() == JNI_TRUE) {
-//        std::cout << "!!!!!!!!!!!!!!!!!! env->ExceptionCheck() == JNI_TRUE, message=[" << message << std::endl;
+        std::cout << "!!!!!!!!!!!!!!!!!! env->ExceptionCheck() == JNI_TRUE, message=[" << message << std::endl;
         throw std::runtime_error(message);
     }
 }

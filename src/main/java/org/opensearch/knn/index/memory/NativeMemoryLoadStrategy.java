@@ -92,7 +92,9 @@ public interface NativeMemoryLoadStrategy<T extends NativeMemoryAllocation, U ex
             // Try to open an index input then pass it down to native engine for loading an index.
             try (IndexInput readStream = directory.openInput(vectorFileName, IOContext.READONCE)) {
                 final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(readStream);
-                final long indexAddress = JNIService.loadIndex(indexInputWithBuffer, indexEntryContext.getParameters(), knnEngine);
+                final IndexInputThreadLocalGetter indexInputThreadLocalGetter = new IndexInputThreadLocalGetter(directory, vectorFileName);
+                final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter);
+                final long indexAddress = JNIService.loadIndex(indexInputWithBuffer, partialLoadingContext, indexEntryContext.getParameters(), knnEngine);
 
                 return createIndexAllocation(indexEntryContext, knnEngine, indexAddress, indexSizeKb, vectorFileName);
             }

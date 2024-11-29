@@ -190,17 +190,21 @@ public class JNIService {
     /**
      * Load an index via Lucene's IndexInput.
      *
-     * @param readStream A wrapper having Lucene's IndexInput to load bytes from a file.
-     * @param parameters Parameters to be used when loading index
-     * @param knnEngine  Engine to load index
+     * @param readStream            A wrapper having Lucene's IndexInput to load bytes from a file.
+     * @param partialLoadingContext
+     * @param parameters            Parameters to be used when loading index
+     * @param knnEngine             Engine to load index
      * @return Pointer to location in memory the index resides in
      */
-    public static long loadIndex(IndexInputWithBuffer readStream, Map<String, Object> parameters, KNNEngine knnEngine) {
+    public static long loadIndex(IndexInputWithBuffer readStream,
+                                 PartialLoadingContext partialLoadingContext,
+                                 Map<String, Object> parameters,
+                                 KNNEngine knnEngine) {
         if (KNNEngine.FAISS == knnEngine) {
             if (IndexUtil.isBinaryIndex(knnEngine, parameters)) {
                 return FaissService.loadBinaryIndexWithStream(readStream);
             } else {
-                return FaissService.loadIndexWithStream(readStream);
+                return FaissService.loadIndexWithStream(readStream, partialLoadingContext);
             }
         } else if (KNNEngine.NMSLIB == knnEngine) {
             return NmslibService.loadIndexWithStream(readStream, parameters);

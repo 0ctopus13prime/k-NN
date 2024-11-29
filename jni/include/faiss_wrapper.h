@@ -52,7 +52,7 @@ namespace knn_jni {
         // Loads an index with a reader implemented IOReader
         //
         // Returns a pointer of the loaded index
-        jlong LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader);
+        jlong LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader, knn_jni::partial_loading::PartialLoadingContext* partial_loading_context);
 
         // Load a binary index from indexPathJ into memory.
         //

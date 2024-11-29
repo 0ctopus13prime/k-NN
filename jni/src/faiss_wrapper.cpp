@@ -41,6 +41,7 @@
 #include "partial_loading_index_id_map.h"
 #include "partial_loading_io_macros.h"
 #include "partial_loading_index_input_storage.h"
+#include "partial_loading_storage.h"
 // Partial loading
 
 // Defines type of IDSelector
@@ -506,7 +507,15 @@ void opensearch_read_HNSW(HNSWType* hnsw, knn_jni::stream::FaissOpenSearchIORead
 }
 
 faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
+                                    knn_jni::partial_loading::PartialLoadingContext* partial_loading_context,
                                     int io_flags) {
+  //
+  // MMap
+  //
+  const auto index_file_path = partial_loading_context->getMMapFilePathIfAvailable();
+  std::cout << "MMap file path - [" << index_file_path << ']' << std::endl;
+  auto mmaper = std::make_shared<knn_jni::partial_loading::MMaper>(std::move(index_file_path));
+
   uint32_t h;
   READ1(h);
 
@@ -516,43 +525,56 @@ faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
 
   faiss::Index *idx = nullptr;
   if (h == faiss::fourcc("IxMp")) {
-    // auto *idxmap = new faiss::IndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::MMapBytesStorage>();
+    auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::MMapStorage>();
     // auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::VectorStorage>();
-    auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::FaissIndexInputStorage>();
+    // auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::FaissIndexInputStorage>();
     faiss::read_index_header(idxmap, f);
-    idxmap->index = read_index_opensearch(f, io_flags);
+    idxmap->index = read_index_opensearch(f, partial_loading_context, io_flags);
     idxmap->own_fields = true;
+
+    // FOR MMAP
+    idxmap->id_map.init(mmaper);
     OS_READVECTOR(idxmap->id_map);
     idx = idxmap;
   } else if (h == faiss::fourcc("IHNf")) {
-    // auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapBytesStorage>();
+    auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapStorage>();
     // auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::VectorStorage>();
-    auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>();
-//    std::cout << "000000000" << std::endl;
+    // auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>();
+    std::cout << "000000000" << std::endl;
     faiss::read_index_header(idxhnsw, f);
-//    std::cout << "111111111" << std::endl;
+    std::cout << "111111111" << std::endl;
+    // FOR MMAP
+    idxhnsw->hnsw.levels.init(mmaper);
+    idxhnsw->hnsw.offsets.init(mmaper);
+    idxhnsw->hnsw.neighbors.init(mmaper);
     opensearch_read_HNSW(&idxhnsw->hnsw, f);
     auto* hnsw = &idxhnsw->hnsw;
-//    std::cout << "222222222" << std::endl;
-    idxhnsw->storage = read_index_opensearch(f, io_flags);
-//    std::cout << "333333333" << std::endl;
+    std::cout << "222222222" << std::endl;
+    idxhnsw->storage = read_index_opensearch(f, partial_loading_context, io_flags);
+    std::cout << "333333333" << std::endl;
     idxhnsw->own_storage = (idxhnsw->storage != nullptr);
     idx = idxhnsw;
   } else if (h == faiss::fourcc("IxF2")) {
-    // auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::MMapBytesStorage>();
+    auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::MMapStorage>();
     // auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::VectorStorage>();
-    auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::FaissIndexInputStorage>();
+    // auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::FaissIndexInputStorage>();
     faiss::read_index_header(idxf, f);
-//    std::cout << "idxf->d = " << idxf->d << std::endl;
+    std::cout << "idxf->d = " << idxf->d << std::endl;
+    // For IndexInput Storage
     idxf->codes.setMinimumItemsToLoad(idxf->d);
+
     idxf->code_size = idxf->d * sizeof(float);
+
+    // For MMap storage
+    idxf->codes.init(mmaper);
+
     OS_READXBVECTOR(idxf->codes);
-//    std::cout << "idxf->codes.size() = "
-//              << idxf->codes.size() << std::endl;
-//    std::cout << "idxf->ntotal = " << idxf->ntotal
-//              << ", idxf->code_size = " << idxf->code_size
-//              << ", idxf->ntotal * idxf->code_size = "
-//              << (idxf->ntotal * idxf->code_size) << std::endl;
+    std::cout << "idxf->codes.size() = "
+              << idxf->codes.size() << std::endl;
+    std::cout << "idxf->ntotal = " << idxf->ntotal
+              << ", idxf->code_size = " << idxf->code_size
+              << ", idxf->ntotal * idxf->code_size = "
+              << (idxf->ntotal * idxf->code_size) << std::endl;
     FAISS_THROW_IF_NOT(
         idxf->codes.size() == idxf->ntotal * idxf->code_size);
     // leak!
@@ -564,7 +586,8 @@ faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
   return idx;
 }
 
-jlong knn_jni::faiss_wrapper::LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader) {
+jlong knn_jni::faiss_wrapper::LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader,
+                                                  knn_jni::partial_loading::PartialLoadingContext* partial_loading_context) {
 //  std::cout << "******************* jlong knn_jni::faiss_wrapper::LoadIndexWithStream" << std::endl;
 
 //    faiss::Index* indexReader =
@@ -575,9 +598,12 @@ jlong knn_jni::faiss_wrapper::LoadIndexWithStream(knn_jni::stream::FaissOpenSear
 
   faiss::Index *indexReader =
       read_index_opensearch(io_reader,
+                            partial_loading_context,
                             faiss::IO_FLAG_READ_ONLY
                                 | faiss::IO_FLAG_PQ_SKIP_SDC_TABLE
                                 | faiss::IO_FLAG_SKIP_PRECOMPUTE_TABLE);
+
+  std::cout << "-------------- read_index_opensearch is done!" << std::endl;
 
   return (jlong) indexReader;
 }
@@ -829,12 +855,11 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
                                                            jlongArray filterIdsJ,
                                                            jint filterIdsTypeJ,
                                                            jintArray parentIdsJ) {
-//  std::cout << "****************** knn_jni::faiss_wrapper::QueryIndex_WithFilter" << std::endl;
+  std::cout << "****************** knn_jni::faiss_wrapper::QueryIndex_WithFilter" << std::endl;
   // Index reader
   auto *indexReader = reinterpret_cast<faiss::OpenSearchIndexIDMapTemplate
       <faiss::Index, knn_jni::partial_loading::FaissIndexInputStorage>*>(indexPointerJ);
-//  std::cout << "****************** indexReader = "
-//            << indexReader << std::endl;
+  std::cout << "****************** indexReader = " << indexReader << std::endl;
 
   // Method parameters Ex: efSearch
   std::unordered_map<std::string, jobject> methodParams;
@@ -855,8 +880,10 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
   // Create the filterSearch params if the filterIdsJ is not a null pointer
   faiss::SearchParameters *searchParameters = nullptr;
   faiss::SearchParametersHNSW hnswParams;
+  // auto hnswReader = dynamic_cast<
+  //     const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>*>(indexReader->index);
   auto hnswReader = dynamic_cast<
-      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>*>(indexReader->index);
+      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapStorage>*>(indexReader->index);
 
   // Query param efsearch supersedes ef_search provided during index setting.
   hnswParams.efSearch =
@@ -869,9 +896,9 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
 
   jniUtil->HasExceptionInStack(env, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! - 1");
 
-//  std::cout << "**************** search starts" << std::endl;
+  std::cout << "**************** search starts" << std::endl;
   indexReader->search(1, rawQueryVector, kJ, dis.data(), ids.data(), searchParameters);
-//  std::cout << "**************** search is done" << std::endl;
+  std::cout << "**************** search is done" << std::endl;
 
   jniUtil->HasExceptionInStack(env, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! - 2");
 
