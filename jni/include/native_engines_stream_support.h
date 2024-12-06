@@ -118,6 +118,11 @@ class NativeEngineIndexInputMediator {
     jni_interface->HasExceptionInStack(env, "Seek method has failed.");
   }
 
+  size_t getFileLength() {
+    auto file_length = remainingBytes() + getOffset();
+    return file_length;
+  }
+
   static jclass getIndexInputClass(JNIUtilInterface *jni_interface, JNIEnv *env) {
     static jclass INDEX_INPUT_CLASS =
         jni_interface->FindClassFromJNIEnv(env, "org/apache/lucene/store/IndexInput");

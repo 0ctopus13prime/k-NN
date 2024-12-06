@@ -41,7 +41,9 @@
 #include "partial_loading_index_id_map.h"
 #include "partial_loading_io_macros.h"
 #include "partial_loading_index_input_storage.h"
+#include "partial_loading_index_input_cache_storage.h"
 #include "partial_loading_storage.h"
+#include "partial_loading_macros.h"
 // Partial loading
 
 // Defines type of IDSelector
@@ -442,7 +444,6 @@ void knn_jni::faiss_wrapper::CreateByteIndexFromTemplate(knn_jni::JNIUtilInterfa
   int batchSize = 1000;
   std::vector<float> inputFloatVectors(batchSize * dim);
   std::vector<int64_t> floatVectorsIds(batchSize);
-  int id = 0;
   auto iter = inputVectors->begin();
 
   for (int id = 0; id < numVectors; id += batchSize) {
@@ -506,67 +507,148 @@ void opensearch_read_HNSW(HNSWType* hnsw, knn_jni::stream::FaissOpenSearchIORead
   READ1_DUMMY(int)
 }
 
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+const uint64_t partial_loading_index_input_with_cache_max_bytes = [](){
+  const char* env_var_name = "PARTIAL_LOADING_IIWC_MAX_BYTES"; // Name of the environment variable
+  const char* env_value = std::getenv(env_var_name);
+
+  std::cout << "[KDY] PARTIAL_LOADING_IIWC_MAX_BYTES=" << env_value << std::endl;
+
+  if (env_value) {
+    return strtoull(env_value, nullptr, 10);
+  }
+
+  throw std::runtime_error("PARTIAL_LOADING_IIWC_MAX_BYTES was not provided.");
+}();
+auto mmu = std::make_shared<
+    knn_jni::partial_loading::MemoryManagementUnitV1>(partial_loading_index_input_with_cache_max_bytes);
+#endif
+
 faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
                                     knn_jni::partial_loading::PartialLoadingContext* partial_loading_context,
                                     int io_flags) {
   //
   // MMap
   //
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
   const auto index_file_path = partial_loading_context->getMMapFilePathIfAvailable();
   std::cout << "MMap file path - [" << index_file_path << ']' << std::endl;
   auto mmaper = std::make_shared<knn_jni::partial_loading::MMaper>(std::move(index_file_path));
+#endif
 
   uint32_t h;
   READ1(h);
 
-  auto _h = (const char*) &h;
-//  std::cout << "h=" << _h[0] << _h[1] << _h[2] << _h[3] << ", count=" << _count << std::endl;
+  // auto _h = (const char*) &h;
+  // std::cout << "h=" << _h[0] << _h[1] << _h[2] << _h[3] << ", count=" << _count << std::endl;
   ++_count;
 
   faiss::Index *idx = nullptr;
   if (h == faiss::fourcc("IxMp")) {
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_STRATEGY
+    auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::FaissIndexInputCacheStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::MMapStorage>();
-    // auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::VectorStorage>();
-    // auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_DEBUGGING_VECTOR_STRATEGY
+    auto *idxmap = new faiss::OpenSearchIndexIDMapTemplate<faiss::Index, knn_jni::partial_loading::VectorStorage>();
+#endif
     faiss::read_index_header(idxmap, f);
     idxmap->index = read_index_opensearch(f, partial_loading_context, io_flags);
     idxmap->own_fields = true;
 
+    idxmap->id_map.setMinimumItemsToLoad(1);
+
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     // FOR MMAP
     idxmap->id_map.init(mmaper);
+#endif
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    // FOR IndexInputCache
+    idxmap->id_map.memory_management_unit_ = mmu;
+#endif
+
     OS_READVECTOR(idxmap->id_map);
     idx = idxmap;
   } else if (h == faiss::fourcc("IHNf")) {
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_STRATEGY
+    auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputCacheStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapStorage>();
-    // auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::VectorStorage>();
-    // auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_DEBUGGING_VECTOR_STRATEGY
+    auto *idxhnsw = new faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::VectorStorage>();
+#endif
+
     std::cout << "000000000" << std::endl;
     faiss::read_index_header(idxhnsw, f);
     std::cout << "111111111" << std::endl;
+
+    idxhnsw->hnsw.levels.setMinimumItemsToLoad(1);
+    idxhnsw->hnsw.offsets.setMinimumItemsToLoad(1);
+    idxhnsw->hnsw.neighbors.setMinimumItemsToLoad(1);
+
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     // FOR MMAP
     idxhnsw->hnsw.levels.init(mmaper);
     idxhnsw->hnsw.offsets.init(mmaper);
     idxhnsw->hnsw.neighbors.init(mmaper);
+#endif
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    // FOR Cache Storage
+    idxhnsw->hnsw.levels.memory_management_unit_ = mmu;
+    idxhnsw->hnsw.offsets.memory_management_unit_ = mmu;
+    idxhnsw->hnsw.neighbors.memory_management_unit_ = mmu;
+#endif
+
     opensearch_read_HNSW(&idxhnsw->hnsw, f);
-    auto* hnsw = &idxhnsw->hnsw;
     std::cout << "222222222" << std::endl;
     idxhnsw->storage = read_index_opensearch(f, partial_loading_context, io_flags);
     std::cout << "333333333" << std::endl;
     idxhnsw->own_storage = (idxhnsw->storage != nullptr);
     idx = idxhnsw;
   } else if (h == faiss::fourcc("IxF2")) {
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_STRATEGY
+    auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::FaissIndexInputCacheStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::MMapStorage>();
-    // auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::VectorStorage>();
-    // auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::FaissIndexInputStorage>();
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_DEBUGGING_VECTOR_STRATEGY
+    auto *idxf = new faiss::OpenSearchIndexFlatL2<knn_jni::partial_loading::VectorStorage>();
+#endif
+
     faiss::read_index_header(idxf, f);
     std::cout << "idxf->d = " << idxf->d << std::endl;
-    // For IndexInput Storage
+
     idxf->codes.setMinimumItemsToLoad(idxf->d);
 
     idxf->code_size = idxf->d * sizeof(float);
 
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
     // For MMap storage
     idxf->codes.init(mmaper);
+#endif
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+    // For Cache Storage
+    idxf->codes.memory_management_unit_ = mmu;
+#endif
 
     OS_READXBVECTOR(idxf->codes);
     std::cout << "idxf->codes.size() = "
@@ -880,10 +962,23 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
   // Create the filterSearch params if the filterIdsJ is not a null pointer
   faiss::SearchParameters *searchParameters = nullptr;
   faiss::SearchParametersHNSW hnswParams;
-  // auto hnswReader = dynamic_cast<
-  //     const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>*>(indexReader->index);
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_STRATEGY
   auto hnswReader = dynamic_cast<
-      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapStorage>*>(indexReader->index);
+      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputStorage>*>(indexReader->index);
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+  auto hnswReader = dynamic_cast<
+      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::FaissIndexInputCacheStorage>*>(indexReader->index);
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_MMAP_STRATEGY
+  auto hnswReader = dynamic_cast<
+     const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::MMapStorage>*>(indexReader->index);
+#endif
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_DEBUGGING_VECTOR_STRATEGY
+  auto hnswReader = dynamic_cast<
+      const faiss::OpenSearchIndexHNSWFlat<knn_jni::partial_loading::VectorStorage>*>(indexReader->index);
+#endif
 
   // Query param efsearch supersedes ef_search provided during index setting.
   hnswParams.efSearch =
@@ -893,6 +988,12 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
   // Set IndexInput into a thread local variable.
   knn_jni::partial_loading::PartialLoadingContext partial_loading_ctx {jniUtil, env, partial_loading_ctx_j};
   partial_loading_ctx.setIndexInputWithBufferInThreadLocal();
+
+#if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
+  // For Cache Storage
+  auto cleaner =
+      knn_jni::partial_loading::StoragePageCacheCleaner::updateStorageVersionAndGet();
+#endif
 
   jniUtil->HasExceptionInStack(env, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! - 1");
 
