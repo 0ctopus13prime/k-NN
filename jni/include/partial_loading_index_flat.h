@@ -10,6 +10,7 @@
 #include <faiss/impl/DistanceComputer.h>
 #include <faiss/utils/prefetch.h>
 #include <vector>
+#include "partial_loading_macros.h"
 
 namespace faiss {
 
@@ -22,7 +23,7 @@ struct OpenSearchFlatL2Dis : DistanceComputer {
   const float *queryVector;
   size_t ndis;
 
-  OpenSearchFlatL2Dis(const Storage<uint8_t>* _codes_data,
+  OpenSearchFlatL2Dis(const Storage<uint8_t> *_codes_data,
                       size_t _code_size,
                       size_t _d,
                       idx_t _ntotal)
@@ -37,8 +38,19 @@ struct OpenSearchFlatL2Dis : DistanceComputer {
 
   float operator()(idx_t i) final {
     ndis++;
+#ifdef PARTIAL_LOADING_COUT
+    std::cout << "====================== OpenSearchFlatL2Dis "
+              << ", i=" << i
+              << ", type(Storage)" << typeid(Storage<uint8_t>).name()
+              << ", codes_data=" << ((uint64_t) codes_data)
+              << ", code_size=" << code_size
+              << ", d=" << d
+              << std::endl;
+#endif
+    auto &vec = (*codes_data)[i * code_size];
+    const float *vec_pointer = (float *) &vec;
     return fvec_L2sqr(queryVector,
-                      (float*) (&codes_data[i * code_size]),
+                      vec_pointer,
                       d);
   }
 
@@ -59,17 +71,30 @@ struct OpenSearchFlatL2Dis : DistanceComputer {
       float &dis1,
       float &dis2,
       float &dis3) final {
+#ifdef PARTIAL_LOADING_COUT
+    std::cout << "====================== OpenSearchFlatL2Dis"
+              << ", type(Storage)" << typeid(Storage<uint8_t>).name()
+              << ", idx0=" << idx0
+              << ", idx1=" << idx1
+              << ", idx2=" << idx2
+              << ", idx3=" << idx3
+              << ", codes_data=" << ((uint64_t) codes_data)
+              << ", code_size=" << code_size
+              << ", d=" << d
+              << std::endl;
+#endif
+
     ndis += 4;
 
     // compute first, assign next
     const auto *__restrict y0 =
-        reinterpret_cast<const float *>(&codes_data[idx0 * code_size]);
+        reinterpret_cast<const float *>(&(*codes_data)[idx0 * code_size]);
     const auto *__restrict y1 =
-        reinterpret_cast<const float *>(&codes_data[idx1 * code_size]);
+        reinterpret_cast<const float *>(&(*codes_data)[idx1 * code_size]);
     const auto *__restrict y2 =
-        reinterpret_cast<const float *>(&codes_data[idx2 * code_size]);
+        reinterpret_cast<const float *>(&(*codes_data)[idx2 * code_size]);
     const auto *__restrict y3 =
-        reinterpret_cast<const float *>(&codes_data[idx3 * code_size]);
+        reinterpret_cast<const float *>(&(*codes_data)[idx3 * code_size]);
 
     float dp0 = 0;
     float dp1 = 0;
@@ -125,7 +150,7 @@ struct OpenSearchIndexFlat : Index {
   void reconstruct(idx_t key, float *recons) const override {
   }
 
-  void add(idx_t n, const float* x) final {
+  void add(idx_t n, const float *x) final {
   }
 
   void reset() final {
@@ -144,7 +169,6 @@ struct OpenSearchIndexFlatL2 : OpenSearchIndexFlat<Storage> {
 
   OpenSearchIndexFlatL2() = default;
 };
-
 
 }
 

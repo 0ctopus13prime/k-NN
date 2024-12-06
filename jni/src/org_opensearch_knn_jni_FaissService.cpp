@@ -350,6 +350,7 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_queryInd
         return knn_jni::faiss_wrapper::QueryIndex(
             &jniUtil, env, indexPointerJ, partial_loading_ctx_j, queryVectorJ, kJ, methodParamsJ, parentIdsJ);
     } catch (...) {
+        std::cout << "!@#$!@#$!@#$!@#$!@#$!@#$!@#$" << std::endl;
         jniUtil.CatchCppExceptionAndThrowJava(env);
     }
     return nullptr;

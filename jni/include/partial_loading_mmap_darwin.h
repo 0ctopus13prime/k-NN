@@ -57,8 +57,6 @@ struct MMaper {
         calibrated_mapped_pointer_ = nullptr;
         map_size_ = 0;
       }
-
-      std::cout << "--------------------- ~MappedPointerHolder() 222" << std::endl;
     }
 
     void reset() {
