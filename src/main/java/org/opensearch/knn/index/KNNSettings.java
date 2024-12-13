@@ -567,7 +567,7 @@ public class KNNSettings {
 //                KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
 //            ).toString()
 //        );
-        return false;
+        return true;
     }
 
     public static Integer getFilteredExactSearchThreshold(final String indexName) {

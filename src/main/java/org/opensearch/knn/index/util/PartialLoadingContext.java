@@ -20,10 +20,15 @@ public class PartialLoadingContext {
     public String getMMapFilePathIfAvailable() {
         final Directory directory = indexInputThreadLocalGetter.getDirectory();
         final Directory innerDirectory = FilterDirectory.unwrap(directory);
+        System.out.println(
+            "___________________________ innerDirectory instanceof MMapDirectory: " + (innerDirectory instanceof MMapDirectory));
+        System.out.println("___________________________ innerDirectory=" + innerDirectory);
         if (innerDirectory instanceof MMapDirectory) {
             final MMapDirectory mmapDirectory = (MMapDirectory) innerDirectory;
             final String filePath =
-                mmapDirectory.getDirectory().resolve(Paths.get(indexInputThreadLocalGetter.getVectorFileName())).toString();
+                mmapDirectory.getDirectory()
+                    .resolve(Paths.get(indexInputThreadLocalGetter.getVectorFileName()))
+                    .toString();
             return filePath;
         }
 

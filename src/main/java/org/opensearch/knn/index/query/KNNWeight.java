@@ -27,11 +27,11 @@ import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.util.KNNCodecUtil;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
+import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.memory.NativeMemoryAllocation;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManager;
 import org.opensearch.knn.index.memory.NativeMemoryEntryContext;
 import org.opensearch.knn.index.memory.NativeMemoryLoadStrategy;
-import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.quantizationservice.QuantizationService;
 import org.opensearch.knn.index.query.ExactSearcher.ExactSearcherContext.ExactSearcherContextBuilder;
 import org.opensearch.knn.indices.ModelDao;
@@ -147,7 +147,7 @@ public class KNNWeight extends Weight {
         // See whether we have to perform exact search based on approx search results
         // This is required if there are no native engine files or if approximate search returned
         // results less than K, though we have more than k filtered docs
-        if (isExactSearchRequire(context, cardinality, docIdsToScoreMap.size())) {
+        if (false && isExactSearchRequire(context, cardinality, docIdsToScoreMap.size())) {
             System.out.println("----------- isExactSearchRequire=" + true);
             final BitSet docs = filterWeight != null ? filterBitSet : null;
             return doExactSearch(context, docs, k);
@@ -257,9 +257,8 @@ public class KNNWeight extends Weight {
             knnEngine = KNNEngine.getEngine(engineName);
             String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
             spaceType = SpaceType.getSpace(spaceTypeName);
-            vectorDataType = VectorDataType.get(
-                fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue())
-            );
+            vectorDataType =
+                VectorDataType.get(fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue()));
         }
 
         final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
@@ -371,10 +370,9 @@ public class KNNWeight extends Weight {
             return Collections.emptyMap();
         }
 
-        System.out.println("!!!!!!!!!!!!!!!!!!! Got results - " + results);
-        for (int i = 0 ; i < results.length ; ++i) {
-            System.out.println("@@@@@@@@@ id -> " + results[i].getId());
-            System.out.println("@@@@@@@@@ score -> " + results[i].getScore());
+        System.out.println("!!!!!!!!!!!!!!!!!!! Got results - " + results.length);
+        for (int i = 0; i < results.length; ++i) {
+            System.out.println("@@@@@@@@@ id -> " + results[i].getId() + ", score -> " + results[i].getScore());
         }
 
         if (quantizedVector != null) {
@@ -432,8 +430,8 @@ public class KNNWeight extends Weight {
          * is cheaper than computation cost for non binary vector
          */
         return KNNConstants.MAX_DISTANCE_COMPUTATIONS >= filterIdsCount * (knnQuery.getVectorDataType() == VectorDataType.FLOAT
-            ? knnQuery.getQueryVector().length
-            : knnQuery.getByteQueryVector().length);
+                                                                           ? knnQuery.getQueryVector().length
+                                                                           : knnQuery.getByteQueryVector().length);
     }
 
     /**
@@ -459,8 +457,7 @@ public class KNNWeight extends Weight {
             return true;
         }
         if (isFilteredExactSearchRequireAfterANNSearch(filterIdsCount, annResultCount)) {
-            log.debug(
-                "Doing ExactSearch after doing ANNSearch as the number of documents returned are less than "
+            log.debug("Doing ExactSearch after doing ANNSearch as the number of documents returned are less than "
                     + "K, even when we have more than K filtered Ids. K: {}, ANNResults: {}, filteredIdCount: {}",
                 this.knnQuery.getK(),
                 annResultCount,

@@ -93,8 +93,8 @@ public class NativeMemoryCacheManager implements Closeable {
             .removalListener(this::onRemoval);
 
         if (nativeMemoryCacheDTO.isWeightLimited()) {
-            this.maxWeight = nativeMemoryCacheDTO.getMaxWeight();
-            cacheBuilder.maximumWeight(this.maxWeight).weigher((k, v) -> v.getSizeInKB());
+            // this.maxWeight = nativeMemoryCacheDTO.getMaxWeight();
+            // cacheBuilder.maximumWeight(this.maxWeight).weigher((k, v) -> v.getSizeInKB());
         }
 
         if (nativeMemoryCacheDTO.isExpirationLimited()) {
@@ -306,7 +306,7 @@ public class NativeMemoryCacheManager implements Closeable {
             );
         }
 
-        if (KNNFeatureFlags.isForceEvictCacheEnabled()) {
+        if (false && KNNFeatureFlags.isForceEvictCacheEnabled()) {
             // Utilizes a force eviction mechanism to free up memory before the entry can be added to the cache
             // In case of a cache hit, the operation just updates the locally maintained recency list
             // In case of a cache miss, least recently accessed entries are evicted in a blocking manner

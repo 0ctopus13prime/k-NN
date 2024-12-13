@@ -17,7 +17,7 @@ import java.io.IOException;
  * called by native engine via JNI API.
  * Therefore, this class servers as a read layer in native engines to read the bytes it wants.
  */
-public class IndexInputWithBuffer implements Closeable  {
+public class IndexInputWithBuffer implements Closeable {
     private IndexInput indexInput;
     private long contentLength;
     // 64K buffer.
@@ -37,7 +37,7 @@ public class IndexInputWithBuffer implements Closeable  {
      * @throws IOException
      */
     private int copyBytes(long nbytes) throws IOException {
-        System.out.println("IIWB::copyBytes, nbytes: " + nbytes);
+        // System.out.println("IIWB::copyBytes, nbytes: " + nbytes);
         final int readBytes = (int) Math.min(nbytes, buffer.length);
         indexInput.readBytes(buffer, 0, readBytes);
 
@@ -54,6 +54,6 @@ public class IndexInputWithBuffer implements Closeable  {
     }
 
     public void close() throws IOException {
-        indexInput.close();;
+        indexInput.close();
     }
 }
