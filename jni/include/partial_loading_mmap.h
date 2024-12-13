@@ -10,7 +10,7 @@
 #elif defined(__APPLE__) && defined(__MACH__)
   #include "partial_loading_mmap_darwin.h"
 #elif defined(__linux__)
-  #inclue "partial_loading_mmap_linux.h"
+  #include "partial_loading_mmap_linux.h"
 #else
   #error "Unrecognizable operating system. Currently we support Darwin, Linux and Windows."
 #endif

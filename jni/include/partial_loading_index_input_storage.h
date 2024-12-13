@@ -31,8 +31,6 @@ struct FaissIndexInputStorageBase {
   }
 };
 
-
-
 template<typename T>
 struct FaissIndexInputStorage final : FaissIndexInputStorageBase {
   FaissIndexInputStorage()
@@ -61,7 +59,7 @@ struct FaissIndexInputStorage final : FaissIndexInputStorageBase {
 #endif
   }
 
-  const T &operator[](const int32_t index) const {
+  const T &operator[](const size_t index) const {
 #ifdef PARTIAL_LOADING_COUT
     std::cout << "================ FaissIndexInputStorage::operator[](" << index << ")"
               << ", base_offset=" << base_offset_
@@ -74,7 +72,7 @@ struct FaissIndexInputStorage final : FaissIndexInputStorageBase {
     return *const_cast<FaissIndexInputStorage *>(this)->reloadBytes(index);
   }
 
-  T* reloadBytes(const size_t index) {
+  T *reloadBytes(const size_t index) {
     if (__partial_loading_buffer.size() >= (16 * 1024)) {
       __partial_loading_buffer.clear();
     }
@@ -84,15 +82,23 @@ struct FaissIndexInputStorage final : FaissIndexInputStorageBase {
         __partial_loading_buffer.size() + sizeof(T) * minimum_nitems_to_load_);
     auto ret = &__partial_loading_buffer[old_size];
 
-    auto* mediator =
+    auto *mediator =
         knn_jni::partial_loading::PartialLoadingContext::getIndexInputWithBufferFromThreadLocal();
+
+#ifdef PARTIAL_LOADING_COUT
+    std::cout << "========== buffer.size=" << __partial_loading_buffer.size()
+              << ", index=" << index
+              << ", offset=" << (base_offset_ + (sizeof(T) * index))
+              << ", region_size=" << (sizeof(T) * nitems_)
+              << std::endl;
+#endif
 
     mediator->copyBytesWithOffset(
         base_offset_ + (sizeof(T) * index),
         sizeof(T) * minimum_nitems_to_load_,
         ret);
 
-    return (T*) ret;
+    return (T *) ret;
   }
 
   void setMinimumItemsToLoad(int32_t nitems) {

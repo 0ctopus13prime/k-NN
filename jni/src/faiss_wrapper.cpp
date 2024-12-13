@@ -513,7 +513,7 @@ const uint64_t partial_loading_index_input_with_cache_max_bytes = [](){
   const char* env_var_name = "PARTIAL_LOADING_IIWC_MAX_BYTES"; // Name of the environment variable
   const char* env_value = std::getenv(env_var_name);
 
-  std::cout << "[KDY] PARTIAL_LOADING_IIWC_MAX_BYTES=" << env_value << std::endl;
+  std::cout << "[KDY] PARTIAL_LOADING_IIWC_MAX_BYTES=[" << env_value << ']' << std::endl;
 
   if (env_value) {
     return strtoull(env_value, nullptr, 10);

@@ -5,6 +5,8 @@
 #ifndef KNNPLUGIN_JNI_INCLUDE_PARTIAL_LOADING_CONTEXT_H_
 #define KNNPLUGIN_JNI_INCLUDE_PARTIAL_LOADING_CONTEXT_H_
 
+#include <optional>
+
 #include "jni_util.h"
 #include "parameter_utils.h"
 #include "memory_util.h"

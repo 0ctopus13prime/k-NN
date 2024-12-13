@@ -25,7 +25,6 @@ std::set<uint64_t> __storage_version_set;
 
 struct PageHeader;
 
-thread_local std::unordered_map<PageHeader *, void *> __local_page_cache;
 thread_local uint64_t __current_storage_version = 0;
 
 struct StoragePageCacheCleaner {
@@ -36,14 +35,8 @@ struct StoragePageCacheCleaner {
   }
 
   ~StoragePageCacheCleaner() {
-    {
-      std::lock_guard<decltype(__storage_version_set_lock)> lock(__storage_version_set_lock);
-      __storage_version_set.erase(version_);
-    }
-
-    // Clean up local page cache map
-    // This is much faster than calling `clear()`
-    std::unordered_map<PageHeader *, void *>().swap(__local_page_cache);
+    std::lock_guard<decltype(__storage_version_set_lock)> lock(__storage_version_set_lock);
+    __storage_version_set.erase(version_);
   }
 
   static StoragePageCacheCleaner updateStorageVersionAndGet() noexcept {
@@ -96,7 +89,7 @@ struct PageHeader {
   template<typename T>
   T *loadPage(MemoryManagementUnitV1 *memory_management_unit_v1,
               uint64_t page_size,
-              std::function<void(uint8_t*)> loader);
+              std::function<void(uint8_t *)> loader);
 };
 
 struct MemoryManagementUnitV1 {
@@ -116,7 +109,7 @@ struct MemoryManagementUnitV1 {
 
   void *getPage(PageHeader *page_header,
                 const uint64_t page_size,
-                std::function<void(uint8_t*)> loader) {
+                std::function<void(uint8_t *)> loader) {
     auto acquired_page = page_header->page_.load(std::memory_order_acquire);
     if (acquired_page) {
       return acquired_page->page_.data();
@@ -210,7 +203,16 @@ struct MemoryManagementUnitV1 {
 
   void *loadNewPage(PageHeader *page_header,
                     const uint64_t page_size,
-                    std::function<void(uint8_t*)> loader) {
+                    std::function<void(uint8_t *)> loader) {
+#ifdef PARTIAL_LOADING_COUT
+    std::cout << "*************** MemoryManagementUnitV1::loadNewPage"
+              << ", page_size=" << page_size
+              << ", memory_bytes_using=" << memory_used_bytes_.fetch_add(page_size, std::memory_order_acquire)
+              << ", free_bytes="
+              << (((int64_t) max_memory_bytes_) - (int64_t) memory_used_bytes_.fetch_add(page_size, std::memory_order_acquire))
+              << std::endl;
+#endif
+
     PageList *list;
     {
       std::lock_guard<decltype(page_header->update_lock_)> guard{page_header->update_lock_};
@@ -238,7 +240,7 @@ struct MemoryManagementUnitV1 {
 template<typename T>
 T *PageHeader::loadPage(MemoryManagementUnitV1 *memory_management_unit_v1,
                         const uint64_t page_size,
-                        std::function<void(uint8_t*)> loader) {
+                        std::function<void(uint8_t *)> loader) {
 #ifdef PARTIAL_LOADING_COUT
   std::cout << "*************** PageHeader::loadPage, this="
             << ((uint64_t) this)
@@ -247,12 +249,6 @@ T *PageHeader::loadPage(MemoryManagementUnitV1 *memory_management_unit_v1,
             << std::endl;
 #endif
 
-  // Try to find it from a local cache
-  auto it = __local_page_cache.find(this);
-  if (it != __local_page_cache.end()) {
-    return (T *) it->second;
-  }
-
   // Update version
   uint64_t expected = version_.load(std::memory_order_acquire);
   while (__current_storage_version > expected
@@ -260,7 +256,6 @@ T *PageHeader::loadPage(MemoryManagementUnitV1 *memory_management_unit_v1,
 
   // Try to get a page
   void *acquired_page = memory_management_unit_v1->getPage(this, page_size, std::move(loader));
-  __local_page_cache.emplace_hint(it, this, (void *) acquired_page);
 
 #ifdef PARTIAL_LOADING_COUT
   std::cout << "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%" << std::endl;

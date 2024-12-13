@@ -78,7 +78,7 @@ struct MMapStorage {
     index_input_mediator->seek(offset + num_bytes);
   }
 
-  const T &operator[](const int32_t index) const {
+  const T &operator[](const size_t index) const {
 #ifdef PARTIAL_LOADING_COUT
     std::cout << "------------ MMapStorage index=" << index
               << ", nitems=" << nitems_

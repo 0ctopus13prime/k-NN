@@ -67,7 +67,7 @@ struct FaissIndexInputCacheStorage final : FaissIndexInputCacheStorageBase {
 #endif
   }
 
-  const T &operator[](const int32_t index) const {
+  const T &operator[](const size_t index) const {
     const auto page_index = index / num_items_in_page;
 
 #ifdef PARTIAL_LOADING_COUT
