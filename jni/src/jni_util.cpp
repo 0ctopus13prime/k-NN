@@ -17,7 +17,6 @@
 #include <vector>
 #include <iostream>
 
-
 void knn_jni::JNIUtil::Initialize(JNIEnv *env) {
     // Followed recommendation from this SO post: https://stackoverflow.com/a/13940735
     jclass tempLocalClassRef;

@@ -60,24 +60,28 @@ struct StoragePageCacheCleaner {
 struct PageList {
   std::atomic<PageList *> next_;
   std::atomic<uint64_t> *version_;
-  std::atomic<PageList *> *page_reference_;
-  std::vector<uint8_t> page_;
+  std::atomic<uint8_t *> *page_;
+  std::vector<uint8_t> page_holder_;
+  uint64_t version_snapshot_;
 
   PageList(std::atomic<uint64_t> *version,
-           std::atomic<PageList *> *page_reference,
+           std::atomic<uint8_t *> *page_reference,
            const uint64_t page_size)
       : next_(),
         version_(version),
-        page_reference_(page_reference),
-        page_(page_size) {
+        page_(page_reference),
+        page_holder_(page_size) {
+    page_->store(page_holder_.data());
   }
+
+  PageList() = default;
 };
 
 struct MemoryManagementUnitV1;
 
 struct PageHeader {
   std::atomic<uint64_t> version_;
-  std::atomic<PageList *> page_;
+  std::atomic<uint8_t *> page_;
   std::mutex update_lock_;
 
   PageHeader()
@@ -110,52 +114,146 @@ struct MemoryManagementUnitV1 {
   void *getPage(PageHeader *page_header,
                 const uint64_t page_size,
                 std::function<void(uint8_t *)> loader) {
-    auto acquired_page = page_header->page_.load(std::memory_order_acquire);
+    auto *acquired_page = page_header->page_.load(std::memory_order_acquire);
     if (acquired_page) {
-      return acquired_page->page_.data();
-    } else {
-      // Page fault
-      return loadNewPage(page_header, page_size, std::move(loader));
+      return acquired_page;
     }  // End if
+
+    // Page fault
+    return loadNewPage(page_header, page_size, std::move(loader));
   }
 
-  uint64_t tryCleanUpPage(PageList *page, const uint64_t min_version) {
-    if (page->version_->load(std::memory_order_acquire) < min_version) {
-      const auto reclaimed = page->page_.size();
-      memory_used_bytes_.fetch_sub(reclaimed, std::memory_order_acq_rel);
-      delete page;
-      return reclaimed;
-    } else {
-      updateNewPage(&sheol_list_head_, page);
-      return 0;
+  static void appendTo(PageList *target, PageList *to_append) {
+    auto *tmp = target->next_.load(std::memory_order_acquire);
+    target->next_.store(to_append, std::memory_order_release);
+    to_append->next_.store(tmp, std::memory_order_release);
+  }
+
+  static void collectCandidate(PageList &candidate,
+                               int32_t &num_candidate,
+                               PageList *base_node,
+                               const uint64_t min_version,
+                               PageList **last_one) {
+    if (last_one) {
+      *last_one = base_node;
     }
-  }
 
-  void detachPage(PageList *prev, PageList *current) {
-    prev->next_.store(current->next_);
-    current->page_reference_->store(nullptr, std::memory_order_release);
-  }
-
-  uint64_t garbageCollectList(PageList *base_node, const uint64_t min_version) {
     if (base_node == nullptr) {
-      return 0;
+      return;
     }
 
-    uint64_t reclaimed = 0;
-    auto current = base_node->next_.load(std::memory_order_acquire);
+    auto *current = base_node->next_.load(std::memory_order_acquire);
     PageList *prev = base_node;
     while (current) {
-      auto next = current->next_.load(std::memory_order_acquire);
-      if (current->version_->load(std::memory_order_acquire) < min_version) {
-        detachPage(prev, current);
-        reclaimed += tryCleanUpPage(current, min_version);
+      // Remember next first
+      auto *next = current->next_.load(std::memory_order_acquire);
+
+      const auto current_version = current->version_->load(std::memory_order_acquire);
+      if (current_version < min_version) {
+        // Found a target whose version < min_version
+
+        // Detach the target from the list.
+        prev->next_.store(next, std::memory_order_release);
+
+        // Add the detached one to the candidate list.
+        current->version_snapshot_ = current_version;
+        ++num_candidate;
+        appendTo(&candidate, current);
+
         current = next;
         continue;
       }
+
+      if (last_one) {
+        *last_one = current;
+      }
+
       prev = current;
       current = next;
-    }
+    }  // End while
+  }
 
+  void finalizeTargets(PageList &candidate, PageList *last_one) {
+    // Let's make it 50% of MAX_CAP.
+    constexpr double kTarget = 0.50;
+    const auto gc_target_bytes =
+        (uint64_t) (((double) memory_used_bytes_.load(std::memory_order_acquire))
+            - (kTarget * ((double) max_memory_bytes_)));
+
+    struct MaxPageVersionComparator {
+      bool operator()(const PageList *lhs, const PageList *rhs) const noexcept {
+        return lhs->version_snapshot_ < rhs->version_snapshot_;
+      }
+    };
+
+    // Max version heap
+    std::priority_queue<PageList *, std::vector<PageList *>, MaxPageVersionComparator> pq;
+
+    uint64_t estimated_reclaim = 0;
+    for (PageList *target = candidate.next_.load(std::memory_order_acquire); target != nullptr;) {
+      auto *next = target->next_.load(std::memory_order_acquire);
+
+      if ((estimated_reclaim + target->page_holder_.size()) < gc_target_bytes) {
+        pq.push(target);
+        estimated_reclaim += target->page_holder_.size();
+      } else if (target->version_snapshot_ < pq.top()->version_snapshot_) {
+        pq.push(target);
+        estimated_reclaim += target->page_holder_.size();
+
+        do {
+          const auto after_removal_reclaim =
+              estimated_reclaim - pq.top()->page_holder_.size();
+          if (after_removal_reclaim <= gc_target_bytes) {
+            break;
+          }
+
+          // Give a second chance and put it back to list.
+          auto *evicted = pq.top();
+          appendTo(last_one, evicted);
+
+          // Do the eviction.
+          estimated_reclaim -= evicted->page_holder_.size();
+          pq.pop();
+        } while (!pq.empty());  // End while
+      } else {
+        // Append it back to the list.
+        appendTo(last_one, target);
+      }  // End if
+
+      target = next;
+    }  // End for
+
+    // Append final targets to candidate
+    candidate.next_.store(nullptr);
+    while (!pq.empty()) {
+      appendTo(&candidate, pq.top());
+      pq.pop();
+    }
+  }
+
+  uint64_t cleanUpTargets(PageList *target) {
+    uint64_t reclaimed = 0;
+
+    while (target) {
+      // Remember next
+      auto *next = target->next_.load(std::memory_order_acquire);
+
+      // Try to reclaim
+      const auto version = target->version_->load(std::memory_order_acquire);
+      target->page_->store(nullptr, std::memory_order_release);
+      if (target->version_->load(std::memory_order_acquire) != version) {
+        // It was accessed during the detaching. Put it in sheol list.
+        appendTo(&sheol_list_head_, target);
+      } else {
+        // It's safe to reclaim
+        reclaimed += target->page_holder_.size();
+        delete target;
+      }
+
+      target = next;
+    }  // End for
+
+    memory_used_bytes_.fetch_sub(reclaimed);
     return reclaimed;
   }
 
@@ -165,20 +263,31 @@ struct MemoryManagementUnitV1 {
       std::thread gc_thread([this]() {
         auto start = std::chrono::high_resolution_clock::now();
 
-        uint64_t reclaimed = 0;
-        int32_t max_tries = 3;
-        while ((max_tries--) > 0 && memory_used_bytes_.load(std::memory_order_acquire) > max_memory_bytes_) {
-          const auto min_version = StoragePageCacheCleaner::getMinimumStorageVersion();
-          reclaimed += garbageCollectList(&sheol_list_head_, min_version);
-          reclaimed += garbageCollectList(
-              page_list_head_.next_.load(std::memory_order_acquire), min_version);
-        }
+        // 1. Collect a candidate.
+        PageList candidate{};
+        int32_t num_candidate = 0;
+        const auto min_version = StoragePageCacheCleaner::getMinimumStorageVersion();
+        collectCandidate(candidate, num_candidate, &sheol_list_head_, min_version, nullptr);
+
+        PageList *last_one = nullptr;
+        collectCandidate(candidate,
+                         num_candidate,
+                         page_list_head_.next_.load(std::memory_order_acquire),
+                         min_version,
+                         &last_one);
+
+        // 2. Finalize the targets.
+        finalizeTargets(candidate, last_one);
+
+        // 3. Try to clean up targets.
+        const uint64_t reclaimed = cleanUpTargets(candidate.next_.load(std::memory_order_acquire));
 
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
         std::cout << "[GC] reclaimed: " << reclaimed
                   << ", took: " << duration.count()
+                  << ", num_candidate: " << num_candidate
                   << ", curr mem: " << memory_used_bytes_.load(std::memory_order_acquire)
                   << std::endl;
 
@@ -190,10 +299,10 @@ struct MemoryManagementUnitV1 {
       return;
     }
 
-    gc_thread_semaphore_.fetch_sub(1);
+    gc_thread_semaphore_.fetch_sub(1, std::memory_order_acq_rel);
   }
 
-  void updateNewPage(PageList *head, PageList *new_node) {
+  static void updateNewPage(PageList *head, PageList *new_node) {
     PageList *old_header;
     do {
       old_header = head->next_.load(std::memory_order_acquire);
@@ -216,24 +325,24 @@ struct MemoryManagementUnitV1 {
     PageList *list;
     {
       std::lock_guard<decltype(page_header->update_lock_)> guard{page_header->update_lock_};
-      if (auto existing_page = page_header->page_.load(std::memory_order_acquire)) {
+      if (auto *existing_page = page_header->page_.load(std::memory_order_acquire)) {
         // We have it already.
-        return existing_page->page_.data();
+        return existing_page;
       }
 
       // Increase memory gauge
-      const auto memory_bytes_using = memory_used_bytes_.fetch_add(page_size, std::memory_order_acq_rel) + page_size;
+      const auto memory_bytes_using =
+          memory_used_bytes_.fetch_add(page_size, std::memory_order_acq_rel) + page_size;
       if (memory_bytes_using > max_memory_bytes_) {
         signalGarbageCollect();
       }
 
       list = new PageList(&(page_header->version_), &(page_header->page_), page_size);
-      loader(list->page_.data());
-      page_header->page_.store(list, std::memory_order_release);
+      loader(list->page_holder_.data());
       updateNewPage(&page_list_head_, list);
     }
 
-    return list->page_.data();
+    return list->page_holder_.data();
   }
 };
 
