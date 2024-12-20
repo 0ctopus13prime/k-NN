@@ -39,6 +39,7 @@ import org.opensearch.knn.index.store.partial_loading.DistanceMaxHeap;
 import org.opensearch.knn.index.store.partial_loading.FaissHNSW;
 import org.opensearch.knn.index.store.partial_loading.FlatL2DistanceComputer;
 import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
+import org.opensearch.knn.index.store.partial_loading.KdyStats;
 import org.opensearch.knn.index.store.partial_loading.SearchParametersHNSW;
 import org.opensearch.knn.indices.ModelDao;
 import org.opensearch.knn.indices.ModelMetadata;
@@ -318,11 +319,14 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
                         parentIds
                     );
                 } else {
+                    final KdyStats kdyStats = KdyStats.TL.get();
+                    kdyStats.init();
                     results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
                         indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
                         knnQuery.getQueryVector(),
                         k
                     );
+                    kdyStats.print();
 
                     //                    results = JNIService.queryIndex(
                     //                        indexAllocation.getMemoryAddress(),

@@ -15,6 +15,7 @@ public class FlatL2DistanceComputer extends DistanceComputer {
     private float[] floatBuffer1;
     private Storage codes;
     private long oneVectorByteSize;
+    private KdyStats kdyStats;
 
     public FlatL2DistanceComputer(float[] queryVector, Storage codes, long oneVectorByteSize) {
         this.queryVector = queryVector;
@@ -22,10 +23,13 @@ public class FlatL2DistanceComputer extends DistanceComputer {
         this.floatBuffer1 = new float[dimension];
         this.codes = codes;
         this.oneVectorByteSize = oneVectorByteSize;
+        this.kdyStats = KdyStats.TL.get();
     }
 
     @Override public float compute(IndexInput indexInput, long index) throws IOException {
         populateFloats(indexInput, index, floatBuffer1);
+        kdyStats.numVectorsVisit += 1;
+        kdyStats.numBytesRead += oneVectorByteSize;
         return LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
     }
 
@@ -44,5 +48,7 @@ public class FlatL2DistanceComputer extends DistanceComputer {
         distances[2] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
         populateFloats(indexInput, ids[3], floatBuffer1);
         distances[3] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
+        kdyStats.numVectorsVisit += 4;
+        kdyStats.numBytesRead += 4 * oneVectorByteSize;
     }
 }
