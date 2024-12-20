@@ -10,7 +10,9 @@ import lombok.ToString;
 import org.apache.lucene.store.IndexInput;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class FaissHNSW {
@@ -41,6 +43,7 @@ public class FaissHNSW {
         IndexInput indexInput, SearchParametersHNSW parametersHNSW, DistanceComputer distanceComputer
     ) throws IOException {
         IdAndDistance nearest = new IdAndDistance(entryPoint, distanceComputer.compute(indexInput, entryPoint));
+
         // System.out.println(" ++++++++++++++++++= hnswSearch: entryPoint=" + entryPoint + ", dis=" + nearest.distance);
         for (int level = maxLevel; level >= 1; --level) {
             // System.out.println(" +++++++++++++ next greedyUpdateNearest, level=" + level);
@@ -48,10 +51,10 @@ public class FaissHNSW {
         }
 
         final int ef = Math.max(parametersHNSW.efSearch, parametersHNSW.k);
-        // // System.out.println(" +++++++++++++++++ hnswSearch, ef="
-        // //     + ef + ", k=" + parametersHNSW.k + ", efSearch=" + parametersHNSW.efSearch
-        // //     + ", nearest.id=" + nearest.id
-        // //     + ", nearest.distance=" + nearest.distance);
+        // System.out.println(" +++++++++++++++++ hnswSearch, ef="
+        //     + ef + ", k=" + parametersHNSW.k + ", efSearch=" + parametersHNSW.efSearch
+        //     + ", nearest.id=" + nearest.id
+        //     + ", nearest.distance=" + nearest.distance);
         DistanceMaxHeap resultMaxHeap = new DistanceMaxHeap(parametersHNSW.k);
         DistanceMaxHeap candidates = new DistanceMaxHeap(ef);
         candidates.insertWithOverflow(nearest.id, nearest.distance);
@@ -60,32 +63,31 @@ public class FaissHNSW {
     }
 
     private static float addToMaxHeaps(
-        int id, float distance, float threshold, DistanceMaxHeap resultMaxHeap, DistanceMaxHeap candidates
+        int id, float distance, DistanceMaxHeap resultMaxHeap, DistanceMaxHeap candidates
     ) {
-        if (distance < threshold) {
-            resultMaxHeap.insertWithOverflow(id, distance);
-        }
+        resultMaxHeap.insertWithOverflow(id, distance);
+        // System.out.println("++++++++++ Adding to candidate | id=" + id + ", dis=" + distance
+        //                    + ", heap_size=" + candidates.size()
+        //                    + ", top=" + (candidates.isEmpty() ? -1f : candidates.top().distance));
         candidates.insertWithOverflow(id, distance);
-        return resultMaxHeap.isEmpty() ? Float.MAX_VALUE : resultMaxHeap.top().distance;
+        return resultMaxHeap.top().distance;
     }
 
     private void searchFromCandidates(
         IndexInput indexInput, DistanceComputer distanceComputer, DistanceMaxHeap resultMaxHeap, DistanceMaxHeap candidates, int level
     ) throws IOException {
-        final Set<Integer> idSet = new HashSet<>();
-        float threshold = resultMaxHeap.isEmpty() ? Float.MAX_VALUE : resultMaxHeap.top().distance;
+        final Set<Integer> idSet = new HashSet<>(128, 0.65f);
+        final List<Integer> neighborIds = new ArrayList<>(128);
         for (final IdAndDistance candidate : candidates) {
-            if (candidate.distance < threshold) {
-                resultMaxHeap.insertWithOverflow(candidate.id, candidate.distance);
-                threshold = resultMaxHeap.top().distance;
-            }
+            resultMaxHeap.insertWithOverflow(candidate.id, candidate.distance);
             idSet.add(candidate.id);
         }
 
-        // System.out.println(" ++++++++++++++++++ searchFromCandidates, threshold=" + threshold + ", resultSize=" + resultMaxHeap.size());
+        // System.out.println(" ++++++++++++++++++ searchFromCandidates, threshold="
+        //      + resultMaxHeap.top().distance + ", resultSize=" + resultMaxHeap.size());
 
-        int[] savedNeighborIds = new int[4];
-        float[] distances = new float[4];
+        int[] neighbor4Ids = new int[4];
+        float[] distances4 = new float[4];
         final IdAndDistance currMin = new IdAndDistance(0, 0);
 
         while (!candidates.isEmpty()) {
@@ -97,44 +99,47 @@ public class FaissHNSW {
             end = o + cumNumberNeighborPerLevel[level + 1];
 
             // System.out.println(" ++++++++++++++++++++++ currMin.id="
-            //    + currMin.id + ", currMin.dis=" + currMin.distance + ", begin=" + begin + ", end=" + end);
+            //    + currMin.id + ", currMin.dis=" + currMin.distance
+            //     + ", begin=" + begin + ", end=" + end
+            //     + ", threshold=" + (resultMaxHeap.isEmpty() ? Float.MAX_VALUE : resultMaxHeap.top().distance)
+            //     + ", currMax.id=" + (resultMaxHeap.isEmpty() ? -1: resultMaxHeap.top().id)
+            //     + ", len(candidate)=" + candidates.size());
 
-            long maxNeighborIdx = begin;
-            while (maxNeighborIdx < end) {
-                final int neighborId = neighbors.readInt(indexInput, maxNeighborIdx);
-                if (neighborId < 0) {
-                    break;
+            neighborIds.clear();
+            for (long offset = begin ; offset < end ; offset++) {
+                final int neighborId = neighbors.readInt(indexInput, offset);
+                if (neighborId >= 0) {
+                    neighborIds.add(neighborId);
+                    continue;
                 }
-                ++maxNeighborIdx;
+                break;
             }
 
-            // System.out.println(" ++++++++++++++++++++ maxNeighborIdx=" + maxNeighborIdx);
+            // System.out.println(" ++++++++++++++++++++ len(neighborIds)=" + neighborIds.size());
 
-            int count = 0;
+            int numBuffered = 0;
 
-            for (long neighborIdx = begin; neighborIdx < maxNeighborIdx; ++neighborIdx) {
-                final int neighborId = neighbors.readInt(indexInput, neighborIdx);
+            for (int neighborId : neighborIds) {
                 if (!idSet.contains(neighborId)) {
                     idSet.add(neighborId);
-                    savedNeighborIds[count] = neighborId;
-                    ++count;
+                    neighbor4Ids[numBuffered++] = neighborId;
+
+                    if (numBuffered == 4) {
+                        distanceComputer.computeBatch4(indexInput, neighbor4Ids, distances4);
+
+                        addToMaxHeaps(neighbor4Ids[0], distances4[0], resultMaxHeap, candidates);
+                        addToMaxHeaps(neighbor4Ids[1], distances4[1], resultMaxHeap, candidates);
+                        addToMaxHeaps(neighbor4Ids[2], distances4[2], resultMaxHeap, candidates);
+                        addToMaxHeaps(neighbor4Ids[3], distances4[3], resultMaxHeap, candidates);
+
+                        numBuffered = 0;
+                    }  // End if
                 }
-
-                if (count == 4) {
-                    distanceComputer.computeBatch4(indexInput, savedNeighborIds, distances);
-
-                    threshold = addToMaxHeaps(savedNeighborIds[0], distances[0], threshold, resultMaxHeap, candidates);
-                    threshold = addToMaxHeaps(savedNeighborIds[1], distances[1], threshold, resultMaxHeap, candidates);
-                    threshold = addToMaxHeaps(savedNeighborIds[2], distances[2], threshold, resultMaxHeap, candidates);
-                    threshold = addToMaxHeaps(savedNeighborIds[3], distances[3], threshold, resultMaxHeap, candidates);
-
-                    count = 0;
-                }  // End if
             }  // End for
 
-            for (int i = 0; i < count; ++i) {
-                final float distance = distanceComputer.compute(indexInput, savedNeighborIds[i]);
-                threshold = addToMaxHeaps(savedNeighborIds[i], distance, threshold, resultMaxHeap, candidates);
+            for (int i = 0; i < numBuffered; ++i) {
+                final float distance = distanceComputer.compute(indexInput, neighbor4Ids[i]);
+                addToMaxHeaps(neighbor4Ids[i], distance, resultMaxHeap, candidates);
             }
         }  // End while
     }
@@ -158,8 +163,20 @@ public class FaissHNSW {
 
             int nBuffered = 0;
 
+//            for (long j = begin; j < end; j++) {
+//                final int neighborId = neighbors.readInt(indexInput, j);
+//                if (neighborId < 0) {
+//                    break;
+//                }
+//                final float distance = distanceComputer.compute(indexInput, neighborId);
+//                if (distance < nearest.distance) {
+//                    nearest.id = neighborId;
+//                    nearest.distance = distance;
+//                }
+//            }  // End for
+
             for (long j = begin; j < end; j++) {
-                int neighborId = neighbors.readInt(indexInput, j);
+                final int neighborId = neighbors.readInt(indexInput, j);
                 if (neighborId < 0) {
                     break;
                 }

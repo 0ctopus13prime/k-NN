@@ -9,12 +9,10 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
-    private int k = 0;  // Pointing the next last leaf element.
-    private int numValidElems = 0;
-    private final int maxSize;
+    private int k;
+    private int numValidElems;
+    private final int maxK;
     private final FaissHNSW.IdAndDistance[] heap;
-    private int[] invalidIndices;
-    private int invalidIndicesUpto;
 
     public DistanceMaxHeap(int maxSize) {
         final int heapSize;
@@ -30,27 +28,26 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
 
         // T is an unbounded type, so this unchecked cast works always.
         this.heap = new FaissHNSW.IdAndDistance[heapSize];
-        this.maxSize = maxSize;
+        this.maxK = heapSize - 1;
 
         for (int i = 1; i < heapSize; i++) {
             heap[i] = new FaissHNSW.IdAndDistance(0, Float.MAX_VALUE);
         }
 
-        invalidIndices = new int[2];
-        invalidIndicesUpto = 0;
+        this.k = 0;
+        this.numValidElems = 0;
     }
 
-    private FaissHNSW.IdAndDistance add(int id, float distance) {
+    private void add(int id, float distance) {
         // don't modify size until we know heap access didn't throw AIOOB.
-        int index = k + 1;
+        final int index = k + 1;
         heap[index].id = id;
         heap[index].distance = distance;
         k = index;
         upHeap(index);
-        return heap[1];
     }
 
-    private int findLastValidIndex() {
+    private int findMinimumIndex() {
         float minDistance = Float.MAX_VALUE;
         int minIdx = -1;
         for (int i = k; i > 0; --i) {
@@ -64,53 +61,28 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
     }
 
     public final void popMin(FaissHNSW.IdAndDistance minIad) {
-        final int minIdx = findLastValidIndex();
-        if (invalidIndicesUpto >= invalidIndices.length) {
-            int[] newInvalidIndices = new int[2 * invalidIndices.length];
-            System.arraycopy(invalidIndices, 0, newInvalidIndices, 0, invalidIndices.length);
-            invalidIndices = newInvalidIndices;
-        }
-        invalidIndices[invalidIndicesUpto++] = minIdx;
+        final int minIdx = findMinimumIndex();
         minIad.id = heap[minIdx].id;
         minIad.distance = heap[minIdx].distance;
-        // Mark it invalid.
         heap[minIdx].id = -1;
-        heap[minIdx].distance = Float.MIN_VALUE;
         --numValidElems;
     }
 
     public void insertWithOverflow(int id, float distance) {
-        if (numValidElems < maxSize) {
-            if (invalidIndicesUpto <= 0) {
-                add(id, distance);
-            } else {
-                // Find minimum invalid index.
-                int minIdxIdx = 0;
-                int minIdx = Integer.MAX_VALUE;
-                for (int i = 0; i < invalidIndicesUpto; ++i) {
-                    if (invalidIndices[i] < minIdx) {
-                        minIdx = invalidIndices[i];
-                        minIdxIdx = i;
-                    }
-                }
-                if (minIdxIdx != (invalidIndicesUpto - 1)) {
-                    for (int i = minIdxIdx + 1; i < invalidIndicesUpto; ++i) {
-                        invalidIndices[i - 1] = invalidIndices[i];
-                    }
-                }
-                --invalidIndicesUpto;
-
-                // System.out.println("minIdx=" + minIdx + ", invalidIndicesUpto=" + invalidIndicesUpto);
-
-                heap[minIdx].id = id;
-                heap[minIdx].distance = distance;
-                upHeap(minIdx);
+        if (k == maxK) {
+            if (distance >= heap[1].distance) {
+                return;
             }
-            ++numValidElems;
-        } else if (greaterThan(heap[1].distance, distance)) {
+            if (heap[1].id == -1) {
+                ++numValidElems;
+            }
+
             heap[1].id = id;
             heap[1].distance = distance;
             updateTop();
+        } else {
+            add(id, distance);
+            ++numValidElems;
         }
     }
 
@@ -148,7 +120,7 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
         return numValidElems <= 0;
     }
 
-    private boolean upHeap(int origPos) {
+    private void upHeap(int origPos) {
         int i = origPos;
         FaissHNSW.IdAndDistance node = heap[i]; // save bottom node
         int j = i >>> 1;
@@ -158,7 +130,6 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
             j = j >>> 1;
         }
         heap[i] = node; // install saved node
-        return i != origPos;
     }
 
     private void downHeap(int i) {

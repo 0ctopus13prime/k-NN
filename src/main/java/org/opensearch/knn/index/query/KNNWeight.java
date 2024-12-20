@@ -379,6 +379,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
     private KNNQueryResult[] kdySearch(KdyHNSW kdyHNSW, IndexInput indexInput, float[] queryVector, int k) throws IOException {
         SearchParametersHNSW searchParametersHNSW = new SearchParametersHNSW();
         searchParametersHNSW.k = k;
+        searchParametersHNSW.efSearch = 100;
 
         FlatL2DistanceComputer l2Computer =
             new FlatL2DistanceComputer(queryVector, kdyHNSW.indexFlatL2.codes, kdyHNSW.indexFlatL2.oneVectorByteSize);
