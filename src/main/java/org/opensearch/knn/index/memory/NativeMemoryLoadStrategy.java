@@ -19,8 +19,8 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
 import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
-import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.index.util.IndexUtil;
+import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
 import org.opensearch.knn.index.util.PartialLoadingContext;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.engine.KNNEngine;
@@ -89,15 +89,57 @@ public interface NativeMemoryLoadStrategy<T extends NativeMemoryAllocation, U ex
             final Directory directory = indexEntryContext.getDirectory();
             final int indexSizeKb = Math.toIntExact(directory.fileLength(vectorFileName) / 1024);
 
+            System.out.println("%%%%%%%%%%%%%%%%%%%%%%% " + indexSizeKb);
+
             // Try to open an index input then pass it down to native engine for loading an index.
             try (IndexInput readStream = directory.openInput(vectorFileName, IOContext.READONCE)) {
-                final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(readStream);
-                final IndexInputThreadLocalGetter indexInputThreadLocalGetter = new IndexInputThreadLocalGetter(directory, vectorFileName);
-                final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter);
-                final long indexAddress = JNIService.loadIndex(indexInputWithBuffer, partialLoadingContext, indexEntryContext.getParameters(), knnEngine);
+                final KdyHNSW kdyHNSW = new KdyHNSW(readStream);
+                System.out.println("%%%%%%%%%%%%%%%%%%%%%%% GOGOGOGOGO");
+                return kdyCreateIndexAllocation(indexEntryContext, knnEngine, kdyHNSW, indexSizeKb, vectorFileName);
 
-                return createIndexAllocation(indexEntryContext, knnEngine, indexAddress, indexSizeKb, vectorFileName);
+//                final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(readStream);
+//                final IndexInputThreadLocalGetter indexInputThreadLocalGetter = new IndexInputThreadLocalGetter(directory, vectorFileName);
+//                final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter);
+//                final long indexAddress = JNIService.loadIndex(
+//                    indexInputWithBuffer,
+//                    partialLoadingContext,
+//                    indexEntryContext.getParameters(),
+//                    knnEngine
+//                );
+//
+//                return createIndexAllocation(indexEntryContext, knnEngine, indexAddress, indexSizeKb, vectorFileName);
+            } catch (Exception e) {
+                e.printStackTrace();
+                throw e;
             }
+        }
+
+        private NativeMemoryAllocation.IndexAllocation kdyCreateIndexAllocation(
+            final NativeMemoryEntryContext.IndexEntryContext indexEntryContext,
+            final KNNEngine knnEngine,
+            final KdyHNSW kdyHNSW,
+            final int indexSizeKb,
+            final String vectorFileName
+        ) {
+            SharedIndexState sharedIndexState = null;
+
+            final IndexInputThreadLocalGetter indexInputThreadLocalGetter = new IndexInputThreadLocalGetter(
+                indexEntryContext.getDirectory(),
+                vectorFileName
+            );
+            final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter, kdyHNSW);
+
+            return new NativeMemoryAllocation.IndexAllocation(
+                executor,
+                0,
+                indexSizeKb,
+                knnEngine,
+                vectorFileName,
+                indexEntryContext.getOpenSearchIndexName(),
+                sharedIndexState,
+                IndexUtil.isBinaryIndex(knnEngine, indexEntryContext.getParameters()),
+                partialLoadingContext
+            );
         }
 
         private NativeMemoryAllocation.IndexAllocation createIndexAllocation(
@@ -115,9 +157,11 @@ public interface NativeMemoryLoadStrategy<T extends NativeMemoryAllocation, U ex
                 JNIService.setSharedIndexState(indexAddress, sharedIndexState.getSharedIndexStateAddress(), knnEngine);
             }
 
-            final IndexInputThreadLocalGetter indexInputThreadLocalGetter =
-                new IndexInputThreadLocalGetter(indexEntryContext.getDirectory(), vectorFileName);
-            final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter);
+            final IndexInputThreadLocalGetter indexInputThreadLocalGetter = new IndexInputThreadLocalGetter(
+                indexEntryContext.getDirectory(),
+                vectorFileName
+            );
+            final PartialLoadingContext partialLoadingContext = new PartialLoadingContext(indexInputThreadLocalGetter, null);
 
             return new NativeMemoryAllocation.IndexAllocation(
                 executor,

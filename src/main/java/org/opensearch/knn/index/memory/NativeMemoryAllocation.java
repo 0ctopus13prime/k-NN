@@ -19,7 +19,6 @@ import org.opensearch.common.concurrent.RefCountedReleasable;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
 import org.opensearch.knn.index.query.KNNWeight;
-import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
 import org.opensearch.knn.index.util.PartialLoadingContext;
 import org.opensearch.knn.jni.JNIService;
 import org.opensearch.knn.index.engine.KNNEngine;

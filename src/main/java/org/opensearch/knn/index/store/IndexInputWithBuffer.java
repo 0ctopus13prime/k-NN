@@ -18,7 +18,7 @@ import java.io.IOException;
  * Therefore, this class servers as a read layer in native engines to read the bytes it wants.
  */
 public class IndexInputWithBuffer implements Closeable {
-    private IndexInput indexInput;
+    public IndexInput indexInput;
     private long contentLength;
     // 64K buffer.
     private byte[] buffer = new byte[64 * 1024];
