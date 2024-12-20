@@ -35,6 +35,7 @@ import org.opensearch.knn.index.memory.NativeMemoryEntryContext;
 import org.opensearch.knn.index.memory.NativeMemoryLoadStrategy;
 import org.opensearch.knn.index.quantizationservice.QuantizationService;
 import org.opensearch.knn.index.query.ExactSearcher.ExactSearcherContext.ExactSearcherContextBuilder;
+import org.opensearch.knn.index.store.partial_loading.DistanceMaxHeap;
 import org.opensearch.knn.index.store.partial_loading.FaissHNSW;
 import org.opensearch.knn.index.store.partial_loading.FlatL2DistanceComputer;
 import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
@@ -377,13 +378,14 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 
         FlatL2DistanceComputer l2Computer =
             new FlatL2DistanceComputer(queryVector, kdyHNSW.indexFlatL2.codes, kdyHNSW.indexFlatL2.oneVectorByteSize);
-        PriorityQueue<FaissHNSW.IdAndDistance> resultsMaxHeap =
+        DistanceMaxHeap resultsMaxHeap =
             kdyHNSW.hnswFlatIndex.hnsw.hnswSearch(indexInput, searchParametersHNSW, l2Computer);
         KNNQueryResult[] results = new KNNQueryResult[resultsMaxHeap.size()];
-        int i = 0;
-        while (!resultsMaxHeap.isEmpty()) {
-            FaissHNSW.IdAndDistance element = resultsMaxHeap.poll();
-            results[i++] = new KNNQueryResult(element.id, element.distance);
+        int i = resultsMaxHeap.size() - 1;
+        while (i >= 0) {
+            FaissHNSW.IdAndDistance element = resultsMaxHeap.top();
+            results[i--] = new KNNQueryResult(element.id, element.distance);
+            resultsMaxHeap.pop();
         }
         return results;
     }
