@@ -8,6 +8,7 @@ package org.opensearch.knn.index.store.partial_loading;
 import lombok.AllArgsConstructor;
 import lombok.ToString;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.SparseFixedBitSet;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -45,11 +46,15 @@ public class FaissHNSW {
         IdAndDistance nearest = new IdAndDistance(entryPoint, distanceComputer.compute(indexInput, entryPoint));
 
         // System.out.println(" ++++++++++++++++++= hnswSearch: entryPoint=" + entryPoint + ", dis=" + nearest.distance);
+        long __s = System.nanoTime();
         for (int level = maxLevel; level >= 1; --level) {
             // System.out.println(" +++++++++++++ next greedyUpdateNearest, level=" + level);
             greedyUpdateNearest(indexInput, distanceComputer, level, nearest);
         }
+        long __e = System.nanoTime();
+        long __tg = __e - __s;
 
+        __s = System.nanoTime();
         final int ef = Math.max(parametersHNSW.efSearch, parametersHNSW.k);
         // System.out.println(" +++++++++++++++++ hnswSearch, ef="
         //     + ef + ", k=" + parametersHNSW.k + ", efSearch=" + parametersHNSW.efSearch
@@ -59,6 +64,9 @@ public class FaissHNSW {
         DistanceMaxHeap candidates = new DistanceMaxHeap(ef);
         candidates.insertWithOverflow(nearest.id, nearest.distance);
         searchFromCandidates(indexInput, distanceComputer, resultMaxHeap, candidates, 0);
+        __e = System.nanoTime();
+        long __tsfc = __e - __s;
+        System.out.println("Time for greedy: " + (__tg / 1000) + ", search_from_candidate: " + (__tsfc / 1000));
         return resultMaxHeap;
     }
 
@@ -74,13 +82,18 @@ public class FaissHNSW {
     }
 
     private void searchFromCandidates(
-        IndexInput indexInput, DistanceComputer distanceComputer, DistanceMaxHeap resultMaxHeap, DistanceMaxHeap candidates, int level
+        IndexInput indexInput,
+        DistanceComputer distanceComputer,
+        DistanceMaxHeap resultMaxHeap,
+        DistanceMaxHeap candidates,
+        int level
     ) throws IOException {
-        final Set<Integer> idSet = new HashSet<>(128, 0.65f);
-        final List<Integer> neighborIds = new ArrayList<>(128);
+        // final Set<Integer> idSet = new HashSet<>(128, 0.65f);
+        final SparseFixedBitSet bitSet = new SparseFixedBitSet(1000100);
         for (final IdAndDistance candidate : candidates) {
             resultMaxHeap.insertWithOverflow(candidate.id, candidate.distance);
-            idSet.add(candidate.id);
+            bitSet.set(candidate.id);
+            // idSet.add(candidate.id);
         }
 
         // System.out.println(" ++++++++++++++++++ searchFromCandidates, threshold="
@@ -105,49 +118,79 @@ public class FaissHNSW {
             //     + ", currMax.id=" + (resultMaxHeap.isEmpty() ? -1: resultMaxHeap.top().id)
             //     + ", len(candidate)=" + candidates.size());
 
-            neighborIds.clear();
+            int numBuffered = 0;
+
             for (long offset = begin ; offset < end ; offset++) {
                 final int neighborId = neighbors.readInt(indexInput, offset);
                 if (neighborId >= 0) {
-                    neighborIds.add(neighborId);
+                    if (!bitSet.getAndSet(neighborId)) {
+                        neighbor4Ids[numBuffered++] = neighborId;
+
+                        if (numBuffered == 4) {
+                            distanceComputer.computeBatch4(indexInput, neighbor4Ids, distances4);
+
+                            addToMaxHeaps(neighbor4Ids[0], distances4[0], resultMaxHeap, candidates);
+                            addToMaxHeaps(neighbor4Ids[1], distances4[1], resultMaxHeap, candidates);
+                            addToMaxHeaps(neighbor4Ids[2], distances4[2], resultMaxHeap, candidates);
+                            addToMaxHeaps(neighbor4Ids[3], distances4[3], resultMaxHeap, candidates);
+
+                            numBuffered = 0;
+                        }  // End if
+                    }
                     continue;
                 }
                 break;
             }
 
-            // System.out.println(" ++++++++++++++++++++ len(neighborIds)=" + neighborIds.size());
-
-            int numBuffered = 0;
-
-            for (int neighborId : neighborIds) {
-                if (!idSet.contains(neighborId)) {
-                    idSet.add(neighborId);
-                    neighbor4Ids[numBuffered++] = neighborId;
-
-                    if (numBuffered == 4) {
-                        distanceComputer.computeBatch4(indexInput, neighbor4Ids, distances4);
-
-                        addToMaxHeaps(neighbor4Ids[0], distances4[0], resultMaxHeap, candidates);
-                        addToMaxHeaps(neighbor4Ids[1], distances4[1], resultMaxHeap, candidates);
-                        addToMaxHeaps(neighbor4Ids[2], distances4[2], resultMaxHeap, candidates);
-                        addToMaxHeaps(neighbor4Ids[3], distances4[3], resultMaxHeap, candidates);
-
-                        numBuffered = 0;
-                    }  // End if
-                }
-            }  // End for
-
             for (int i = 0; i < numBuffered; ++i) {
                 final float distance = distanceComputer.compute(indexInput, neighbor4Ids[i]);
+
                 addToMaxHeaps(neighbor4Ids[i], distance, resultMaxHeap, candidates);
             }
+
+            // System.out.println(" ++++++++++++++++++++ len(neighborIds)=" + neighborIds.size());
+
+//            for (int neighborId : neighborIds) {
+//                if (!bitSet.getAndSet(neighborId)) {
+//                    neighbor4Ids[numBuffered++] = neighborId;
+//
+//                    if (numBuffered == 4) {
+//                        distanceComputer.computeBatch4(indexInput, neighbor4Ids, distances4);
+//
+//                        addToMaxHeaps(neighbor4Ids[0], distances4[0], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[1], distances4[1], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[2], distances4[2], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[3], distances4[3], resultMaxHeap, candidates);
+//
+//                        numBuffered = 0;
+//                    }  // End if
+//                }
+//                if (!idSet.contains(neighborId)) {
+//                    idSet.add(neighborId);
+//                    neighbor4Ids[numBuffered++] = neighborId;
+//
+//                    if (numBuffered == 4) {
+//                        distanceComputer.computeBatch4(indexInput, neighbor4Ids, distances4);
+//
+//                        addToMaxHeaps(neighbor4Ids[0], distances4[0], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[1], distances4[1], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[2], distances4[2], resultMaxHeap, candidates);
+//                        addToMaxHeaps(neighbor4Ids[3], distances4[3], resultMaxHeap, candidates);
+//
+//                        numBuffered = 0;
+//                    }  // End if
+//                }
+//            }  // End for
         }  // End while
     }
 
-    private void greedyUpdateNearest(IndexInput indexInput, DistanceComputer distanceComputer, int level, IdAndDistance nearest)
-        throws IOException {
+    private void greedyUpdateNearest(IndexInput indexInput,
+        DistanceComputer distanceComputer,
+        int level,
+        IdAndDistance nearest) throws IOException {
         int[] bufferedIds = new int[4];
         float[] distances = new float[4];
+        final Set<Integer> idSet = new HashSet<>(128, 0.65f);
 
         while (true) {
             final int prevNearest = nearest.id;
@@ -180,6 +223,10 @@ public class FaissHNSW {
                 if (neighborId < 0) {
                     break;
                 }
+                if (idSet.contains(neighborId)) {
+                    continue;
+                }
+                idSet.add(neighborId);
                 bufferedIds[nBuffered++] = neighborId;
 
                 if (nBuffered == 4) {
@@ -220,3 +267,10 @@ public class FaissHNSW {
         }  // End while
     }
 }
+
+/*
+  TODO : Read bulk neighbor list.
+  Scoring function ... -> JNI?
+  where does extra 1-2 ms come from..???
+   e.g. graph searching -> 2-3ms, result -> 5ms
+ */

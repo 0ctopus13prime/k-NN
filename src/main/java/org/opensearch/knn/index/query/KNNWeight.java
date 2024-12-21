@@ -113,12 +113,18 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
     }
 
     @Override public Scorer scorer(LeafReaderContext context) throws IOException {
-        final Map<Integer, Float> docIdToScoreMap = searchLeaf(context, knnQuery.getK());
-        if (docIdToScoreMap.isEmpty()) {
-            return KNNScorer.emptyScorer(this);
+        long __s = System.nanoTime();
+        try {
+            final Map<Integer, Float> docIdToScoreMap = searchLeaf(context, knnQuery.getK());
+            if (docIdToScoreMap.isEmpty()) {
+                return KNNScorer.emptyScorer(this);
+            }
+            final int maxDoc = Collections.max(docIdToScoreMap.keySet()) + 1;
+            return new KNNScorer(this, ResultUtil.resultMapToDocIds(docIdToScoreMap, maxDoc), docIdToScoreMap, boost);
+        } finally {
+            long __e = System.nanoTime();
+            System.out.println("KNNWeight::scorer took " + (__e - __s) / 1000);
         }
-        final int maxDoc = Collections.max(docIdToScoreMap.keySet()) + 1;
-        return new KNNScorer(this, ResultUtil.resultMapToDocIds(docIdToScoreMap, maxDoc), docIdToScoreMap, boost);
     }
 
     /**
@@ -319,14 +325,14 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
                         parentIds
                     );
                 } else {
-                    final KdyStats kdyStats = KdyStats.TL.get();
-                    kdyStats.init();
+//                    final KdyStats kdyStats = KdyStats.TL.get();
+//                    kdyStats.init();
                     results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
                         indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
                         knnQuery.getQueryVector(),
                         k
                     );
-                    kdyStats.print();
+//                    kdyStats.print();
 
                     //                    results = JNIService.queryIndex(
                     //                        indexAllocation.getMemoryAddress(),
