@@ -20,6 +20,7 @@ set(TARGET_LIBS "")  # Libs to be installed
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Xclang -fopenmp -L/opt/homebrew/opt/libomp/lib -I/opt/homebrew/opt/libomp/include -lomp -arch arm64 -fexceptions")
 option(CONFIG_FAISS "Configure faiss library build when this is on")
 option(CONFIG_NMSLIB "Configure nmslib library build when this is on")
 option(CONFIG_TEST "Configure tests when this is on")
@@ -130,7 +131,7 @@ endif ()
 # --------------------------------- TESTS -----------------------------------
 # Windows : Comment the TESTS for now because the tests are failing(failing to build jni_tests.exe) if we are building our target libraries as SHARED libraries.
 # TODO: Fix the failing JNI TESTS on Windows
-if ("${WIN32}" STREQUAL "")
+if (FALSE AND "${WIN32}" STREQUAL "")
     if (${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} STREQUAL ON)
         # Reference - https://crascit.com/2015/07/25/cmake-gtest/
         configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)

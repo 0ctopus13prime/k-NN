@@ -106,9 +106,9 @@ public class KdyHNSW {
         System.out.println("hnsw.levels.baseOffset = " + hnsw.levels.baseOffset);
         System.out.println("hnsw.levels.regionSize = " + hnsw.levels.regionSize);
 
-        hnsw.offsets.loadBlock(readStream);
-        System.out.println("hnsw.offsets.baseOffset = " + hnsw.offsets.baseOffset);
-        System.out.println("hnsw.offsets.regionSize = " + hnsw.offsets.regionSize);
+        hnsw.offsets = new long[(int) readStream.readLong()];
+        readStream.readLongs(hnsw.offsets, 0, hnsw.offsets.length);
+        System.out.println("len(hnsw.offsets)= " + hnsw.offsets.length);
 
         hnsw.neighbors.loadBlock(readStream);
         System.out.println("hnsw.neighbors.baseOffset = " + hnsw.neighbors.baseOffset);

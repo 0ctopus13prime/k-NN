@@ -18,36 +18,32 @@ public class IndexInputThreadLocalGetter implements Closeable {
     private Directory directory;
     @Getter
     private String vectorFileName;
-    private ThreadLocal<IndexInputWithBuffer> indexInputThreadLocal;
+    private IndexInputWithBuffer globalIndexInput;
+
+    private synchronized IndexInputWithBuffer getII() {
+        if (globalIndexInput != null) {
+            return globalIndexInput;
+        }
+
+        try {
+            IndexInput indexInput = directory.openInput(vectorFileName, IOContext.READ);
+            return globalIndexInput = new IndexInputWithBuffer(indexInput);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     public IndexInputThreadLocalGetter(Directory directory, String vectorFileName) {
         this.directory = directory;
         this.vectorFileName = vectorFileName;
-        indexInputThreadLocal = new ThreadLocal<>();
     }
 
     public void close() {
-        final IndexInputWithBuffer indexInputWithBuffer = indexInputThreadLocal.get();
-        if (indexInputWithBuffer != null) {
-            try {
-                indexInputWithBuffer.close();
-            } catch (IOException e) {
-                // Ignore
-            }
-            indexInputThreadLocal.remove();
-        }
-        indexInputThreadLocal = null;
+        // TODO
     }
 
     public IndexInputWithBuffer getIndexInputWithBuffer() throws IOException {
-        IndexInputWithBuffer indexInputWithBuffer = indexInputThreadLocal.get();
-        if (indexInputWithBuffer != null) {
-            return indexInputWithBuffer;
-        }
-
-        final IndexInput indexInput = directory.openInput(vectorFileName, IOContext.READ);
-        indexInputWithBuffer = new IndexInputWithBuffer(indexInput);
-        indexInputThreadLocal.set(indexInputWithBuffer);
-        return indexInputWithBuffer;
+        IndexInputWithBuffer indexInput = getII();
+        return new IndexInputWithBuffer(indexInput.indexInput.clone());
     }
 }

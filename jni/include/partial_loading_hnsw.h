@@ -340,7 +340,7 @@ struct OpenSearchHNSW {
 
   /// offsets[i] is the offset in the neighbors array where vector i is stored
   /// size ntotal + 1
-  Storage<size_t> offsets;
+  std::vector<size_t> offsets;
 
   /// neighbors[offsets[i]:offsets[i+1]] is the list of neighbors of vector i
   /// for all levels. this is where all storage goes.

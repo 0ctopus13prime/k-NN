@@ -493,15 +493,52 @@ int _count = 0;
 template <typename HNSWType>
 void opensearch_read_HNSW(HNSWType* hnsw, knn_jni::stream::FaissOpenSearchIOReader *f) {
   READVECTOR(hnsw->assign_probas);
+#ifdef PARTIAL_LOADING_COUT
+  std::cout << "[KDY] len(hnsw->assign_probas) == "
+           << hnsw->assign_probas.size()
+           << std::endl;
+  for (int i = 0 ; i < hnsw->assign_probas.size() ; ++i) {
+    double d = hnsw->assign_probas[i];
+    auto ptr = (uint8_t*) (hnsw->assign_probas.data() + i);
+    std::cout << "[KDY] assign_proba="
+             << d
+             << ", b[0]=" << (uint32_t) ptr[0]
+             << ", b[1]=" << (uint32_t) ptr[1]
+             << ", b[2]=" << (uint32_t) ptr[2]
+             << ", b[3]=" << (uint32_t) ptr[3]
+             << ", b[4]=" << (uint32_t) ptr[4]
+             << ", b[5]=" << (uint32_t) ptr[5]
+             << ", b[6]=" << (uint32_t) ptr[6]
+             << ", b[7]=" << (uint32_t) ptr[7]
+             << std::endl;
+  }
+#endif
   READVECTOR(hnsw->cum_nneighbor_per_level);
+#ifdef PARTIAL_LOADING_COUT
+  std::cout << "[KDY] len(hnsw->cum_nneighbor_per_level) == "
+            << hnsw->cum_nneighbor_per_level.size()
+            << ", offset=" << f->mediator->getOffset()
+            << std::endl;
+  for (int i : hnsw->cum_nneighbor_per_level) {
+    std::cout << "[KDY] i=" << i << std::endl;
+  }
+#endif
   OS_READVECTOR(hnsw->levels);
-  OS_READVECTOR(hnsw->offsets);
+  READVECTOR(hnsw->offsets);
   OS_READVECTOR(hnsw->neighbors);
 
   READ1(hnsw->entry_point);
   READ1(hnsw->max_level);
   READ1(hnsw->efConstruction);
   READ1(hnsw->efSearch);
+#ifdef PARTIAL_LOADING_COUT
+  std::cout << "[KDY] entry_point=" << hnsw->entry_point
+            << ", max_level=" << hnsw->max_level
+            << ", efConstruction=" << hnsw->efConstruction
+            << ", efSearch=" << hnsw->efSearch
+            << ", offset=" << f->mediator->getOffset()
+            << std::endl;
+#endif
 
   // // deprecated field
   // READ1(hnsw->upper_beam);
@@ -510,16 +547,17 @@ void opensearch_read_HNSW(HNSWType* hnsw, knn_jni::stream::FaissOpenSearchIORead
 
 #if PARTIAL_LOADING_STRATEGY == PARTIAL_LOADING_INDEX_INPUT_WITH_CACHE_STRATEGY
 const uint64_t partial_loading_index_input_with_cache_max_bytes = [](){
-  const char* env_var_name = "PARTIAL_LOADING_IIWC_MAX_BYTES"; // Name of the environment variable
-  const char* env_value = std::getenv(env_var_name);
+  return 1024ULL * 1024ULL * 1024ULL;
+  // const char* env_var_name = "PARTIAL_LOADING_IIWC_MAX_BYTES"; // Name of the environment variable
+  // const char* env_value = std::getenv(env_var_name);
 
-  std::cout << "[KDY] PARTIAL_LOADING_IIWC_MAX_BYTES=[" << env_value << ']' << std::endl;
+  // std::cout << "[KDY] PARTIAL_LOADING_IIWC_MAX_BYTES=[" << env_value << ']' << std::endl;
 
-  if (env_value) {
-    return strtoull(env_value, nullptr, 10);
-  }
+  // if (env_value) {
+  //   return strtoull(env_value, nullptr, 10);
+  // }
 
-  throw std::runtime_error("PARTIAL_LOADING_IIWC_MAX_BYTES was not provided.");
+  // throw std::runtime_error("PARTIAL_LOADING_IIWC_MAX_BYTES was not provided.");
 }();
 auto mmu = std::make_shared<
     knn_jni::partial_loading::MemoryManagementUnitV1>(partial_loading_index_input_with_cache_max_bytes);
@@ -596,7 +634,7 @@ faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
     std::cout << "111111111" << std::endl;
 
     idxhnsw->hnsw.levels.setMinimumItemsToLoad(1);
-    idxhnsw->hnsw.offsets.setMinimumItemsToLoad(1);
+    // idxhnsw->hnsw.offsets.setMinimumItemsToLoad(1);
     idxhnsw->hnsw.neighbors.setMinimumItemsToLoad(1);
 
 
@@ -671,7 +709,7 @@ faiss::Index *read_index_opensearch(knn_jni::stream::FaissOpenSearchIOReader *f,
 
 jlong knn_jni::faiss_wrapper::LoadIndexWithStream(knn_jni::stream::FaissOpenSearchIOReader* io_reader,
                                                   knn_jni::partial_loading::PartialLoadingContext* partial_loading_context) {
-//  std::cout << "******************* jlong knn_jni::faiss_wrapper::LoadIndexWithStream" << std::endl;
+  std::cout << "******************* jlong knn_jni::faiss_wrapper::LoadIndexWithStream" << std::endl;
 
 //    faiss::Index* indexReader =
 //      faiss::read_index(ioReader,

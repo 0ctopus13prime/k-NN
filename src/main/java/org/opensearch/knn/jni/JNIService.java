@@ -16,7 +16,6 @@ import org.opensearch.common.Nullable;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.query.KNNQueryResult;
-import org.opensearch.knn.index.store.IndexInputThreadLocalGetter;
 import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 import org.opensearch.knn.index.util.IndexUtil;
@@ -196,10 +195,12 @@ public class JNIService {
      * @param knnEngine             Engine to load index
      * @return Pointer to location in memory the index resides in
      */
-    public static long loadIndex(IndexInputWithBuffer readStream,
-                                 PartialLoadingContext partialLoadingContext,
-                                 Map<String, Object> parameters,
-                                 KNNEngine knnEngine) {
+    public static long loadIndex(
+        IndexInputWithBuffer readStream,
+        PartialLoadingContext partialLoadingContext,
+        Map<String, Object> parameters,
+        KNNEngine knnEngine
+    ) {
         if (KNNEngine.FAISS == knnEngine) {
             if (IndexUtil.isBinaryIndex(knnEngine, parameters)) {
                 return FaissService.loadBinaryIndexWithStream(readStream);

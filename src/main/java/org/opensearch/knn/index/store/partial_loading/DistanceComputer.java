@@ -11,6 +11,4 @@ import java.io.IOException;
 
 public abstract class DistanceComputer {
     public abstract float compute(IndexInput indexInput, long index) throws IOException;
-
-    public abstract void computeBatch4(IndexInput indexInput, int[] ids, float[] distances) throws IOException;
 }

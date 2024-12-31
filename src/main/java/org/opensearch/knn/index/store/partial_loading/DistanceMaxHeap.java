@@ -120,6 +120,10 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
         return numValidElems <= 0;
     }
 
+    public boolean isFull() {
+        return k == maxK;
+    }
+
     private void upHeap(int origPos) {
         int i = origPos;
         FaissHNSW.IdAndDistance node = heap[i]; // save bottom node

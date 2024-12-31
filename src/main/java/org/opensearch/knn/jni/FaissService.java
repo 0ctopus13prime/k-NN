@@ -11,10 +11,6 @@
 
 package org.opensearch.knn.jni;
 
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.MMapDirectory;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.query.KNNQueryResult;
@@ -23,10 +19,8 @@ import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 import org.opensearch.knn.index.util.PartialLoadingContext;
 
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.util.HashMap;
 import java.util.Map;
 
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX2Disabled;
@@ -469,22 +463,22 @@ class FaissService {
     );
 
     // TMP
-    public static void main(String ... args) throws IOException {
-//        final String dirPath = "/Users/kdooyong/workspace/partial-loading-baseline/build/testclusters/integTest-0/data"
-//            + "/nodes/0/indices/DmZ5tGJCT8W7c9dGu8eKZA/0/index";
-//        final String indexFile = "_0_165_my_vector.faissc";
-//        final Map<String, Object> parameters = new HashMap<>();
-//        parameters.put("data_type", "float");
-//        parameters.put("spaceType", "l2");
-//        Directory directory = new MMapDirectory(Paths.get(dirPath));
-//        try (IndexInput in = directory.openInput(indexFile, IOContext.READONCE)) {
-//            IndexInputWithBuffer buffer = new IndexInputWithBuffer(in);
-//            JNIService.loadIndex(buffer, parameters, KNNEngine.FAISS);
-//        }
-//
-//        System.out.println("###############");
-//        System.out.println("## Good bye");
-//        System.out.println("###############");
+    public static void main(String... args) throws IOException {
+        // final String dirPath = "/Users/kdooyong/workspace/partial-loading-baseline/build/testclusters/integTest-0/data"
+        // + "/nodes/0/indices/DmZ5tGJCT8W7c9dGu8eKZA/0/index";
+        // final String indexFile = "_0_165_my_vector.faissc";
+        // final Map<String, Object> parameters = new HashMap<>();
+        // parameters.put("data_type", "float");
+        // parameters.put("spaceType", "l2");
+        // Directory directory = new MMapDirectory(Paths.get(dirPath));
+        // try (IndexInput in = directory.openInput(indexFile, IOContext.READONCE)) {
+        // IndexInputWithBuffer buffer = new IndexInputWithBuffer(in);
+        // JNIService.loadIndex(buffer, parameters, KNNEngine.FAISS);
+        // }
+        //
+        // System.out.println("###############");
+        // System.out.println("## Good bye");
+        // System.out.println("###############");
     }
     // TMP
 }

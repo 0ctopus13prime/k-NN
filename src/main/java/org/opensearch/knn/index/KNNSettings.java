@@ -14,7 +14,6 @@ import org.opensearch.action.admin.cluster.settings.ClusterUpdateSettingsRespons
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.Booleans;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -561,12 +560,12 @@ public class KNNSettings {
     }
 
     public static boolean isFaissAVX512Disabled() {
-//        return Booleans.parseBoolean(
-//            Objects.requireNonNullElse(
-//                KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
-//                KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
-//            ).toString()
-//        );
+        // return Booleans.parseBoolean(
+        // Objects.requireNonNullElse(
+        // KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
+        // KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
+        // ).toString()
+        // );
         return true;
     }
 

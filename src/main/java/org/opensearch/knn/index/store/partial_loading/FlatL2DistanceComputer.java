@@ -15,7 +15,8 @@ public class FlatL2DistanceComputer extends DistanceComputer {
     private float[] floatBuffer1;
     private Storage codes;
     private long oneVectorByteSize;
-//    private KdyStats kdyStats;
+    private long lastIndex = -1;
+    private float lastScore;
 
     public FlatL2DistanceComputer(float[] queryVector, Storage codes, long oneVectorByteSize) {
         this.queryVector = queryVector;
@@ -23,32 +24,19 @@ public class FlatL2DistanceComputer extends DistanceComputer {
         this.floatBuffer1 = new float[dimension];
         this.codes = codes;
         this.oneVectorByteSize = oneVectorByteSize;
-//        this.kdyStats = KdyStats.TL.get();
     }
 
     @Override public float compute(IndexInput indexInput, long index) throws IOException {
-        populateFloats(indexInput, index, floatBuffer1);
-//        kdyStats.numVectorsVisit += 1;
-//        kdyStats.numBytesRead += oneVectorByteSize;
-        return LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
+        if (index != lastIndex) {
+            populateFloats(indexInput, index, floatBuffer1);
+            lastIndex = index;
+            return lastScore = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
+        }
+        return lastScore;
     }
 
     private void populateFloats(IndexInput indexInput, long index, float[] floats) throws IOException {
-        // System.out.println("populateFloats, index=" + index + ", oneVectorByteSize=" + oneVectorByteSize);
         indexInput.seek(codes.baseOffset + index * oneVectorByteSize);
         indexInput.readFloats(floats, 0, floats.length);
-    }
-
-    @Override public void computeBatch4(IndexInput indexInput, int[] ids, float[] distances) throws IOException {
-        populateFloats(indexInput, ids[0], floatBuffer1);
-        distances[0] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
-        populateFloats(indexInput, ids[1], floatBuffer1);
-        distances[1] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
-        populateFloats(indexInput, ids[2], floatBuffer1);
-        distances[2] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
-        populateFloats(indexInput, ids[3], floatBuffer1);
-        distances[3] = LuceneVectorUtilSupportProxy.squareDistance(queryVector, floatBuffer1);
-//        kdyStats.numVectorsVisit += 4;
-//        kdyStats.numBytesRead += 4 * oneVectorByteSize;
     }
 }

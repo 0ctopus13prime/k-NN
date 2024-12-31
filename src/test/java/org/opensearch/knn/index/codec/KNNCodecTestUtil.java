@@ -208,7 +208,9 @@ public class KNNCodecTestUtil {
         try (final IndexInput indexInput = state.directory.openInput(fileName, IOContext.LOAD)) {
             final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(indexInput);
             long indexPtr = JNIService.loadIndex(
-                indexInputWithBuffer, partialLoadingContext, Maps.newHashMap(ImmutableMap.of(SPACE_TYPE, spaceType.getValue())),
+                indexInputWithBuffer,
+                partialLoadingContext,
+                Maps.newHashMap(ImmutableMap.of(SPACE_TYPE, spaceType.getValue())),
                 knnEngine
             );
             int k = 2;
@@ -232,7 +234,9 @@ public class KNNCodecTestUtil {
         try (final IndexInput indexInput = state.directory.openInput(fileName, IOContext.LOAD)) {
             final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(indexInput);
             long indexPtr = JNIService.loadIndex(
-                indexInputWithBuffer, partialLoadingContext, Maps.newHashMap(
+                indexInputWithBuffer,
+                partialLoadingContext,
+                Maps.newHashMap(
                     ImmutableMap.of(
                         SPACE_TYPE,
                         spaceType.getValue(),

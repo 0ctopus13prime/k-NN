@@ -106,8 +106,8 @@ struct MemoryManagementUnitV1 {
   explicit MemoryManagementUnitV1(const uint64_t max_memory_bytes)
       : max_memory_bytes_(max_memory_bytes),
         memory_used_bytes_(),
-        page_list_head_(nullptr, nullptr, 0),
-        sheol_list_head_(nullptr, nullptr, 0),
+        page_list_head_(),
+        sheol_list_head_(),
         gc_thread_semaphore_() {
   }
 

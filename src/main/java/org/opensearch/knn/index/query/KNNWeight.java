@@ -38,6 +38,7 @@ import org.opensearch.knn.index.query.ExactSearcher.ExactSearcherContext.ExactSe
 import org.opensearch.knn.index.store.partial_loading.DistanceMaxHeap;
 import org.opensearch.knn.index.store.partial_loading.FaissHNSW;
 import org.opensearch.knn.index.store.partial_loading.FlatL2DistanceComputer;
+import org.opensearch.knn.index.store.partial_loading.KdyControl;
 import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
 import org.opensearch.knn.index.store.partial_loading.KdyStats;
 import org.opensearch.knn.index.store.partial_loading.SearchParametersHNSW;
@@ -113,7 +114,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
     }
 
     @Override public Scorer scorer(LeafReaderContext context) throws IOException {
-        long __s = System.nanoTime();
+        // long __s = System.nanoTime();
         try {
             final Map<Integer, Float> docIdToScoreMap = searchLeaf(context, knnQuery.getK());
             if (docIdToScoreMap.isEmpty()) {
@@ -122,8 +123,8 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
             final int maxDoc = Collections.max(docIdToScoreMap.keySet()) + 1;
             return new KNNScorer(this, ResultUtil.resultMapToDocIds(docIdToScoreMap, maxDoc), docIdToScoreMap, boost);
         } finally {
-            long __e = System.nanoTime();
-            System.out.println("KNNWeight::scorer took " + (__e - __s) / 1000);
+            // long __e = System.nanoTime();
+            // System.out.println("KNNWeight::scorer took " + (__e - __s) / 1000);
         }
     }
 
@@ -327,24 +328,29 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
                 } else {
 //                    final KdyStats kdyStats = KdyStats.TL.get();
 //                    kdyStats.init();
-                    results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
-                        indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
-                        knnQuery.getQueryVector(),
-                        k
-                    );
-//                    kdyStats.print();
 
-                    //                    results = JNIService.queryIndex(
-                    //                        indexAllocation.getMemoryAddress(),
-                    //                        indexAllocation.getPartialLoadingContext(),
-                    //                        knnQuery.getQueryVector(),
-                    //                        k,
-                    //                        knnQuery.getMethodParameters(),
-                    //                        knnEngine,
-                    //                        filterIds,
-                    //                        filterType.getValue(),
-                    //                        parentIds
-                    //                    );
+                    // Java based partial loading
+                    if (KdyControl.DO_JAVA) {
+                         results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
+                             indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
+                             knnQuery.getQueryVector(),
+                             k
+                         );
+                    } else {
+                        // C++ based partial loading
+                        results = JNIService.queryIndex(
+                            indexAllocation.getMemoryAddress(),
+                            indexAllocation.getPartialLoadingContext(),
+                            knnQuery.getQueryVector(),
+                            k,
+                            knnQuery.getMethodParameters(),
+                            knnEngine,
+                            filterIds,
+                            filterType.getValue(),
+                            parentIds
+                        );
+                    }
+//                    kdyStats.print();
                 }
             } else {
                 results = JNIService.radiusQueryIndex(indexAllocation.getMemoryAddress(),
