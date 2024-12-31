@@ -43,7 +43,7 @@ public class FaissHNSW {
     }
 
     public DistanceMaxHeap hnswSearch(
-        IndexInput indexInput, SearchParametersHNSW parametersHNSW, DistanceComputer distanceComputer
+        IndexInput indexInput, SearchParametersHNSW parametersHNSW, DistanceComputer distanceComputer, float maxEligibleDistance
     ) throws IOException {
         IdAndDistance nearest = new IdAndDistance(entryPoint, distanceComputer.compute(indexInput, entryPoint));
         final SparseFixedBitSet bitSet = new SparseFixedBitSet(1000100);
@@ -54,7 +54,7 @@ public class FaissHNSW {
         DistanceMaxHeap resultMaxHeap = new DistanceMaxHeap(parametersHNSW.k);
         DistanceMaxHeap candidates = new DistanceMaxHeap(ef);
         candidates.insertWithOverflow(nearest.id, nearest.distance);
-        searchFromCandidatesFaiss(indexInput, distanceComputer, resultMaxHeap, candidates, bitSet);
+        searchFromCandidatesFaiss(indexInput, distanceComputer, resultMaxHeap, candidates, bitSet, maxEligibleDistance);
         return resultMaxHeap;
     }
 
@@ -78,7 +78,8 @@ public class FaissHNSW {
         DistanceComputer distanceComputer,
         DistanceMaxHeap resultMaxHeap,
         DistanceMaxHeap candidates,
-        SparseFixedBitSet visited
+        SparseFixedBitSet visited,
+        float maxEligibleDistance
     ) throws IOException {
         if (candidates.top().distance < getMaxAcceptableDistance(resultMaxHeap)) {
             resultMaxHeap.insertWithOverflow(candidates.top().id, candidates.top().distance);
@@ -88,6 +89,11 @@ public class FaissHNSW {
         IdAndDistance minIad = new IdAndDistance(0, 0);
         while (!candidates.isEmpty()) {
             candidates.popMin(minIad);
+
+            if (minIad.distance > maxEligibleDistance) {
+                break;
+            }
+
             final long o = offsets[minIad.id];
             final long begin = o + cumNumberNeighborPerLevel[0];
             final long end = o + cumNumberNeighborPerLevel[1];
@@ -101,7 +107,7 @@ public class FaissHNSW {
                     continue;
                 }
                 final float dist = distanceComputer.compute(indexInput, neighborId);
-                if (dist < getMaxAcceptableDistance(resultMaxHeap)) {
+                if (dist <= maxEligibleDistance && dist < getMaxAcceptableDistance(resultMaxHeap)) {
                     resultMaxHeap.insertWithOverflow(neighborId, dist);
                 }
                 candidates.insertWithOverflow(neighborId, dist);

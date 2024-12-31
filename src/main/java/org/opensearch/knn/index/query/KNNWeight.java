@@ -40,6 +40,7 @@ import org.opensearch.knn.index.store.partial_loading.FaissHNSW;
 import org.opensearch.knn.index.store.partial_loading.FlatL2DistanceComputer;
 import org.opensearch.knn.index.store.partial_loading.KdyControl;
 import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
+import org.opensearch.knn.index.store.partial_loading.KdyMaxScoreTracker;
 import org.opensearch.knn.index.store.partial_loading.KdyStats;
 import org.opensearch.knn.index.store.partial_loading.SearchParametersHNSW;
 import org.opensearch.knn.indices.ModelDao;
@@ -79,6 +80,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 
     private static ExactSearcher DEFAULT_EXACT_SEARCHER;
     private final QuantizationService quantizationService;
+    private KdyMaxScoreTracker maxScoreTracker;
 
     public KNNWeight(KNNQuery query, float boost) {
         super(query);
@@ -88,6 +90,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         this.filterWeight = null;
         this.exactSearcher = DEFAULT_EXACT_SEARCHER;
         this.quantizationService = QuantizationService.getInstance();
+        this.maxScoreTracker = new KdyMaxScoreTracker(knnQuery.getK());
     }
 
     public KNNWeight(KNNQuery query, float boost, Weight filterWeight) {
@@ -98,6 +101,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         this.filterWeight = filterWeight;
         this.exactSearcher = DEFAULT_EXACT_SEARCHER;
         this.quantizationService = QuantizationService.getInstance();
+        this.maxScoreTracker = new KdyMaxScoreTracker(knnQuery.getK());
     }
 
     public static void initialize(ModelDao modelDao) {
@@ -331,11 +335,20 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 
                     // Java based partial loading
                     if (KdyControl.DO_JAVA) {
+                         final float minEligibleMaxDistance = maxScoreTracker.distanceMaxHeap.size() < k
+                                                              ? Float.MAX_VALUE : maxScoreTracker.distanceMaxHeap.top().distance;
+                         // System.out.println("********* minEligibleMaxDistance=" + minEligibleMaxDistance);
+                         // System.out.println("********* maxScoreTracker.distanceMaxHeap.size() =" + maxScoreTracker.distanceMaxHeap.size());
+
                          results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
                              indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
                              knnQuery.getQueryVector(),
-                             k
+                             k,
+                             minEligibleMaxDistance
                          );
+                         for (KNNQueryResult knnResult : results) {
+                             maxScoreTracker.distanceMaxHeap.insertWithOverflow(0, knnResult.getScore());
+                         }
                     } else {
                         // C++ based partial loading
                         results = JNIService.queryIndex(
@@ -388,7 +401,11 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
             .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), spaceType)));
     }
 
-    private KNNQueryResult[] kdySearch(KdyHNSW kdyHNSW, IndexInput indexInput, float[] queryVector, int k) throws IOException {
+    private KNNQueryResult[] kdySearch(KdyHNSW kdyHNSW,
+        IndexInput indexInput,
+        float[] queryVector,
+        int k,
+        float maxEligibleDistance) throws IOException {
         SearchParametersHNSW searchParametersHNSW = new SearchParametersHNSW();
         searchParametersHNSW.k = k;
         searchParametersHNSW.efSearch = 100;
@@ -396,7 +413,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         FlatL2DistanceComputer l2Computer =
             new FlatL2DistanceComputer(queryVector, kdyHNSW.indexFlatL2.codes, kdyHNSW.indexFlatL2.oneVectorByteSize);
         DistanceMaxHeap resultsMaxHeap =
-            kdyHNSW.hnswFlatIndex.hnsw.hnswSearch(indexInput, searchParametersHNSW, l2Computer);
+            kdyHNSW.hnswFlatIndex.hnsw.hnswSearch(indexInput, searchParametersHNSW, l2Computer, maxEligibleDistance);
         KNNQueryResult[] results = new KNNQueryResult[resultsMaxHeap.size()];
         int i = resultsMaxHeap.size() - 1;
         while (i >= 0) {
