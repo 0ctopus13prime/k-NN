@@ -9,23 +9,38 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.TaskExecutor;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.Weight;
+import org.apache.lucene.search.knn.KnnCollectorManager;
+import org.apache.lucene.search.knn.TopKnnCollectorManager;
+import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.hnsw.HnswGraphSearcher;
+import org.apache.lucene.util.hnsw.OrdinalTranslatedKnnCollector;
+import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.opensearch.common.StopWatch;
 import org.opensearch.knn.index.KNNSettings;
+import org.opensearch.knn.index.memory.NativeMemoryAllocation;
 import org.opensearch.knn.index.query.ExactSearcher;
 import org.opensearch.knn.index.query.KNNQuery;
 import org.opensearch.knn.index.query.KNNWeight;
 import org.opensearch.knn.index.query.ResultUtil;
 import org.opensearch.knn.index.query.rescore.RescoreContext;
+import org.opensearch.knn.index.store.partial_loading.FlatL2DistanceComputer;
+import org.opensearch.knn.index.store.partial_loading.KdyFaissHnswGraph;
+import org.opensearch.knn.index.store.partial_loading.KdyHNSW;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -35,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+
 
 /**
  * {@link KNNQuery} executes approximate nearest neighbor search (ANN) on a segment level.
@@ -50,8 +66,115 @@ public class NativeEngineKnnVectorQuery extends Query {
 
     private final KNNQuery knnQuery;
 
+    public Weight kdyPartialLoading(IndexSearcher indexSearcher, ScoreMode scoreMode, float boost) throws IOException {
+        System.out.println("kdyPartialLoading!!!!!!!!!!!!");
+
+        KnnCollectorManager knnCollectorManager = new TopKnnCollectorManager(100, indexSearcher);
+        IndexReader reader = indexSearcher.getIndexReader();
+        final KNNWeight knnWeight = (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1);
+        List<LeafReaderContext> leafReaderContexts = reader.leaves();
+        List<Callable<TopDocs>> tasks = new ArrayList<>(leafReaderContexts.size());
+        for (LeafReaderContext context : leafReaderContexts) {
+            tasks.add(() -> kdySearchLeaf(knnQuery.getQueryVector(), context, null, knnCollectorManager, knnWeight));
+        }
+        TaskExecutor taskExecutor = indexSearcher.getTaskExecutor();
+        TopDocs[] perLeafResults = taskExecutor.invokeAll(tasks).toArray(TopDocs[]::new);
+
+        // Merge sort the results
+        TopDocs topK = TopDocs.merge(10, perLeafResults);
+        if (topK.scoreDocs.length == 0) {
+            return new MatchNoDocsQuery().createWeight(indexSearcher, scoreMode, boost);
+        }
+        return createDocAndScoreQuery(reader, topK).createWeight(indexSearcher, scoreMode, boost);
+    }
+
+    private TopDocs kdySearchLeaf(
+        float[] queryVector,
+        LeafReaderContext ctx,
+        Weight filterWeight,
+        KnnCollectorManager knnCollectorManager,
+        KNNWeight knnWeight)
+        throws IOException {
+        TopDocs results = kdyGetLeafResults(queryVector, ctx, filterWeight, knnCollectorManager, knnWeight);
+        if (ctx.docBase > 0) {
+            for (ScoreDoc scoreDoc : results.scoreDocs) {
+                scoreDoc.doc += ctx.docBase;
+            }
+        }
+        return results;
+    }
+
+    private TopDocs kdyGetLeafResults(
+        float[] queryVector,
+        LeafReaderContext ctx,
+        Weight filterWeight,
+        KnnCollectorManager knnCollectorManager,
+        KNNWeight knnWeight)
+        throws IOException {
+        final LeafReader reader = ctx.reader();
+        final Bits liveDocs = reader.getLiveDocs();
+
+        if (filterWeight == null) {
+            return kdyApproximateSearch(queryVector, ctx, liveDocs, Integer.MAX_VALUE, knnCollectorManager, knnWeight);
+        }
+
+        throw new RuntimeException("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX filterWeight != null???");
+    }
+
+    private TopDocs kdyApproximateSearch(
+        float[] queryVector,
+        LeafReaderContext context,
+        Bits acceptDocs,
+        int visitedLimit,
+        KnnCollectorManager knnCollectorManager,
+        KNNWeight knnWeight)
+        throws IOException {
+        KnnCollector knnCollector = knnCollectorManager.newCollector(visitedLimit, context);
+
+        NativeMemoryAllocation nativeMemoryAllocation = knnWeight.kdyGetNativeMemoryAllocation(context);
+        if (nativeMemoryAllocation == null) {
+            return TopDocsCollector.EMPTY_TOPDOCS;
+        }
+
+        KdyHNSW kdyHNSW = nativeMemoryAllocation.getPartialLoadingContext().kdyHNSW;
+        IndexInput indexInput =
+            nativeMemoryAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput;
+        IndexInput vectorIndexInput = indexInput.clone();
+
+        FlatL2DistanceComputer l2Computer =
+            new FlatL2DistanceComputer(queryVector, kdyHNSW.indexFlatL2.codes, kdyHNSW.indexFlatL2.oneVectorByteSize);
+
+        RandomVectorScorer scorer = new RandomVectorScorer() {
+            @Override public float score(int node) throws IOException {
+                return l2Computer.compute(vectorIndexInput, node);
+            }
+
+            @Override public int maxOrd() {
+                return Integer.MAX_VALUE;
+            }
+        };
+
+        final KnnCollector collector =
+            new OrdinalTranslatedKnnCollector(knnCollector, scorer::ordToDoc);
+        final Bits acceptedOrds = null;
+        KdyFaissHnswGraph kdyFaissHnswGraph = new KdyFaissHnswGraph(kdyHNSW, indexInput.clone());
+        HnswGraphSearcher.search(scorer, collector, kdyFaissHnswGraph, acceptedOrds);
+        TopDocs results = knnCollector.topDocs();
+        return results;
+    }
+
     @Override
     public Weight createWeight(IndexSearcher indexSearcher, ScoreMode scoreMode, float boost) throws IOException {
+        System.out.println("++++++++++++++++++++++++++++");
+        return kdyPartialLoading(indexSearcher, scoreMode, boost);
+
+
+
+
+
+
+
+        /*
         final IndexReader reader = indexSearcher.getIndexReader();
         final KNNWeight knnWeight = (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1);
         List<LeafReaderContext> leafReaderContexts = reader.leaves();
@@ -85,6 +208,7 @@ public class NativeEngineKnnVectorQuery extends Query {
             return new MatchNoDocsQuery().createWeight(indexSearcher, scoreMode, boost);
         }
         return createDocAndScoreQuery(reader, topK).createWeight(indexSearcher, scoreMode, boost);
+         */
     }
 
     private List<Map<Integer, Float>> doSearch(

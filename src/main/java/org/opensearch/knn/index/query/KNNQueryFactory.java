@@ -95,7 +95,8 @@ public class KNNQueryFactory extends BaseQueryFactory {
                         .rescoreContext(rescoreContext)
                         .build();
             }
-            return createQueryRequest.getRescoreContext().isPresent() ? new NativeEngineKnnVectorQuery(knnQuery) : knnQuery;
+            // return createQueryRequest.getRescoreContext().isPresent() ? new NativeEngineKnnVectorQuery(knnQuery) : knnQuery;
+            return new NativeEngineKnnVectorQuery(knnQuery);
         }
 
         Integer requestEfSearch = null;

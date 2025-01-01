@@ -13,10 +13,13 @@ import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.FilteredDocIdSetIterator;
+import org.apache.lucene.util.hnsw.BlockingFloatHeap;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
+import org.apache.lucene.search.knn.MultiLeafKnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
+import org.apache.lucene.search.TopKnnCollector;
 import org.apache.lucene.util.BitSetIterator;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
@@ -80,7 +83,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 
     private static ExactSearcher DEFAULT_EXACT_SEARCHER;
     private final QuantizationService quantizationService;
-    private KdyMaxScoreTracker maxScoreTracker;
+    private MultiLeafKnnCollector collector;
 
     public KNNWeight(KNNQuery query, float boost) {
         super(query);
@@ -90,7 +93,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         this.filterWeight = null;
         this.exactSearcher = DEFAULT_EXACT_SEARCHER;
         this.quantizationService = QuantizationService.getInstance();
-        this.maxScoreTracker = new KdyMaxScoreTracker(knnQuery.getK());
+        this.collector = new MultiLeafKnnCollector(100, new BlockingFloatHeap(100), new TopKnnCollector(100, Integer.MAX_VALUE));
     }
 
     public KNNWeight(KNNQuery query, float boost, Weight filterWeight) {
@@ -101,7 +104,7 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         this.filterWeight = filterWeight;
         this.exactSearcher = DEFAULT_EXACT_SEARCHER;
         this.quantizationService = QuantizationService.getInstance();
-        this.maxScoreTracker = new KdyMaxScoreTracker(knnQuery.getK());
+        this.collector = new MultiLeafKnnCollector(100, new BlockingFloatHeap(100), new TopKnnCollector(100, Integer.MAX_VALUE));
     }
 
     public static void initialize(ModelDao modelDao) {
@@ -232,9 +235,80 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
         return exactSearch(context, exactSearcherContextBuilder.build());
     }
 
+    public NativeMemoryAllocation kdyGetNativeMemoryAllocation(final LeafReaderContext context) throws IOException {
+        final SegmentReader reader = Lucene.segmentReader(context.reader());
+
+        FieldInfo fieldInfo = reader.getFieldInfos().fieldInfo(knnQuery.getField());
+        KNNEngine knnEngine;
+        SpaceType spaceType;
+        VectorDataType vectorDataType;
+
+        // Check if a modelId exists. If so, the space type and engine will need to be picked up from the model's
+        // metadata.
+        String modelId = fieldInfo.getAttribute(MODEL_ID);
+        if (modelId != null) {
+            ModelMetadata modelMetadata = modelDao.getMetadata(modelId);
+            if (!ModelUtil.isModelCreated(modelMetadata)) {
+                throw new RuntimeException("Model \"" + modelId + "\" is not created.");
+            }
+
+            knnEngine = modelMetadata.getKnnEngine();
+            spaceType = modelMetadata.getSpaceType();
+            vectorDataType = modelMetadata.getVectorDataType();
+        } else {
+            String engineName = fieldInfo.attributes().getOrDefault(KNN_ENGINE, KNNEngine.DEFAULT.getName());
+            knnEngine = KNNEngine.getEngine(engineName);
+            String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
+            spaceType = SpaceType.getSpace(spaceTypeName);
+            vectorDataType =
+                VectorDataType.get(fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue()));
+        }
+
+        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo =
+            SegmentLevelQuantizationInfo.build(reader, fieldInfo, knnQuery.getField());
+        // TODO: Change type of vector once more quantization methods are supported
+        final byte[] quantizedVector = SegmentLevelQuantizationUtil.quantizeVector(knnQuery.getQueryVector(), segmentLevelQuantizationInfo);
+
+        List<String> engineFiles = KNNCodecUtil.getEngineFiles(knnEngine.getExtension(), knnQuery.getField(), reader.getSegmentInfo().info);
+        if (engineFiles.isEmpty()) {
+            log.debug("[KNN] No native engine files found for field {} for segment {}", knnQuery.getField(), reader.getSegmentName());
+            return null;
+        }
+
+        final String vectorIndexFileName = engineFiles.get(0);
+        final String cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(vectorIndexFileName, reader.getSegmentInfo().info);
+
+        final KNNQueryResult[] results;
+        KNNCounter.GRAPH_QUERY_REQUESTS.increment();
+
+        // We need to first get index allocation
+        NativeMemoryAllocation indexAllocation;
+        try {
+            indexAllocation = nativeMemoryCacheManager.get(new NativeMemoryEntryContext.IndexEntryContext(reader.directory(),
+                cacheKey,
+                NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
+                getParametersAtLoading(spaceType, knnEngine, knnQuery.getIndexName(),
+                    // TODO: In the future, more vector data types will be supported with quantization
+                    quantizedVector == null ? vectorDataType : VectorDataType.BINARY
+                ),
+                knnQuery.getIndexName(),
+                modelId
+            ), true);
+        } catch (ExecutionException e) {
+            GRAPH_QUERY_ERRORS.increment();
+            throw new RuntimeException(e);
+        }
+
+        return indexAllocation;
+    }
+
     private Map<Integer, Float> doANNSearch(
         final LeafReaderContext context, final BitSet filterIdsBitSet, final int cardinality, final int k
     ) throws IOException {
+        if (true) {
+          throw new RuntimeException("+++++++++++++++++");
+        }
+
         final SegmentReader reader = Lucene.segmentReader(context.reader());
 
         FieldInfo fieldInfo = reader.getFieldInfos().fieldInfo(knnQuery.getField());
@@ -335,19 +409,19 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 
                     // Java based partial loading
                     if (KdyControl.DO_JAVA) {
-                         final float minEligibleMaxDistance = maxScoreTracker.distanceMaxHeap.size() < k
-                                                              ? Float.MAX_VALUE : maxScoreTracker.distanceMaxHeap.top().distance;
-                         // System.out.println("********* minEligibleMaxDistance=" + minEligibleMaxDistance);
-                         // System.out.println("********* maxScoreTracker.distanceMaxHeap.size() =" + maxScoreTracker.distanceMaxHeap.size());
+                         final float maxEligibleMaxDistance = -collector.minCompetitiveSimilarity();
+                         // System.out.println("********* maxEligibleMaxDistance=" + maxEligibleMaxDistance);
+                         // System.out.println("********* maxScoreTracker.distanceMaxHeap.size()="
+                         //                    + maxScoreTracker.distanceMaxHeap.size());
 
                          results = kdySearch(indexAllocation.getPartialLoadingContext().kdyHNSW,
                              indexAllocation.getPartialLoadingContext().indexInputThreadLocalGetter.getIndexInputWithBuffer().indexInput,
                              knnQuery.getQueryVector(),
                              k,
-                             minEligibleMaxDistance
+                             maxEligibleMaxDistance
                          );
                          for (KNNQueryResult knnResult : results) {
-                             maxScoreTracker.distanceMaxHeap.insertWithOverflow(0, knnResult.getScore());
+                             collector.collect(0, -knnResult.getScore());
                          }
                     } else {
                         // C++ based partial loading

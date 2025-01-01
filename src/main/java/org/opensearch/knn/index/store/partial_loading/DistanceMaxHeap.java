@@ -138,7 +138,7 @@ public class DistanceMaxHeap implements Iterable<FaissHNSW.IdAndDistance> {
 
     private void downHeap(int i) {
         FaissHNSW.IdAndDistance node = heap[i]; // save top node
-        int j = i << 1; // find smaller child
+        int j = i << 1; // find bigger child
         int k = (i << 1) + 1;
         if (k <= this.k && greaterThan(heap[k].distance, heap[j].distance)) {
             j = k;
