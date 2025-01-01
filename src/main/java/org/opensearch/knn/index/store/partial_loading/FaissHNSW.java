@@ -29,6 +29,8 @@ public class FaissHNSW {
     public int efConstruction = 40;
     public int efSearch = 16;
 
+    public static int GRAPH_SIZE = 1000_0000 + 100;
+
     public FaissHNSW() {
         this(32);
     }
@@ -46,12 +48,13 @@ public class FaissHNSW {
         IndexInput indexInput, SearchParametersHNSW parametersHNSW, DistanceComputer distanceComputer, float maxEligibleDistance
     ) throws IOException {
         IdAndDistance nearest = new IdAndDistance(entryPoint, distanceComputer.compute(indexInput, entryPoint));
-        final SparseFixedBitSet bitSet = new SparseFixedBitSet(1000100);
+        final SparseFixedBitSet bitSet = new SparseFixedBitSet(GRAPH_SIZE);
         for (int level = maxLevel; level >= 1; --level) {
-            greedyUpdateNearest(indexInput, distanceComputer, level, nearest);
+            greedyUpdateNearest(indexInput, distanceComputer, level, nearest, bitSet);
         }
-        final int ef = Math.max(parametersHNSW.efSearch, parametersHNSW.k);
+        bitSet.clear();
         DistanceMaxHeap resultMaxHeap = new DistanceMaxHeap(parametersHNSW.k);
+        final int ef = Math.max(parametersHNSW.efSearch, parametersHNSW.k);
         DistanceMaxHeap candidates = new DistanceMaxHeap(ef);
         candidates.insertWithOverflow(nearest.id, nearest.distance);
         searchFromCandidatesFaiss(indexInput, distanceComputer, resultMaxHeap, candidates, bitSet, maxEligibleDistance);
@@ -119,7 +122,9 @@ public class FaissHNSW {
         IndexInput indexInput,
         DistanceComputer distanceComputer,
         int level,
-        IdAndDistance nearest) throws IOException {
+        IdAndDistance nearest,
+        SparseFixedBitSet bitSet) throws IOException {
+        bitSet.set(nearest.id);
 
         while (true) {
             final int prevNearest = nearest.id;
@@ -137,6 +142,9 @@ public class FaissHNSW {
                 final int neighborId = neighbors.readInt(indexInput, j);
                 if (neighborId < 0) {
                     break;
+                }
+                if (bitSet.getAndSet(neighborId)) {
+                    continue;
                 }
                 final float distance = distanceComputer.compute(indexInput, neighborId);
                 if (distance < nearest.distance) {
