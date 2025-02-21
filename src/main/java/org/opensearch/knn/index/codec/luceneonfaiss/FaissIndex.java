@@ -61,9 +61,9 @@ public abstract class FaissIndex {
         }
 
         if (metricTypeIndex == 0) {
-            index.spaceType = SpaceType.L2;
-        } else if (metricTypeIndex == 1) {
             index.spaceType = SpaceType.INNER_PRODUCT;
+        } else if (metricTypeIndex == 1) {
+            index.spaceType = SpaceType.L2;
         } else {
             throw new IllegalStateException("Partial loading does not support metric type index=" + metricTypeIndex + " from FAISS.");
         }

@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.function.Supplier;
 
+@Getter
 public abstract class FaissIndexFlat extends FaissIndex {
     // Maps to IndexFlatL2 e.g. L2 distance
     public static final String IXF2 = "IxF2";
@@ -22,10 +23,8 @@ public abstract class FaissIndexFlat extends FaissIndex {
     private static Map<String, Supplier<FaissIndexFlat>> FLAT_INDEX_SUPPLIERS =
         Map.of(IXF2, FaissIndexFlatL2::new, IXFI, FaissIndexFlatIP::new);
 
-    @Getter
     private final Storage codes = new Storage();
     private int oneVectorByteSize;
-    @Getter
     private String indexType;
 
     public static FaissIndex load(final IndexInput input, final String indexType) throws IOException {

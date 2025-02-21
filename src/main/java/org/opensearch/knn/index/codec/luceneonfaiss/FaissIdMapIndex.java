@@ -29,6 +29,7 @@ public class FaissIdMapIndex extends FaissIndex {
     @Getter
     private FaissHNSWFlatIndex nestedIndex;
     private long[] vectorIdToDocIdMapping;
+    private long oneVectorByteSize;
 
     /**
      * Partially load id mapping and its nested index to which vector searching will be delegated.
@@ -46,6 +47,7 @@ public class FaissIdMapIndex extends FaissIndex {
         } else {
             throw new IllegalStateException("Invalid nested index. Expected FaissHNSWFlatIndex, but got " + nestedIndex.getIndexType());
         }
+        faissIdMapIndex.oneVectorByteSize = faissIdMapIndex.nestedIndex.getStorage().getOneVectorByteSize();
 
         // Load `idMap`
         final long numElements = input.readLong();
@@ -90,7 +92,7 @@ public class FaissIdMapIndex extends FaissIndex {
 
             @Override
             public float[] vectorValue(int targetOrd) throws IOException {
-                data.seek((long) Long.BYTES * targetOrd);
+                data.seek(oneVectorByteSize * targetOrd);
                 data.readFloats(vector, 0, vector.length);
                 return vector;
             }
@@ -127,7 +129,7 @@ public class FaissIdMapIndex extends FaissIndex {
 
             @Override
             public float[] vectorValue(int targetOrd) throws IOException {
-                data.seek((long) Long.BYTES * targetOrd);
+                data.seek(oneVectorByteSize * targetOrd);
                 data.readFloats(vector, 0, vector.length);
                 return vector;
             }
