@@ -42,6 +42,7 @@ import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.indices.ModelDao;
 import org.opensearch.knn.indices.ModelMetadata;
 import org.opensearch.knn.indices.ModelUtil;
+import org.opensearch.knn.index.codec.luceneonfaiss.LuceneOnFaissUtils;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -427,6 +428,7 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
             );
         KNNEngine knnEngine = queryConfigFromMapping.get().getKnnEngine();
         MethodComponentContext methodComponentContext = queryConfigFromMapping.get().getMethodComponentContext();
+        final boolean forceUseLuceneSearcher = LuceneOnFaissUtils.isUseLuceneOnFaiss(methodComponentContext.getParameters());
         SpaceType spaceType = queryConfigFromMapping.get().getSpaceType();
         VectorDataType vectorDataType = queryConfigFromMapping.get().getVectorDataType();
         RescoreContext processedRescoreContext = knnVectorFieldType.resolveRescoreContext(rescoreContext);
@@ -553,6 +555,7 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
                 .context(context)
                 .rescoreContext(processedRescoreContext)
                 .expandNested(expandNested)
+                .forceUseLuceneSearcher(forceUseLuceneSearcher)
                 .build();
             return KNNQueryFactory.create(createQueryRequest);
         }
