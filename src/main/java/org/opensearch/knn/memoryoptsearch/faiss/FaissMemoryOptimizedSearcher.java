@@ -5,8 +5,9 @@
 
 package org.opensearch.knn.memoryoptsearch.faiss;
 
-import org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil;
-import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.index.ByteVectorValues;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
@@ -15,16 +16,13 @@ import org.apache.lucene.util.IOSupplier;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.OrdinalTranslatedKnnCollector;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
-import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 
 import java.io.IOException;
 
 /**
  * This searcher directly reads FAISS index file via the provided {@link IndexInput} then perform vector search on it.
  */
-public class FaissMemoryOptimizedSearcher implements VectorSearcher {
-    private static final FlatVectorsScorer VECTOR_SCORER = FlatVectorScorerUtil.getLucene99FlatVectorsScorer();
-
+public class FaissMemoryOptimizedSearcher extends KnnVectorsReader {
     private final IndexInput indexInput;
     private FaissIndex faissIndex;
     private FaissHnswGraph faissHnswGraph;
@@ -45,28 +43,45 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     }
 
     @Override
-    public void search(float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
+    public void checkIntegrity() throws IOException {
+        // No-op
+    }
+
+    @Override
+    public FloatVectorValues getFloatVectorValues(final String field) throws IOException {
+        return faissIndex.getFloatValues(indexInput);
+    }
+
+    @Override
+    public ByteVectorValues getByteVectorValues(final String field) throws IOException {
+        return faissIndex.getByteValues(indexInput);
+    }
+
+    @Override
+    public void search(final String field, float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
         search(
             VectorEncoding.FLOAT32,
-            () -> VECTOR_SCORER.getRandomVectorScorer(
-                faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
-                faissIndex.getFloatValues(indexInput),
-                target
-            ),
+            () -> FlatVectorScorerGetter.get()
+                .getRandomVectorScorer(
+                    faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
+                    faissIndex.getFloatValues(indexInput),
+                    target
+                ),
             knnCollector,
             acceptDocs
         );
     }
 
     @Override
-    public void search(byte[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
+    public void search(final String field, byte[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
         search(
             VectorEncoding.BYTE,
-            () -> VECTOR_SCORER.getRandomVectorScorer(
-                faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
-                faissIndex.getByteValues(indexInput),
-                target
-            ),
+            () -> FlatVectorScorerGetter.get()
+                .getRandomVectorScorer(
+                    faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
+                    faissIndex.getByteValues(indexInput),
+                    target
+                ),
             knnCollector,
             acceptDocs
         );

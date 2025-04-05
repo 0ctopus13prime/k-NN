@@ -7,6 +7,7 @@ package org.opensearch.knn.index.codec.KNN990Codec;
 
 import com.google.common.collect.ImmutableSet;
 import lombok.SneakyThrows;
+import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.SegmentInfo;
@@ -18,7 +19,6 @@ import org.mockito.MockedStatic;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.index.codec.KNNCodecTestUtil;
 import org.opensearch.knn.index.engine.KNNEngine;
-import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.VectorSearcherFactory;
 
 import java.lang.reflect.Field;
@@ -42,7 +42,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
         final FieldInfos fieldInfos = new FieldInfos(fieldInfoArray);
 
         // Load vector searchers
-        final Map<String, VectorSearcher> vectorSearchers = loadSearchers(fieldInfos, Collections.emptySet(), true);
+        final Map<String, KnnVectorsReader> vectorSearchers = loadSearchers(fieldInfos, Collections.emptySet(), true);
         assertTrue(vectorSearchers.isEmpty());
     }
 
@@ -58,7 +58,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
         // Mocking FAISS engine to return a dummy vector searcher
         KNNEngine mockFaiss = spy(KNNEngine.FAISS);
         VectorSearcherFactory mockFactory = mock(VectorSearcherFactory.class);
-        when(mockFactory.createVectorSearcher(any(), any())).thenReturn(mock(VectorSearcher.class));
+        when(mockFactory.createVectorSearcher(any(), any())).thenReturn(mock(KnnVectorsReader.class));
         when(mockFaiss.getVectorSearcherFactory()).thenReturn(mockFactory);
 
         try (MockedStatic<KNNEngine> mockedStatic = mockStatic(KNNEngine.class)) {
@@ -87,7 +87,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
             mockedStatic.when(KNNEngine::getEnginesThatCreateCustomSegmentFiles).thenReturn(ImmutableSet.of(mockFaiss));
 
             // Load vector searchers
-            final Map<String, VectorSearcher> vectorSearchers = loadSearchers(fieldInfos, filesInSegment, true);
+            final Map<String, KnnVectorsReader> vectorSearchers = loadSearchers(fieldInfos, filesInSegment, true);
 
             // Validate #searchers
             assertEquals(2, vectorSearchers.size());
@@ -101,7 +101,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
         final FieldInfos fieldInfos = new FieldInfos(fieldInfoArray);
 
         // Load vector searchers
-        final Map<String, VectorSearcher> vectorSearchers = loadSearchers(fieldInfos, Collections.emptySet(), false);
+        final Map<String, KnnVectorsReader> vectorSearchers = loadSearchers(fieldInfos, Collections.emptySet(), false);
         assertNull(vectorSearchers);
     }
 
@@ -117,7 +117,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
         // Mocking FAISS engine to return a dummy vector searcher
         KNNEngine mockFaiss = spy(KNNEngine.FAISS);
         VectorSearcherFactory mockFactory = mock(VectorSearcherFactory.class);
-        when(mockFactory.createVectorSearcher(any(), any())).thenReturn(mock(VectorSearcher.class));
+        when(mockFactory.createVectorSearcher(any(), any())).thenReturn(mock(KnnVectorsReader.class));
         when(mockFaiss.getVectorSearcherFactory()).thenReturn(mockFactory);
 
         try (MockedStatic<KNNEngine> mockedStatic = mockStatic(KNNEngine.class)) {
@@ -146,7 +146,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
             mockedStatic.when(KNNEngine::getEnginesThatCreateCustomSegmentFiles).thenReturn(ImmutableSet.of(mockFaiss));
 
             // Load vector searchers
-            final Map<String, VectorSearcher> vectorSearchers = loadSearchers(fieldInfos, filesInSegment, false);
+            final Map<String, KnnVectorsReader> vectorSearchers = loadSearchers(fieldInfos, filesInSegment, false);
 
             // The table should be null even we had faiss fields.
             assertNull(vectorSearchers);
@@ -164,7 +164,7 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
     }
 
     @SneakyThrows
-    private static Map<String, VectorSearcher> loadSearchers(
+    private static Map<String, KnnVectorsReader> loadSearchers(
         final FieldInfos fieldInfos,
         final Set<String> filesInSegment,
         final boolean memoryOptimizedSearchEnabled
@@ -185,6 +185,6 @@ public class NativeEngines990KnnVectorsReaderTests extends KNNTestCase {
         // Get searcher table
         final Field tableField = clazz.getDeclaredField("vectorSearchers");
         tableField.setAccessible(true);
-        return (Map<String, VectorSearcher>) tableField.get(reader);
+        return (Map<String, KnnVectorsReader>) tableField.get(reader);
     }
 }

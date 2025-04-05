@@ -33,7 +33,6 @@ import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManager;
 import org.opensearch.knn.index.quantizationservice.QuantizationService;
-import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.VectorSearcherFactory;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationState;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationStateCacheManager;
@@ -61,7 +60,7 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
     private Map<String, String> quantizationStateCacheKeyPerField;
     private final SegmentReadState segmentReadState;
     private final List<String> cacheKeys;
-    private volatile Map<String, VectorSearcher> vectorSearchers;
+    private volatile Map<String, KnnVectorsReader> vectorSearchers;
 
     public NativeEngines990KnnVectorsReader(final SegmentReadState state, final FlatVectorsReader flatVectorsReader) {
         this(state, flatVectorsReader, false);
@@ -104,6 +103,10 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
      */
     @Override
     public FloatVectorValues getFloatVectorValues(final String field) throws IOException {
+        final KnnVectorsReader memoryOptimizedSearcher = getMemoryOptimizedSearcher(field);
+        if (memoryOptimizedSearcher != null) {
+            return memoryOptimizedSearcher.getFloatVectorValues(field);
+        }
         return flatVectorsReader.getFloatVectorValues(field);
     }
 
@@ -116,6 +119,11 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
      */
     @Override
     public ByteVectorValues getByteVectorValues(final String field) throws IOException {
+        final KnnVectorsReader memoryOptimizedSearcher = getMemoryOptimizedSearcher(field);
+        if (memoryOptimizedSearcher != null) {
+            return memoryOptimizedSearcher.getByteVectorValues(field);
+        }
+
         return flatVectorsReader.getByteVectorValues(field);
     }
 
@@ -243,6 +251,13 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         }
     }
 
+    private KnnVectorsReader getMemoryOptimizedSearcher(final String field) {
+        loadMemoryOptimizedSearcherIfRequired();
+
+        // Try with memory optimized searcher
+        return vectorSearchers.get(field);
+    }
+
     private boolean trySearchWithMemoryOptimizedSearch(
         String field,
         Object target,
@@ -250,15 +265,12 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         Bits acceptDocs,
         boolean isFloatVector
     ) throws IOException {
-        loadMemoryOptimizedSearcherIfRequired();
-
-        // Try with memory optimized searcher
-        final VectorSearcher memoryOptimizedSearcher = vectorSearchers.get(field);
+        final KnnVectorsReader memoryOptimizedSearcher = getMemoryOptimizedSearcher(field);
         if (memoryOptimizedSearcher != null) {
             if (isFloatVector) {
-                memoryOptimizedSearcher.search((float[]) target, knnCollector, acceptDocs);
+                memoryOptimizedSearcher.search(field, (float[]) target, knnCollector, acceptDocs);
             } else {
-                memoryOptimizedSearcher.search((byte[]) target, knnCollector, acceptDocs);
+                memoryOptimizedSearcher.search(field, (byte[]) target, knnCollector, acceptDocs);
             }
             return true;
         }
@@ -300,16 +312,16 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
 
             // We need sufficient memory space for this table as it will be queried for every single search.
             // Hence, having larger space to approximate a perfect hash here.
-            final Map<String, VectorSearcher> vectorSearcherPerField = new HashMap<>(
+            final Map<String, KnnVectorsReader> vectorSearcherPerField = new HashMap<>(
                 RESERVE_TWICE_SPACE * segmentReadState.fieldInfos.size(),
                 SUFFICIENT_LOAD_FACTOR
             );
 
             try {
                 for (FieldInfo fieldInfo : segmentReadState.fieldInfos) {
-                    final IOSupplier<VectorSearcher> searcherSupplier = getVectorSearcherSupplier(fieldInfo);
+                    final IOSupplier<KnnVectorsReader> searcherSupplier = getVectorSearcherSupplier(fieldInfo);
                     if (searcherSupplier != null) {
-                        final VectorSearcher searcher = searcherSupplier.get();
+                        final KnnVectorsReader searcher = searcherSupplier.get();
                         if (searcher != null) {
                             // It's supported. There can be a case where a certain index type underlying is not yet supported while
                             // KNNEngine
@@ -332,7 +344,7 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         }
     }
 
-    private IOSupplier<VectorSearcher> getVectorSearcherSupplier(final FieldInfo fieldInfo) {
+    private IOSupplier<KnnVectorsReader> getVectorSearcherSupplier(final FieldInfo fieldInfo) {
         // Skip non-knn fields.
         final Map<String, String> attributes = fieldInfo.attributes();
         if (attributes == null || attributes.containsKey(KNN_FIELD) == false) {

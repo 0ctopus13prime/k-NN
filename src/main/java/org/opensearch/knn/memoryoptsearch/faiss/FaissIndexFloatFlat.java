@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
+import org.apache.lucene.search.VectorScorer;
 import org.apache.lucene.store.IndexInput;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 
@@ -91,6 +92,16 @@ public class FaissIndexFloatFlat extends FaissIndex {
                 indexInput.seek(floatVectors.getBaseOffset() + internalVectorId * oneVectorByteSize);
                 indexInput.readFloats(buffer, 0, buffer.length);
                 return buffer;
+            }
+
+            @Override
+            public DocIndexIterator iterator() {
+                return new DenseDocIdIterator(totalNumberOfVectors);
+            }
+
+            @Override
+            public VectorScorer scorer(float[] target) throws IOException {
+                return new FloatVectorScorer(target, this, spaceType.getKnnVectorSimilarityFunction().getVectorSimilarityFunction());
             }
 
             @Override

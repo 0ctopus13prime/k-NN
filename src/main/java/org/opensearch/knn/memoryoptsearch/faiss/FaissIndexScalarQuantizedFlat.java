@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
+import org.apache.lucene.search.VectorScorer;
 import org.apache.lucene.store.IndexInput;
 import org.opensearch.knn.memoryoptsearch.faiss.reconstruct.FaissQuantizedValueReconstructor;
 import org.opensearch.knn.memoryoptsearch.faiss.reconstruct.FaissQuantizedValueReconstructorFactory;
@@ -109,6 +110,16 @@ public class FaissIndexScalarQuantizedFlat extends FaissIndex {
             }
 
             @Override
+            public DocIndexIterator iterator() {
+                return new DenseDocIdIterator(totalNumberOfVectors);
+            }
+
+            @Override
+            public VectorScorer scorer(float[] target) throws IOException {
+                return new FloatVectorScorer(target, this, spaceType.getKnnVectorSimilarityFunction().getVectorSimilarityFunction());
+            }
+
+            @Override
             public int dimension() {
                 return dimension;
             }
@@ -140,6 +151,16 @@ public class FaissIndexScalarQuantizedFlat extends FaissIndex {
                 indexInput.readBytes(buffer, 0, buffer.length);
                 reconstructor.reconstruct(buffer, buffer);
                 return buffer;
+            }
+
+            @Override
+            public DocIndexIterator iterator() {
+                return new DenseDocIdIterator(totalNumberOfVectors);
+            }
+
+            @Override
+            public VectorScorer scorer(byte[] target) throws IOException {
+                return new ByteVectorScorer(target, this, spaceType.getKnnVectorSimilarityFunction().getVectorSimilarityFunction());
             }
 
             @Override

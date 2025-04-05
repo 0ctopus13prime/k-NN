@@ -8,7 +8,6 @@ package org.opensearch.knn.index.engine;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
-import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 
 import java.util.Map;
 import java.util.Optional;
@@ -30,7 +29,7 @@ public class MemoryOptimizedSearchSupportSpec {
 
     /**
      * Determine whether if a KNN field supports memory-optimized-search.
-     * If it is supported, then the field can perform memory-optimized search via {@link VectorSearcher}.
+     * If it is supported, then the field can perform memory-optimized search via {@link org.apache.lucene.codecs.KnnVectorsReader}.
      * Which can be obtained from a factory acquired from {@link KNNEngine#getVectorSearcherFactory()}.
      *
      * @param methodContextOpt   Optional method context.
