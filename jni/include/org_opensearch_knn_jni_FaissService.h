@@ -268,6 +268,15 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
   (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    kdyExactSearch
+ * Signature: (J[FILjava/util/Map;[JI[I)[Lorg/opensearch/knn/index/query/KNNQueryResult;
+ */
+JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_kdyExactSearch
+  (JNIEnv *, jclass, jlong, jfloatArray, jint, jobject, jlongArray, jint, jintArray);
+
+
 #ifdef __cplusplus
 }
 #endif

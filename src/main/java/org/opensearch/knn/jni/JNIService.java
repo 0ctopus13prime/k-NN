@@ -461,4 +461,24 @@ public class JNIService {
         }
         throw new IllegalArgumentException(String.format(Locale.ROOT, "RadiusQueryIndex not supported for provided engine"));
     }
+
+    public static KNNQueryResult[] kdyExactSearch(
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        @Nullable Map<String, ?> methodParameters,
+        KNNEngine knnEngine,
+        long[] filteredIds,
+        int filterIdsType,
+        int[] parentIds
+    ) {
+        if (KNNEngine.FAISS == knnEngine) {
+            if (filteredIds == null || filteredIds.length == 0) {
+                throw new IllegalArgumentException("WWWWWWWWWWWWWWWWWWWWWWWW?????");
+            }
+
+            return FaissService.kdyExactSearch(indexPointer, queryVector, k, methodParameters, filteredIds, filterIdsType, parentIds);
+        }
+        throw new IllegalArgumentException("TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT????????");
+    }
 }

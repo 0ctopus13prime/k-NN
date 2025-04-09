@@ -161,21 +161,23 @@ public class KNNWeight extends Weight {
         if (filterWeight != null && cardinality == 0) {
             return PerLeafResult.EMPTY_RESULT;
         }
-        /*
-         * The idea for this optimization is to get K results, we need to at least look at K vectors in the HNSW graph
-         * . Hence, if filtered results are less than K and filter query is present we should shift to exact search.
-         * This improves the recall.
-         */
-        if (isFilteredExactSearchPreferred(cardinality)) {
-            Map<Integer, Float> result = doExactSearch(context, new BitSetIterator(filterBitSet, cardinality), cardinality, k);
-            return new PerLeafResult(filterWeight == null ? null : filterBitSet, result);
-        }
 
         /*
          * If filters match all docs in this segment, then null should be passed as filterBitSet
          * so that it will not do a bitset look up in bottom search layer.
          */
         final BitSet annFilter = (filterWeight != null && cardinality == maxDoc) ? null : filterBitSet;
+
+        /*
+         * The idea for this optimization is to get K results, we need to at least look at K vectors in the HNSW graph
+         * . Hence, if filtered results are less than K and filter query is present we should shift to exact search.
+         * This improves the recall.
+         */
+        if (isFilteredExactSearchPreferred(cardinality)) {
+            // Map<Integer, Float> result = doExactSearch(context, new BitSetIterator(filterBitSet, cardinality), cardinality, k);
+            Map<Integer, Float> result = kdyDoExactSearch(reader, context, annFilter, cardinality, k);
+            return new PerLeafResult(filterWeight == null ? null : filterBitSet, result);
+        }
 
         StopWatch annStopWatch = startStopWatch();
         final Map<Integer, Float> docIdsToScoreMap = doANNSearch(reader, context, annFilter, cardinality, k);
@@ -191,6 +193,156 @@ public class KNNWeight extends Weight {
         }
         return new PerLeafResult(filterWeight == null ? null : filterBitSet, docIdsToScoreMap);
     }
+
+    //
+    // KDY
+    //
+
+    private Map<Integer, Float> kdyDoExactSearch(
+        final SegmentReader reader,
+        final LeafReaderContext context,
+        final BitSet filterIdsBitSet,
+        final int cardinality,
+        final int k
+    ) throws IOException {
+        FieldInfo fieldInfo = FieldInfoExtractor.getFieldInfo(reader, knnQuery.getField());
+
+        if (fieldInfo == null) {
+            log.debug("[KNN] Field info not found for {}:{}", knnQuery.getField(), reader.getSegmentName());
+            return Collections.emptyMap();
+        }
+
+        KNNEngine knnEngine;
+        SpaceType spaceType;
+        VectorDataType vectorDataType;
+
+        // Check if a modelId exists. If so, the space type and engine will need to be picked up from the model's
+        // metadata.
+        String modelId = fieldInfo.getAttribute(MODEL_ID);
+        if (modelId != null) {
+            ModelMetadata modelMetadata = modelDao.getMetadata(modelId);
+            if (!ModelUtil.isModelCreated(modelMetadata)) {
+                throw new RuntimeException("Model \"" + modelId + "\" is not created.");
+            }
+
+            knnEngine = modelMetadata.getKnnEngine();
+            spaceType = modelMetadata.getSpaceType();
+            vectorDataType = modelMetadata.getVectorDataType();
+        } else {
+            String engineName = fieldInfo.attributes().getOrDefault(KNN_ENGINE, KNNEngine.DEFAULT.getName());
+            knnEngine = KNNEngine.getEngine(engineName);
+            String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
+            spaceType = SpaceType.getSpace(spaceTypeName);
+            vectorDataType = VectorDataType.get(
+                fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue())
+            );
+        }
+
+        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
+            reader,
+            fieldInfo,
+            knnQuery.getField()
+        );
+        // TODO: Change type of vector once more quantization methods are supported
+        final byte[] quantizedVector = SegmentLevelQuantizationUtil.quantizeVector(knnQuery.getQueryVector(), segmentLevelQuantizationInfo);
+
+        List<String> engineFiles = KNNCodecUtil.getEngineFiles(knnEngine.getExtension(), knnQuery.getField(), reader.getSegmentInfo().info);
+        if (engineFiles.isEmpty()) {
+            log.debug("[KNN] No native engine files found for field {} for segment {}", knnQuery.getField(), reader.getSegmentName());
+            return Collections.emptyMap();
+        }
+
+        final String vectorIndexFileName = engineFiles.get(0);
+        final String cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(vectorIndexFileName, reader.getSegmentInfo().info);
+
+        final KNNQueryResult[] results;
+        KNNCounter.GRAPH_QUERY_REQUESTS.increment();
+
+        // We need to first get index allocation
+        NativeMemoryAllocation indexAllocation;
+        try {
+            indexAllocation = nativeMemoryCacheManager.get(
+                new NativeMemoryEntryContext.IndexEntryContext(
+                    reader.directory(),
+                    cacheKey,
+                    NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
+                    getParametersAtLoading(
+                        spaceType,
+                        knnEngine,
+                        knnQuery.getIndexName(),
+                        // TODO: In the future, more vector data types will be supported with quantization
+                        quantizedVector == null ? vectorDataType : VectorDataType.BINARY
+                    ),
+                    knnQuery.getIndexName(),
+                    modelId
+                ),
+                true
+            );
+        } catch (ExecutionException e) {
+            GRAPH_QUERY_ERRORS.increment();
+            throw new RuntimeException(e);
+        }
+
+        // From cardinality select different filterIds type
+        FilterIdsSelector filterIdsSelector = FilterIdsSelector.getFilterIdSelector(filterIdsBitSet, cardinality);
+        long[] filterIds = filterIdsSelector.getFilterIds();
+        FilterIdsSelector.FilterIdsSelectorType filterType = filterIdsSelector.getFilterType();
+        // Now that we have the allocation, we need to readLock it
+        indexAllocation.readLock();
+        indexAllocation.incRef();
+        try {
+            if (indexAllocation.isClosed()) {
+                throw new RuntimeException("Index has already been closed");
+            }
+            int[] parentIds = getParentIdsArray(context);
+            if (k > 0) {
+                // Non-radius
+                results = JNIService.kdyExactSearch(
+                    indexAllocation.getMemoryAddress(),
+                    knnQuery.getQueryVector(),
+                    k,
+                    knnQuery.getMethodParameters(),
+                    knnEngine,
+                    filterIds,
+                    filterType.getValue(),
+                    parentIds
+                );
+            } else {
+                results = JNIService.radiusQueryIndex(
+                    indexAllocation.getMemoryAddress(),
+                    knnQuery.getQueryVector(),
+                    knnQuery.getRadius(),
+                    knnQuery.getMethodParameters(),
+                    knnEngine,
+                    knnQuery.getContext().getMaxResultWindow(),
+                    filterIds,
+                    filterType.getValue(),
+                    parentIds
+                );
+            }
+        } catch (Exception e) {
+            GRAPH_QUERY_ERRORS.increment();
+            throw new RuntimeException(e);
+        } finally {
+            indexAllocation.readUnlock();
+            indexAllocation.decRef();
+        }
+        if (results.length == 0) {
+            log.debug("[KNN] Query yielded 0 results");
+            return Collections.emptyMap();
+        }
+
+        if (quantizedVector != null) {
+            return Arrays.stream(results)
+                .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), SpaceType.HAMMING)));
+        }
+        return Arrays.stream(results)
+            .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), spaceType)));
+    }
+
+    //
+    // KDY
+    //
 
     private void stopStopWatchAndLog(@Nullable final StopWatch stopWatch, final String prefixMessage, String segmentName) {
         if (log.isDebugEnabled() && stopWatch != null) {

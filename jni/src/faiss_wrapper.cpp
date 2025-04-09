@@ -26,6 +26,9 @@
 #include "commons.h"
 #include "faiss/IndexBinaryIVF.h"
 #include "faiss/IndexBinaryHNSW.h"
+#include "faiss/impl/DistanceComputer.h"
+#include "faiss/impl/ResultHandler.h"
+#include "faiss/MetricType.h"
 
 #include <algorithm>
 #include <jni.h>
@@ -665,6 +668,147 @@ jobjectArray knn_jni::faiss_wrapper::QueryIndex_WithFilter(knn_jni::JNIUtilInter
     }
     return results;
 }
+
+//
+// KDY
+//
+
+jobjectArray knn_jni::faiss_wrapper::KdyExact(
+                                   knn_jni::JNIUtilInterface * jniUtil,
+                                   JNIEnv * env,
+                                   jlong indexPointerJ,
+                                   jfloatArray queryVectorJ,
+                                   jint kJ,
+                                   jobject methodParamsJ,
+                                   jlongArray filterIdsJ,
+                                   jint filterIdsTypeJ,
+                                   jintArray parentIdsJ) {
+
+    if (queryVectorJ == nullptr) {
+        throw std::runtime_error("Query Vector cannot be null");
+    }
+
+    auto *indexReader = reinterpret_cast<faiss::IndexIDMap *>(indexPointerJ);
+
+    if (indexReader == nullptr) {
+        throw std::runtime_error("Invalid pointer to index");
+    }
+
+    std::unordered_map<std::string, jobject> methodParams;
+    if (methodParamsJ != nullptr) {
+        methodParams = jniUtil->ConvertJavaMapToCppMap(env, methodParamsJ);
+    }
+    // The ids vector will hold the top k ids from the search and the dis vector will hold the top k distances from
+    // the query point
+    std::vector<float> dis(kJ);
+    std::vector<faiss::idx_t> ids(kJ);
+    float* rawQueryvector = jniUtil->GetFloatArrayElements(env, queryVectorJ, nullptr);
+    /*
+        Setting the omp_set_num_threads to 1 to make sure that no new OMP threads are getting created.
+    */
+    omp_set_num_threads(1);
+    // create the filterSearch params if the filterIdsJ is not a null pointer
+    if (filterIdsJ != nullptr) {
+        jlong *filteredIdsArray = jniUtil->GetLongArrayElements(env, filterIdsJ, nullptr);
+        int filterIdsLength = jniUtil->GetJavaLongArrayLength(env, filterIdsJ);
+        std::unique_ptr<faiss::IDSelector> idSelector;
+        if (filterIdsTypeJ == BITMAP) {
+            idSelector.reset(new faiss::IDSelectorJlongBitmap(filterIdsLength, filteredIdsArray));
+        } else {
+            faiss::idx_t* batchIndices = reinterpret_cast<faiss::idx_t*>(filteredIdsArray);
+            idSelector.reset(new faiss::IDSelectorBatch(filterIdsLength, batchIndices));
+        }
+        std::unique_ptr<faiss::IDGrouperBitmap> idGrouper;
+        std::vector<uint64_t> idGrouperBitmap;
+        auto hnswReader = dynamic_cast<const faiss::IndexHNSW*>(indexReader->index);
+        if (hnswReader) {
+            if (parentIdsJ != nullptr) {
+                idGrouper = buildIDGrouperBitmap(jniUtil, env, parentIdsJ, &idGrouperBitmap);
+            }
+
+            std::unique_ptr<faiss::DistanceComputer> distance_computer (hnswReader->get_distance_computer());
+            distance_computer->set_query(rawQueryvector);
+            const auto total_num_vectors = (int32_t) hnswReader->ntotal;
+            faiss::HeapBlockResultHandler<faiss::HNSW::C> bres(1, dis.data(), ids.data(), kJ);
+            faiss::HeapBlockResultHandler<faiss::HNSW::C>::SingleResultHandler bresbres(bres);
+            size_t saved_j[4];
+            float dis[4];
+            int counter = 0;
+
+            bresbres.begin(0);
+
+            for (int32_t i = 0 ; i < total_num_vectors ; ++i) {
+                if (idSelector->is_member(i)) {
+                    saved_j[counter++] = i;
+                    if (counter == 4) {
+                        distance_computer->distances_batch_4(
+                            saved_j[0],
+                            saved_j[1],
+                            saved_j[2],
+                            saved_j[3],
+                            dis[0],
+                            dis[1],
+                            dis[2],
+                            dis[3]);
+
+                        bresbres.add_result(dis[0], saved_j[0]);
+                        bresbres.add_result(dis[1], saved_j[1]);
+                        bresbres.add_result(dis[2], saved_j[2]);
+                        bresbres.add_result(dis[3], saved_j[3]);
+
+                        counter = 0;
+                    }
+                }
+            }
+
+            for (int i = 0 ; i < counter ; ++i) {
+                const auto dist = (*distance_computer)(saved_j[i]);
+                bresbres.add_result(dist, saved_j[i]);
+            }
+
+            if (faiss::is_similarity_metric(hnswReader->metric_type)) {
+                // we need to revert the negated distances
+                for (size_t i = 0; i < kJ; i++) {
+                    dis[i] = -dis[i];
+                }
+            }
+
+            bresbres.end();
+        } else {
+            throw std::runtime_error("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR");
+        }
+
+        jniUtil->ReleaseLongArrayElements(env, filterIdsJ, filteredIdsArray, JNI_ABORT);
+    } else {
+        throw std::runtime_error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%");
+    }
+
+    jniUtil->ReleaseFloatArrayElements(env, queryVectorJ, rawQueryvector, JNI_ABORT);
+
+    // If there are not k results, the results will be padded with -1. Find the first -1, and set result size to that
+    // index
+    int resultSize = kJ;
+    auto it = std::find(ids.begin(), ids.end(), -1);
+    if (it != ids.end()) {
+        resultSize = it - ids.begin();
+    }
+
+    jclass resultClass = jniUtil->FindClass(env,"org/opensearch/knn/index/query/KNNQueryResult");
+    jmethodID allArgs = jniUtil->FindMethod(env, "org/opensearch/knn/index/query/KNNQueryResult", "<init>");
+
+    jobjectArray results = jniUtil->NewObjectArray(env, resultSize, resultClass, nullptr);
+
+    jobject result;
+    for(int i = 0; i < resultSize; ++i) {
+        result = jniUtil->NewObject(env, resultClass, allArgs, ids[i], dis[i]);
+        jniUtil->SetObjectArrayElement(env, results, i, result);
+    }
+    return results;
+}
+
+//
+// KDY
+//
 
 jobjectArray knn_jni::faiss_wrapper::QueryBinaryIndex_WithFilter(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong indexPointerJ,
                                                 jbyteArray queryVectorJ, jint kJ, jobject methodParamsJ, jlongArray filterIdsJ, jint filterIdsTypeJ, jintArray parentIdsJ) {

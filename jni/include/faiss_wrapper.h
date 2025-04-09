@@ -98,6 +98,10 @@ namespace knn_jni {
                                            jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jlongArray filterIdsJ,
                                            jint filterIdsTypeJ, jintArray parentIdsJ);
 
+        jobjectArray KdyExact(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong indexPointerJ,
+                                           jfloatArray queryVectorJ, jint kJ, jobject methodParamsJ, jlongArray filterIdsJ,
+                                           jint filterIdsTypeJ, jintArray parentIdsJ);
+
         // Execute a query against the binary index located in memory at indexPointerJ along with Filters
         //
         // Return an array of KNNQueryResults

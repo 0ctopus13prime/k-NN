@@ -450,4 +450,14 @@ class FaissService {
         int indexMaxResultWindow,
         int[] parentIds
     );
+
+    public static native KNNQueryResult[] kdyExactSearch(
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
+    );
 }
