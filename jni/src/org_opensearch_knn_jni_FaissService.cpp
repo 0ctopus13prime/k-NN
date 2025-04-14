@@ -528,6 +528,14 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_deallocateFlatVe
     delete ((FlatVectorManager*) flatVectorsManagerAddress);
 }
 
+float convert_dist_to_lucene_score(float dist) {
+    if (dist < 0) {
+      return 1 / (1 + -dist);
+    } else {
+      return dist + 1;
+    }
+}
+
 void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
    uint64_t flatVectorsManagerAddress,
    float* query,
@@ -563,13 +571,21 @@ void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
                 scores[score_idx + 1],
                 scores[score_idx + 2],
                 scores[score_idx + 3]);
+
+            scores[0] = convert_dist_to_lucene_score(scores[0]);
+            scores[1] = convert_dist_to_lucene_score(scores[1]);
+            scores[2] = convert_dist_to_lucene_score(scores[2]);
+            scores[3] = convert_dist_to_lucene_score(scores[3]);
+
             idx = 0;
             score_idx += 4;
         }
     }
 
     for (int i = 0 ; i < idx ; ++i) {
-        scores[score_idx++] = faiss::fvec_inner_product(query, vectors[i], dimension);
+        scores[score_idx++] =
+            convert_dist_to_lucene_score(
+                faiss::fvec_inner_product(query, vectors[i], dimension));
     }
 }
 
@@ -587,6 +603,7 @@ float Java_org_opensearch_knn_jni_FaissService_singleScoring
     auto vec = manager->floatValues[page_index].data() + (vec_index * dimension);
 
     float dist = faiss::fvec_inner_product(query, vec, dimension);
+
     std::cout << "_______________ single score in c++ -> "
               << dist
               << ", manager addr=" << flatVectorsManagerAddress
@@ -608,7 +625,7 @@ float Java_org_opensearch_knn_jni_FaissService_singleScoring
     }
     std::cout << std::endl;
 
-    return dist;
+    return convert_dist_to_lucene_score(dist);
 }
 
 // TMP
