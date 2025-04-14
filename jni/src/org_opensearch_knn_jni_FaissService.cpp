@@ -528,50 +528,50 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_deallocateFlatVe
     delete ((FlatVectorManager*) flatVectorsManagerAddress);
 }
 
-//void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
-//   uint64_t flatVectorsManagerAddress,
-//   float* query,
-//   uint32_t* neighborList,
-//   float* scores,
-//   uint32_t size,
-//   uint32_t dimension) {
-//    auto manager = (FlatVectorManager*) flatVectorsManagerAddress;
-//
-//    const int32_t oneVecSize = sizeof(float) * dimension;
-//    const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
-//
-//    float* vectors[4];
-//    int idx = 0;
-//    int score_idx = 0;
-//
-//    for (int i = 0 ; i < size ; ++i) {
-//        const long id = neighborList[i];
-//        const int page_index = id / numVecsInPage;
-//        const int vec_index = id % numVecsInPage;
-//
-//        const auto vec = (manager->floatValues[page_index].data()) + (vec_index * oneVecSize);
-//        vectors[idx++] = vec;
-//        if (idx == 4) {
-//            faiss::fvec_inner_product_batch_4(
-//                query,
-//                vectors[0],
-//                vectors[1],
-//                vectors[2],
-//                vectors[3],
-//                dimension,
-//                scores[score_idx],
-//                scores[score_idx + 1],
-//                scores[score_idx + 2],
-//                scores[score_idx + 3]);
-//            idx = 0;
-//            score_idx += 4;
-//        }
-//    }
-//
-//    for (int i = 0 ; i < idx ; ++i) {
-//        scores[score_idx++] = faiss::fvec_inner_product(query, vectors[i], dimension);
-//    }
-//}
+void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
+   uint64_t flatVectorsManagerAddress,
+   float* query,
+   uint32_t* neighborList,
+   float* scores,
+   uint32_t size,
+   uint32_t dimension) {
+    auto manager = (FlatVectorManager*) flatVectorsManagerAddress;
+
+    const int32_t oneVecSize = sizeof(float) * dimension;
+    const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
+
+    float* vectors[4];
+    int idx = 0;
+    int score_idx = 0;
+
+    for (int i = 0 ; i < size ; ++i) {
+        const long id = neighborList[i];
+        const int page_index = id / numVecsInPage;
+        const int vec_index = id % numVecsInPage;
+
+        const auto vec = (manager->floatValues[page_index].data()) + (vec_index * oneVecSize);
+        vectors[idx++] = vec;
+        if (idx == 4) {
+            faiss::fvec_inner_product_batch_4(
+                query,
+                vectors[0],
+                vectors[1],
+                vectors[2],
+                vectors[3],
+                dimension,
+                scores[score_idx],
+                scores[score_idx + 1],
+                scores[score_idx + 2],
+                scores[score_idx + 3]);
+            idx = 0;
+            score_idx += 4;
+        }
+    }
+
+    for (int i = 0 ; i < idx ; ++i) {
+        scores[score_idx++] = faiss::fvec_inner_product(query, vectors[i], dimension);
+    }
+}
 
 float Java_org_opensearch_knn_jni_FaissService_singleScoring
   (int64_t flatVectorsManagerAddress,
@@ -584,11 +584,11 @@ float Java_org_opensearch_knn_jni_FaissService_singleScoring
     const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
     const int page_index = vector_id / numVecsInPage;
     const int vec_index = vector_id % numVecsInPage;
-    auto vec = manager->floatValues[page_index].data() + vec_index;
+    auto vec = manager->floatValues[page_index].data() + (vec_index * dimension);
 
-    float ret = faiss::fvec_inner_product(query, vec, dimension);
+    float dist = faiss::fvec_inner_product(query, vec, dimension);
     std::cout << "_______________ single score in c++ -> "
-              << ret
+              << dist
               << ", manager addr=" << flatVectorsManagerAddress
               << ", dim=" << dimension
               << ", vector_id=" << vector_id
@@ -608,7 +608,7 @@ float Java_org_opensearch_knn_jni_FaissService_singleScoring
     }
     std::cout << std::endl;
 
-    return ret;
+    return dist;
 }
 
 // TMP

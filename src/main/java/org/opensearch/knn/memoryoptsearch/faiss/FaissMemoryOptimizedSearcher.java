@@ -31,17 +31,13 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private static final FlatVectorsScorer VECTOR_SCORER = FlatVectorScorerUtil.getLucene99FlatVectorsScorer();
 
     private final IndexInput indexInput;
-    private FaissIndex faissIndex;
-    private FaissHnswGraph faissHnswGraph;
-    private Arena arena;
-    private MemorySegment query;
+    private final FaissIndex faissIndex;
+    private final FaissHNSW hnsw;
 
     public FaissMemoryOptimizedSearcher(IndexInput indexInput) throws IOException {
         this.indexInput = indexInput;
         this.faissIndex = FaissIndex.load(indexInput);
-        final FaissHNSW hnsw = extractFaissHnsw(faissIndex);
-        this.faissHnswGraph = new FaissHnswGraph(hnsw, indexInput);
-        this.arena = Arena.ofShared();
+        this.hnsw = extractFaissHnsw(faissIndex);
     }
 
     private static FaissHNSW extractFaissHnsw(final FaissIndex faissIndex) {
@@ -57,25 +53,15 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         final FloatVectorValues floatValues = faissIndex.getFloatValues(indexInput);
         if (floatValues instanceof NativeFloatVectorValues nativeFloatVectorValues) {
             search(VectorEncoding.FLOAT32, () -> {
-                if (query == null || query.byteSize() < (Float.BYTES * target.length)) {
-                    arena.close();
-                    arena = Arena.ofShared();
-                    query = arena.allocate(Float.BYTES * target.length, ValueLayout.JAVA_FLOAT.byteAlignment());
-                    for (int i = 0; i < target.length; i++) {
-                        query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
-                    }
-                }
-
-                System.out.println("______________ maxNodeId=" + faissHnswGraph.maxNodeId()
+                KdyPrint.println("______________ maxNodeId=" + (hnsw.getTotalNumberOfVectors() - 1)
                                    + ", manager_addr=" + nativeFloatVectorValues.getFlatVectorsManagerAddress()
-                                   + ", dimension=" + faissIndex.dimension
-                                   + ", query=" + query);
+                                   + ", dimension=" + faissIndex.dimension);
 
                 final NativeRandomVectorScorer scorer = new NativeRandomVectorScorer(
-                    faissHnswGraph.maxNodeId(),
+                    (int) (hnsw.getTotalNumberOfVectors() - 1),
                     nativeFloatVectorValues.getFlatVectorsManagerAddress(),
                     faissIndex.dimension,
-                    query
+                    target
                 );
                 return scorer;
             }, knnCollector, acceptDocs);
@@ -112,9 +98,6 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     public void close() throws IOException {
         indexInput.close();
         faissIndex.close();
-        if (arena != null) {
-            arena.close();
-        }
     }
 
     private void search(
@@ -144,8 +127,14 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         final Bits acceptedOrds = scorer.getAcceptOrds(acceptDocs);
 
         if (knnCollector.k() < scorer.maxOrd()) {
-            // Do ANN search with Lucene's HNSW graph searcher.
-            HnswGraphSearcher.search(scorer, collector, faissHnswGraph, acceptedOrds);
+
+            if (scorer instanceof NativeRandomVectorScorer nativeVectorScorer) {
+                final FaissHnswGraph faissHnswGraph = new FaissHnswGraph(hnsw, indexInput, nativeVectorScorer);
+                // Do ANN search with Lucene's HNSW graph searcher.
+                HnswGraphSearcher.search(scorer, collector, faissHnswGraph, acceptedOrds);
+            } else {
+                throw new RuntimeException("!!!!!!!!!!!!!!!!!! ######## @@@@@@@@");
+            }
         } else {
             // If k is larger than the number of vectors, we can just iterate over all vectors
             // and collect them.
@@ -160,5 +149,9 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
                 }
             }
         }  // End if
+
+        if (scorer instanceof NativeRandomVectorScorer nativeVectorScorer) {
+            nativeVectorScorer.close();
+        }
     }
 }

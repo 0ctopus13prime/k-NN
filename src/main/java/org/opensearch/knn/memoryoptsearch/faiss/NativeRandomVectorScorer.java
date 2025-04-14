@@ -5,9 +5,11 @@
 
 package org.opensearch.knn.memoryoptsearch.faiss;
 
+import lombok.Getter;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
@@ -17,30 +19,66 @@ import java.lang.invoke.MethodHandle;
 
 public class NativeRandomVectorScorer implements RandomVectorScorer {
     private final int maxOrd;
+    @Getter
+    private final Arena arena;
     private final MemorySegment query;
     private final long flatVectorsManagerAddress;
     private final int dimension;
+    private int nextNeighborIndex;
+    private MemorySegment neighborList;
+    private MemorySegment scores;
 
     public NativeRandomVectorScorer(
         final int maxOrd,
         final long flatVectorsManagerAddress,
         final int dimension,
-        final MemorySegment query
+        final float[] target
     ) {
         this.maxOrd = maxOrd;
         this.flatVectorsManagerAddress = flatVectorsManagerAddress;
         this.dimension = dimension;
-        this.query = query;
+        this.arena = Arena.ofConfined();
+        this.query = arena.allocate(Float.BYTES * target.length, ValueLayout.JAVA_FLOAT.byteAlignment());
+        for (int i = 0; i < target.length; i++) {
+            this.query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
+        }
+    }
+
+    public void close() {
+        arena.close();
     }
 
     @Override
     public float score(int internalVectorId) throws IOException {
-        // Entry point
+        if (scores == null) {
+            // Entry point
+            try {
+                final float singleScore = (float) singleScoreMethodHandle.invoke(
+                    flatVectorsManagerAddress, query, internalVectorId, dimension);
+                KdyPrint.println("__________ single score=" + singleScore + ", vid=" + internalVectorId);
+                return singleScore;
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        final int expectedId = neighborList.getAtIndex(ValueLayout.JAVA_INT, nextNeighborIndex);
+        if (expectedId == internalVectorId) {
+            return scores.getAtIndex(ValueLayout.JAVA_FLOAT, nextNeighborIndex++);
+        }
+
+        throw new RuntimeException("%%%%%%%%%%%%%%%%%%% vid=" + internalVectorId + ", expected=" + expectedId);
+    }
+
+    public void bulkScoring(final MemorySegment neighborList, final int numNeighbors) {
+        this.neighborList = neighborList;
+        this.nextNeighborIndex = 0;
+        if (scores == null || scores.byteSize() < (Float.BYTES * numNeighbors)) {
+            scores = arena.allocate(numNeighbors * Float.BYTES, 64);
+        }
         try {
-            final float singleScore = (float) singleScoreMethodHandle.invoke(
-                flatVectorsManagerAddress, query, internalVectorId, dimension);
-            System.out.println("__________ single score=" + singleScore + ", vid=" + internalVectorId);
-            return singleScore;
+            bulkScoreMethodHandle.invoke(
+                flatVectorsManagerAddress, query, neighborList, scores, numNeighbors, dimension);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
@@ -53,9 +91,23 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
 
     static final MethodHandle singleScoreMethodHandle;
 
+    static final MethodHandle bulkScoreMethodHandle;
+
     static {
         final Linker linker = Linker.nativeLinker();
         final SymbolLookup lookup = SymbolLookup.loaderLookup();
+
+        bulkScoreMethodHandle = linker.downcallHandle(
+            lookup.find("Java_org_opensearch_knn_jni_FaissService_bulkScoring").orElseThrow(),
+            FunctionDescriptor.ofVoid(
+                ValueLayout.JAVA_LONG,  // manager address
+                ValueLayout.ADDRESS,  // query
+                ValueLayout.ADDRESS,  // neighbor list
+                ValueLayout.ADDRESS,  // scores
+                ValueLayout.JAVA_INT,  // size
+                ValueLayout.JAVA_INT  // dimension
+            )
+        );
 
         singleScoreMethodHandle = linker.downcallHandle(
             lookup.find("Java_org_opensearch_knn_jni_FaissService_singleScoring").orElseThrow(),
