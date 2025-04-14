@@ -7,6 +7,7 @@ package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil;
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
@@ -18,6 +19,10 @@ import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.rmi.RemoteException;
 
 /**
  * This searcher directly reads FAISS index file via the provided {@link IndexInput} then perform vector search on it.
@@ -28,12 +33,15 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private final IndexInput indexInput;
     private FaissIndex faissIndex;
     private FaissHnswGraph faissHnswGraph;
+    private Arena arena;
+    private MemorySegment query;
 
     public FaissMemoryOptimizedSearcher(IndexInput indexInput) throws IOException {
         this.indexInput = indexInput;
         this.faissIndex = FaissIndex.load(indexInput);
         final FaissHNSW hnsw = extractFaissHnsw(faissIndex);
         this.faissHnswGraph = new FaissHnswGraph(hnsw, indexInput);
+        this.arena = Arena.ofShared();
     }
 
     private static FaissHNSW extractFaissHnsw(final FaissIndex faissIndex) {
@@ -46,16 +54,44 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        search(
-            VectorEncoding.FLOAT32,
-            () -> VECTOR_SCORER.getRandomVectorScorer(
-                faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
-                faissIndex.getFloatValues(indexInput),
-                target
-            ),
-            knnCollector,
-            acceptDocs
-        );
+        final FloatVectorValues floatValues = faissIndex.getFloatValues(indexInput);
+        if (floatValues instanceof NativeFloatVectorValues nativeFloatVectorValues) {
+            search(VectorEncoding.FLOAT32, () -> {
+                if (query == null || query.byteSize() < (Float.BYTES * target.length)) {
+                    arena.close();
+                    arena = Arena.ofShared();
+                    query = arena.allocate(Float.BYTES * target.length, ValueLayout.JAVA_FLOAT.byteAlignment());
+                    for (int i = 0; i < target.length; i++) {
+                        query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
+                    }
+                }
+
+                System.out.println("______________ maxNodeId=" + faissHnswGraph.maxNodeId()
+                                   + ", manager_addr=" + nativeFloatVectorValues.getFlatVectorsManagerAddress()
+                                   + ", dimension=" + faissIndex.dimension
+                                   + ", query=" + query);
+
+                final NativeRandomVectorScorer scorer = new NativeRandomVectorScorer(
+                    faissHnswGraph.maxNodeId(),
+                    nativeFloatVectorValues.getFlatVectorsManagerAddress(),
+                    faissIndex.dimension,
+                    query
+                );
+                return scorer;
+            }, knnCollector, acceptDocs);
+        } else {
+            throw new RemoteException("NOOOOOOOOOOOOOOOOOOO NativeFloatVectorValues");
+            // search(
+            // VectorEncoding.FLOAT32,
+            // () -> VECTOR_SCORER.getRandomVectorScorer(
+            // faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
+            // faissIndex.getFloatValues(indexInput),
+            // target
+            // ),
+            // knnCollector,
+            // acceptDocs
+            // );
+        }
     }
 
     @Override
@@ -75,6 +111,10 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     @Override
     public void close() throws IOException {
         indexInput.close();
+        faissIndex.close();
+        if (arena != null) {
+            arena.close();
+        }
     }
 
     private void search(

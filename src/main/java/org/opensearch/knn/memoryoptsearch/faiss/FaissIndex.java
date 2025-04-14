@@ -117,4 +117,6 @@ public abstract class FaissIndex {
      * @throws IOException
      */
     public abstract ByteVectorValues getByteValues(IndexInput indexInput) throws IOException;
+
+    public void close() {}
 }

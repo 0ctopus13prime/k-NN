@@ -36,7 +36,7 @@ import static org.opensearch.knn.jni.PlatformUtils.isAVX512SPRSupportedBySystem;
  *      src/main/java/org/opensearch/knn/index/query/KNNQueryResult.java
  *      src/main/java/org/opensearch/knn/common/KNNConstants.java
  */
-class FaissService {
+public class FaissService {
 
     static {
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
@@ -45,12 +45,16 @@ class FaissService {
             // 'knn.faiss.avx2.disabled', 'knn.faiss.avx512.disabled', or 'knn.faiss.avx512_spr.disabled' to true in the opensearch.yml
             // configuration
             if (!isFaissAVX512SPRDisabled() && isAVX512SPRSupportedBySystem()) {
+                System.out.println("_____________________ lib=" + KNNConstants.FAISS_AVX512_SPR_JNI_LIBRARY_NAME);
                 System.loadLibrary(KNNConstants.FAISS_AVX512_SPR_JNI_LIBRARY_NAME);
             } else if (!isFaissAVX512Disabled() && isAVX512SupportedBySystem()) {
+                System.out.println("_____________________ lib=" + KNNConstants.FAISS_AVX512_JNI_LIBRARY_NAME);
                 System.loadLibrary(KNNConstants.FAISS_AVX512_JNI_LIBRARY_NAME);
             } else if (!isFaissAVX2Disabled() && isAVX2SupportedBySystem()) {
+                System.out.println("_____________________ lib=" + KNNConstants.FAISS_AVX2_JNI_LIBRARY_NAME);
                 System.loadLibrary(KNNConstants.FAISS_AVX2_JNI_LIBRARY_NAME);
             } else {
+                System.out.println("_____________________ lib=" + KNNConstants.FAISS_JNI_LIBRARY_NAME);
                 System.loadLibrary(KNNConstants.FAISS_JNI_LIBRARY_NAME);
             }
 
@@ -450,4 +454,10 @@ class FaissService {
         int indexMaxResultWindow,
         int[] parentIds
     );
+
+    // TMP
+    public static native long allocateFlatVectorsManager(IndexInputWithBuffer input, int dimension, int numVectors);
+
+    public static native void deallocateFlatVectorsManager(long flatVectorsMemoryAddress);
+    // TMP
 }

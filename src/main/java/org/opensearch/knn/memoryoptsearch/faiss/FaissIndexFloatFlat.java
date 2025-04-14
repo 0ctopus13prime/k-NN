@@ -6,12 +6,13 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.store.IndexInput;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
+import org.opensearch.knn.index.store.IndexInputWithBuffer;
+import org.opensearch.knn.jni.FaissService;
 
 import java.io.IOException;
 import java.util.Map;
@@ -40,6 +41,7 @@ public class FaissIndexFloatFlat extends FaissIndex {
     private long oneVectorByteSize;
     @Getter
     private final KNNVectorSimilarityFunction vectorSimilarityFunction;
+    private long flatVectorsMemoryAddress;
 
     public FaissIndexFloatFlat(final String indexType) {
         super(indexType);
@@ -57,7 +59,7 @@ public class FaissIndexFloatFlat extends FaissIndex {
      * @throws IOException
      */
     @Override
-    protected void doLoad(IndexInput input) throws IOException {
+    protected void doLoad(final IndexInput input) throws IOException {
         readCommonHeader(input);
         oneVectorByteSize = (long) Float.BYTES * getDimension();
         floatVectors = new FaissSection(input, Float.BYTES);
@@ -72,6 +74,18 @@ public class FaissIndexFloatFlat extends FaissIndex {
                     + oneVectorByteSize
             );
         }
+
+        System.out.println("------------------------ offset111=" + input.getFilePointer());
+
+        input.seek(floatVectors.getBaseOffset());
+        kdyNativeLoad(input);
+
+        System.out.println("------------------------ offset222=" + input.getFilePointer());
+    }
+
+    private void kdyNativeLoad(final IndexInput input) {
+        final IndexInputWithBuffer indexInputWithBuffer = new IndexInputWithBuffer(input);
+        flatVectorsMemoryAddress = FaissService.allocateFlatVectorsManager(indexInputWithBuffer, dimension, totalNumberOfVectors);
     }
 
     @Override
@@ -81,21 +95,15 @@ public class FaissIndexFloatFlat extends FaissIndex {
 
     @Override
     public FloatVectorValues getFloatValues(final IndexInput indexInput) {
-        @RequiredArgsConstructor
-        class FloatVectorValuesImpl extends FloatVectorValues {
-            final IndexInput indexInput;
-            final float[] buffer = new float[dimension];
-
+        class FloatVectorValuesImpl extends NativeFloatVectorValues {
             @Override
             public float[] vectorValue(int internalVectorId) throws IOException {
-                indexInput.seek(floatVectors.getBaseOffset() + internalVectorId * oneVectorByteSize);
-                indexInput.readFloats(buffer, 0, buffer.length);
-                return buffer;
+                throw new UnsupportedOperationException("WWWWWWWWWWWWWWW");
             }
 
             @Override
             public FloatVectorValues copy() {
-                return new FloatVectorValuesImpl(indexInput.clone());
+                return new FloatVectorValuesImpl();
             }
 
             @Override
@@ -107,13 +115,23 @@ public class FaissIndexFloatFlat extends FaissIndex {
             public int size() {
                 return totalNumberOfVectors;
             }
+
+            @Override
+            public long getFlatVectorsManagerAddress() {
+                return flatVectorsMemoryAddress;
+            }
         }
 
-        return new FloatVectorValuesImpl(indexInput);
+        return new FloatVectorValuesImpl();
     }
 
     @Override
     public ByteVectorValues getByteValues(IndexInput indexInput) {
         throw new UnsupportedOperationException(getClass().getSimpleName() + " does not support " + ByteVectorValues.class.getSimpleName());
+    }
+
+    public void close() {
+        super.close();
+        FaissService.deallocateFlatVectorsManager(flatVectorsMemoryAddress);
     }
 }
