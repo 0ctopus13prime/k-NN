@@ -24,6 +24,7 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
     private final MemorySegment query;
     private final long flatVectorsManagerAddress;
     private final int dimension;
+    private int numNeighbors;
     private int nextNeighborIndex;
     private MemorySegment neighborList;
     private MemorySegment scores;
@@ -37,7 +38,7 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
         this.maxOrd = maxOrd;
         this.flatVectorsManagerAddress = flatVectorsManagerAddress;
         this.dimension = dimension;
-        this.arena = Arena.ofConfined();
+        this.arena = Arena.ofShared();
         this.query = arena.allocate(Float.BYTES * target.length, ValueLayout.JAVA_FLOAT.byteAlignment());
         for (int i = 0; i < target.length; i++) {
             this.query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
@@ -50,31 +51,30 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
 
     @Override
     public float score(int internalVectorId) throws IOException {
-        if (scores == null) {
-            // Entry point
-            try {
-                final float singleScore = (float) singleScoreMethodHandle.invoke(
-                    flatVectorsManagerAddress, query, internalVectorId, dimension);
-                KdyPrint.println("__________ single score=" + singleScore + ", vid=" + internalVectorId);
-                return singleScore;
-            } catch (Throwable e) {
-                throw new RuntimeException(e);
+        if (nextNeighborIndex < numNeighbors) {
+            final int expectedId = neighborList.getAtIndex(ValueLayout.JAVA_INT, nextNeighborIndex);
+            if (expectedId == internalVectorId) {
+                return scores.getAtIndex(ValueLayout.JAVA_FLOAT, nextNeighborIndex++);
             }
         }
 
-        final int expectedId = neighborList.getAtIndex(ValueLayout.JAVA_INT, nextNeighborIndex);
-        if (expectedId == internalVectorId) {
-            return scores.getAtIndex(ValueLayout.JAVA_FLOAT, nextNeighborIndex++);
+        try {
+            final float singleScore = (float) singleScoreMethodHandle.invoke(
+                flatVectorsManagerAddress, query, internalVectorId, dimension);
+            KdyPrint.println("__________ single score=" + singleScore + ", vid=" + internalVectorId);
+            return singleScore;
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
         }
-
-        throw new RuntimeException("%%%%%%%%%%%%%%%%%%% vid=" + internalVectorId + ", expected=" + expectedId);
     }
 
     public void bulkScoring(final MemorySegment neighborList, final int numNeighbors) {
         this.neighborList = neighborList;
         this.nextNeighborIndex = 0;
+        this.numNeighbors = numNeighbors;
         if (scores == null || scores.byteSize() < (Float.BYTES * numNeighbors)) {
-            scores = arena.allocate(numNeighbors * Float.BYTES, 64);
+            scores = arena.allocate(2 * numNeighbors * Float.BYTES, 64);
+            System.out.println("___________________ size(scores)==" + scores.byteSize());
         }
         try {
             bulkScoreMethodHandle.invoke(

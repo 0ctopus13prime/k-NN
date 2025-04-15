@@ -84,7 +84,7 @@ public class FaissHnswGraph extends HnswGraph {
         // Make sure we have sufficient space for neighbor list
         final long maxLength = end - begin;
         if (neighborIdList == null || neighborIdList.byteSize() < (Integer.BYTES * maxLength)) {
-            neighborIdList = arena.allocate(Integer.BYTES * maxLength, ValueLayout.JAVA_INT.byteAlignment());
+            neighborIdList = arena.allocate(2 * Integer.BYTES * maxLength, ValueLayout.JAVA_INT.byteAlignment());
         }
 
         // Seek to the first offset of neighbor list

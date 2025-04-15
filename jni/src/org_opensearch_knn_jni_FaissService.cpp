@@ -512,13 +512,13 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_allocateFlatVec
         addedVecs += numVecsToAdd;
     }
 
-    std::cout << "____________________ dimension=" << dimension
-              << ", numVectors=" << numVectors
-              << ", oneVecSize=" << oneVecSize
-              << ", numVecsInPage=" << numVecsInPage
-              << ", numPages=" << numPages
-              << ", manager addr=" << ((uint64_t) manager)
-              << std::endl;
+    // std::cout << "____________________ dimension=" << dimension
+    //           << ", numVectors=" << numVectors
+    //           << ", oneVecSize=" << oneVecSize
+    //           << ", numVecsInPage=" << numVecsInPage
+    //           << ", numPages=" << numPages
+    //           << ", manager addr=" << ((uint64_t) manager)
+    //           << std::endl;
 
     return (jlong) manager;
 }
@@ -530,7 +530,7 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_deallocateFlatVe
 
 float convert_dist_to_lucene_score(float dist) {
     if (dist < 0) {
-      return 1 / (1 + -dist);
+      return 1 / (1 - dist);
     } else {
       return dist + 1;
     }
@@ -548,6 +548,15 @@ void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
     const int32_t oneVecSize = sizeof(float) * dimension;
     const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
 
+    // std::cout << "_________ c++ bulk scoring"
+    //           << ", flatVectorsManagerAddress=" << flatVectorsManagerAddress
+    //           << ", query=" << query
+    //           << ", neighborList=" << neighborList
+    //           << ", scores=" << scores
+    //           << ", size=" << size
+    //           << ", dimension=" << dimension
+    //           << std::endl;
+
     float* vectors[4];
     int idx = 0;
     int score_idx = 0;
@@ -557,9 +566,26 @@ void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
         const int page_index = id / numVecsInPage;
         const int vec_index = id % numVecsInPage;
 
-        const auto vec = (manager->floatValues[page_index].data()) + (vec_index * oneVecSize);
+        auto vec = manager->floatValues[page_index].data() + (vec_index * dimension);
+
+        // std::cout << "__________________ c++ neighbor_id=" << id
+        //           << ", page_index=" << page_index
+        //           << ", vec_index=" << vec_index
+        //           << ", score_idx=" << score_idx
+        //           << ", q[0]=" << query[0]
+        //           << std::endl;
+
         vectors[idx++] = vec;
+
         if (idx == 4) {
+            // std::cout << "+++++++++++++++++++ before c++ bulk"
+            //           << ", v[0]=" << vectors[0][0]
+            //           << ", v[1]=" << vectors[1][0]
+            //           << ", v[2]=" << vectors[2][0]
+            //           << ", v[3]=" << vectors[3][0]
+            //           << ", q=" << ((uint64_t) query)
+            //           << std::endl;
+
             faiss::fvec_inner_product_batch_4(
                 query,
                 vectors[0],
@@ -572,10 +598,10 @@ void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
                 scores[score_idx + 2],
                 scores[score_idx + 3]);
 
-            scores[0] = convert_dist_to_lucene_score(scores[0]);
-            scores[1] = convert_dist_to_lucene_score(scores[1]);
-            scores[2] = convert_dist_to_lucene_score(scores[2]);
-            scores[3] = convert_dist_to_lucene_score(scores[3]);
+            scores[score_idx] = convert_dist_to_lucene_score(scores[score_idx]);
+            scores[score_idx + 1] = convert_dist_to_lucene_score(scores[score_idx + 1]);
+            scores[score_idx + 2] = convert_dist_to_lucene_score(scores[score_idx + 2]);
+            scores[score_idx + 3] = convert_dist_to_lucene_score(scores[score_idx + 3]);
 
             idx = 0;
             score_idx += 4;
@@ -604,26 +630,26 @@ float Java_org_opensearch_knn_jni_FaissService_singleScoring
 
     float dist = faiss::fvec_inner_product(query, vec, dimension);
 
-    std::cout << "_______________ single score in c++ -> "
-              << dist
-              << ", manager addr=" << flatVectorsManagerAddress
-              << ", dim=" << dimension
-              << ", vector_id=" << vector_id
-              << ", page_index=" << page_index
-              << ", vec_index=" << vec_index
-              << std::endl;
-    std::cout << "query -> [";
-    dimension = dimension > 8 ? 8 : dimension;
-    for (int i = 0 ; i < dimension ; ++i) {
-        std::cout << ", " << query[i];
-    }
-    std::cout << std::endl;
+    // std::cout << "_______________ single score in c++ -> "
+    //           << dist
+    //           << ", manager addr=" << flatVectorsManagerAddress
+    //           << ", dim=" << dimension
+    //           << ", vector_id=" << vector_id
+    //           << ", page_index=" << page_index
+    //           << ", vec_index=" << vec_index
+    //           << std::endl;
+    // std::cout << "query -> [";
+    // dimension = dimension > 8 ? 8 : dimension;
+    // for (int i = 0 ; i < dimension ; ++i) {
+    //     std::cout << ", " << query[i];
+    // }
+    // std::cout << std::endl;
 
-    std::cout << "vec -> [";
-    for (int i = 0 ; i < dimension ; ++i) {
-        std::cout << ", " << vec[i];
-    }
-    std::cout << std::endl;
+    // std::cout << "vec -> [";
+    // for (int i = 0 ; i < dimension ; ++i) {
+    //     std::cout << ", " << vec[i];
+    // }
+    // std::cout << std::endl;
 
     return convert_dist_to_lucene_score(dist);
 }

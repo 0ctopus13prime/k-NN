@@ -127,7 +127,6 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         final Bits acceptedOrds = scorer.getAcceptOrds(acceptDocs);
 
         if (knnCollector.k() < scorer.maxOrd()) {
-
             if (scorer instanceof NativeRandomVectorScorer nativeVectorScorer) {
                 final FaissHnswGraph faissHnswGraph = new FaissHnswGraph(hnsw, indexInput, nativeVectorScorer);
                 // Do ANN search with Lucene's HNSW graph searcher.
