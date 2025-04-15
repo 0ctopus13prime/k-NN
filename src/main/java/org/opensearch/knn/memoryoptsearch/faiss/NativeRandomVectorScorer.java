@@ -74,7 +74,7 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
         this.numNeighbors = numNeighbors;
         if (scores == null || scores.byteSize() < (Float.BYTES * numNeighbors)) {
             scores = arena.allocate(2 * numNeighbors * Float.BYTES, 64);
-            System.out.println("___________________ size(scores)==" + scores.byteSize());
+            KdyPrint.println("___________________ size(scores)==" + scores.byteSize());
         }
         try {
             bulkScoreMethodHandle.invoke(
