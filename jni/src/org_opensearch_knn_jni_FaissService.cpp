@@ -18,6 +18,7 @@
 #include "faiss_wrapper.h"
 #include "jni_util.h"
 #include "faiss_stream_support.h"
+#include "faiss/utils/distances.h"
 
 static knn_jni::JNIUtil jniUtil;
 static const jint KNN_FAISS_JNI_VERSION = JNI_VERSION_1_1;
@@ -481,3 +482,176 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
     }
     return nullptr;
 }
+
+// TMP
+
+const uint32_t PAGE_SIZE = 16 * 1024 * 1024;  // 16MB
+
+struct FlatVectorManager {
+    std::vector<std::vector<float>> floatValues;
+};
+
+JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_allocateFlatVectorsManager
+  (JNIEnv* env, jclass cls, jobject input, jint dimension, jint numVectors) {
+    const int oneVecSize = sizeof(float) * dimension;
+    const int numVecsInPage = PAGE_SIZE / oneVecSize;
+    const int numPages = numVectors / numVecsInPage + ((numVectors % numVecsInPage) > 0 ? 1 : 0);
+
+    knn_jni::stream::NativeEngineIndexInputMediator mediator {&jniUtil, env, input};
+    auto manager = new FlatVectorManager();
+    manager->floatValues.resize(numPages);
+    int addedVecs = 0;
+    for (int i = 0 ; i  < numPages ; ++i) {
+        int numVecsToAdd = numVecsInPage;
+        if ((addedVecs + numVecsInPage) > numVectors) {
+            numVecsToAdd = numVectors - addedVecs;
+        }
+        manager->floatValues[i].resize(numVecsToAdd * dimension);
+        auto data = (uint8_t*) manager->floatValues[i].data();
+        mediator.copyBytes(numVecsToAdd * oneVecSize, data);
+        addedVecs += numVecsToAdd;
+    }
+
+    // std::cout << "____________________ dimension=" << dimension
+    //           << ", numVectors=" << numVectors
+    //           << ", oneVecSize=" << oneVecSize
+    //           << ", numVecsInPage=" << numVecsInPage
+    //           << ", numPages=" << numPages
+    //           << ", manager addr=" << ((uint64_t) manager)
+    //           << std::endl;
+
+    return (jlong) manager;
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_deallocateFlatVectorsManager
+  (JNIEnv * env, jclass cls, jlong flatVectorsManagerAddress) {
+    delete ((FlatVectorManager*) flatVectorsManagerAddress);
+}
+
+float convert_dist_to_lucene_score(float dist) {
+    if (dist < 0) {
+      return 1 / (1 - dist);
+    } else {
+      return dist + 1;
+    }
+}
+
+void Java_org_opensearch_knn_jni_FaissService_bulkScoring(
+   uint64_t flatVectorsManagerAddress,
+   float* query,
+   uint32_t* neighborList,
+   float* scores,
+   uint32_t size,
+   uint32_t dimension) {
+    auto manager = (FlatVectorManager*) flatVectorsManagerAddress;
+
+    const int32_t oneVecSize = sizeof(float) * dimension;
+    const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
+
+    // std::cout << "_________ c++ bulk scoring"
+    //           << ", flatVectorsManagerAddress=" << flatVectorsManagerAddress
+    //           << ", query=" << query
+    //           << ", neighborList=" << neighborList
+    //           << ", scores=" << scores
+    //           << ", size=" << size
+    //           << ", dimension=" << dimension
+    //           << std::endl;
+
+    float* vectors[4];
+    int idx = 0;
+    int score_idx = 0;
+
+    for (int i = 0 ; i < size ; ++i) {
+        const long id = neighborList[i];
+        const int page_index = id / numVecsInPage;
+        const int vec_index = id % numVecsInPage;
+
+        auto vec = manager->floatValues[page_index].data() + (vec_index * dimension);
+
+        // std::cout << "__________________ c++ neighbor_id=" << id
+        //           << ", page_index=" << page_index
+        //           << ", vec_index=" << vec_index
+        //           << ", score_idx=" << score_idx
+        //           << ", q[0]=" << query[0]
+        //           << std::endl;
+
+        vectors[idx++] = vec;
+
+        if (idx == 4) {
+            // std::cout << "+++++++++++++++++++ before c++ bulk"
+            //           << ", v[0]=" << vectors[0][0]
+            //           << ", v[1]=" << vectors[1][0]
+            //           << ", v[2]=" << vectors[2][0]
+            //           << ", v[3]=" << vectors[3][0]
+            //           << ", q=" << ((uint64_t) query)
+            //           << std::endl;
+
+            faiss::fvec_inner_product_batch_4(
+                query,
+                vectors[0],
+                vectors[1],
+                vectors[2],
+                vectors[3],
+                dimension,
+                scores[score_idx],
+                scores[score_idx + 1],
+                scores[score_idx + 2],
+                scores[score_idx + 3]);
+
+            scores[score_idx] = convert_dist_to_lucene_score(scores[score_idx]);
+            scores[score_idx + 1] = convert_dist_to_lucene_score(scores[score_idx + 1]);
+            scores[score_idx + 2] = convert_dist_to_lucene_score(scores[score_idx + 2]);
+            scores[score_idx + 3] = convert_dist_to_lucene_score(scores[score_idx + 3]);
+
+            idx = 0;
+            score_idx += 4;
+        }
+    }
+
+    for (int i = 0 ; i < idx ; ++i) {
+        scores[score_idx++] =
+            convert_dist_to_lucene_score(
+                faiss::fvec_inner_product(query, vectors[i], dimension));
+    }
+}
+
+float Java_org_opensearch_knn_jni_FaissService_singleScoring
+  (int64_t flatVectorsManagerAddress,
+   float* query,
+   int32_t vector_id,
+   int32_t dimension) {
+
+    auto manager = (FlatVectorManager*) flatVectorsManagerAddress;
+    const int32_t oneVecSize = sizeof(float) * dimension;
+    const int32_t numVecsInPage = PAGE_SIZE / oneVecSize;
+    const int page_index = vector_id / numVecsInPage;
+    const int vec_index = vector_id % numVecsInPage;
+    auto vec = manager->floatValues[page_index].data() + (vec_index * dimension);
+
+    float dist = faiss::fvec_inner_product(query, vec, dimension);
+
+    // std::cout << "_______________ single score in c++ -> "
+    //           << dist
+    //           << ", manager addr=" << flatVectorsManagerAddress
+    //           << ", dim=" << dimension
+    //           << ", vector_id=" << vector_id
+    //           << ", page_index=" << page_index
+    //           << ", vec_index=" << vec_index
+    //           << std::endl;
+    // std::cout << "query -> [";
+    // dimension = dimension > 8 ? 8 : dimension;
+    // for (int i = 0 ; i < dimension ; ++i) {
+    //     std::cout << ", " << query[i];
+    // }
+    // std::cout << std::endl;
+
+    // std::cout << "vec -> [";
+    // for (int i = 0 ; i < dimension ; ++i) {
+    //     std::cout << ", " << vec[i];
+    // }
+    // std::cout << std::endl;
+
+    return convert_dist_to_lucene_score(dist);
+}
+
+// TMP

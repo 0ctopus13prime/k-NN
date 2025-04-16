@@ -7,6 +7,7 @@ package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil;
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
@@ -18,6 +19,10 @@ import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.rmi.RemoteException;
 
 /**
  * This searcher directly reads FAISS index file via the provided {@link IndexInput} then perform vector search on it.
@@ -26,14 +31,13 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private static final FlatVectorsScorer VECTOR_SCORER = FlatVectorScorerUtil.getLucene99FlatVectorsScorer();
 
     private final IndexInput indexInput;
-    private FaissIndex faissIndex;
-    private FaissHnswGraph faissHnswGraph;
+    private final FaissIndex faissIndex;
+    private final FaissHNSW hnsw;
 
     public FaissMemoryOptimizedSearcher(IndexInput indexInput) throws IOException {
         this.indexInput = indexInput;
         this.faissIndex = FaissIndex.load(indexInput);
-        final FaissHNSW hnsw = extractFaissHnsw(faissIndex);
-        this.faissHnswGraph = new FaissHnswGraph(hnsw, indexInput);
+        this.hnsw = extractFaissHnsw(faissIndex);
     }
 
     private static FaissHNSW extractFaissHnsw(final FaissIndex faissIndex) {
@@ -46,16 +50,34 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        search(
-            VectorEncoding.FLOAT32,
-            () -> VECTOR_SCORER.getRandomVectorScorer(
-                faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
-                faissIndex.getFloatValues(indexInput),
-                target
-            ),
-            knnCollector,
-            acceptDocs
-        );
+        final FloatVectorValues floatValues = faissIndex.getFloatValues(indexInput);
+        if (floatValues instanceof NativeFloatVectorValues nativeFloatVectorValues) {
+            search(VectorEncoding.FLOAT32, () -> {
+                KdyPrint.println("______________ maxNodeId=" + (hnsw.getTotalNumberOfVectors() - 1)
+                                   + ", manager_addr=" + nativeFloatVectorValues.getFlatVectorsManagerAddress()
+                                   + ", dimension=" + faissIndex.dimension);
+
+                final NativeRandomVectorScorer scorer = new NativeRandomVectorScorer(
+                    (int) (hnsw.getTotalNumberOfVectors() - 1),
+                    nativeFloatVectorValues.getFlatVectorsManagerAddress(),
+                    faissIndex.dimension,
+                    target
+                );
+                return scorer;
+            }, knnCollector, acceptDocs);
+        } else {
+            throw new RemoteException("NOOOOOOOOOOOOOOOOOOO NativeFloatVectorValues");
+            // search(
+            // VectorEncoding.FLOAT32,
+            // () -> VECTOR_SCORER.getRandomVectorScorer(
+            // faissIndex.getVectorSimilarityFunction().getVectorSimilarityFunction(),
+            // faissIndex.getFloatValues(indexInput),
+            // target
+            // ),
+            // knnCollector,
+            // acceptDocs
+            // );
+        }
     }
 
     @Override
@@ -75,6 +97,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     @Override
     public void close() throws IOException {
         indexInput.close();
+        faissIndex.close();
     }
 
     private void search(
@@ -104,8 +127,13 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         final Bits acceptedOrds = scorer.getAcceptOrds(acceptDocs);
 
         if (knnCollector.k() < scorer.maxOrd()) {
-            // Do ANN search with Lucene's HNSW graph searcher.
-            HnswGraphSearcher.search(scorer, collector, faissHnswGraph, acceptedOrds);
+            if (scorer instanceof NativeRandomVectorScorer nativeVectorScorer) {
+                final FaissHnswGraph faissHnswGraph = new FaissHnswGraph(hnsw, indexInput, nativeVectorScorer);
+                // Do ANN search with Lucene's HNSW graph searcher.
+                HnswGraphSearcher.search(scorer, collector, faissHnswGraph, acceptedOrds);
+            } else {
+                throw new RuntimeException("!!!!!!!!!!!!!!!!!! ######## @@@@@@@@");
+            }
         } else {
             // If k is larger than the number of vectors, we can just iterate over all vectors
             // and collect them.
@@ -120,5 +148,9 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
                 }
             }
         }  // End if
+
+        if (scorer instanceof NativeRandomVectorScorer nativeVectorScorer) {
+            nativeVectorScorer.close();
+        }
     }
 }

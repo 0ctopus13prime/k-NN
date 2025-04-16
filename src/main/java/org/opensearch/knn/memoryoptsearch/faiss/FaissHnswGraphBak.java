@@ -7,13 +7,9 @@ package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.hnsw.HnswGraph;
 
 import java.io.IOException;
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 
@@ -28,31 +24,20 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
  * <a href="https://github.com/apache/lucene/blob/92290a0201458152c9e03d199f38f2e8a479f045/lucene/core/src/java/org/apache/lucene/codecs/lucene99/Lucene99HnswVectorsReader.java#L467">OffHeapHnswGraph</a>
  * in Lucene.
  */
-public class FaissHnswGraph extends HnswGraph {
+public class FaissHnswGraphBak extends HnswGraph {
     private final FaissHNSW faissHnsw;
     private final IndexInput indexInput;
     private final int numVectors;
-    private MemorySegment neighborIdList;
+    private int[] neighborIdList;
     private int numNeighbors;
     private int nextNeighborIndex;
-    private NativeRandomVectorScorer nativeVectorScorer;
-    private final Arena arena;
-    private final FixedBitSet visited;
-    private int previousLevel;
 
-    public FaissHnswGraph(
-        final FaissHNSW faissHNSW,
-        final IndexInput indexInput,
-        final NativeRandomVectorScorer nativeVectorScorer) {
+    public FaissHnswGraphBak(final FaissHNSW faissHNSW, final IndexInput indexInput) {
         this.faissHnsw = faissHNSW;
         // Offset readers MUST non null.
         Objects.requireNonNull(faissHNSW.getOffsetsReader());
         this.indexInput = indexInput;
         this.numVectors = Math.toIntExact(faissHNSW.getTotalNumberOfVectors());
-        this.nativeVectorScorer = nativeVectorScorer;
-        this.arena = nativeVectorScorer.getArena();
-        this.visited = new FixedBitSet((int) faissHNSW.getTotalNumberOfVectors());
-        this.previousLevel = -1;
     }
 
     /**
@@ -62,11 +47,6 @@ public class FaissHnswGraph extends HnswGraph {
      */
     @Override
     public void seek(int level, int internalVectorId) {
-        if (previousLevel > 0 && level == 0) {
-            visited.clear();
-        }
-        previousLevel = level;
-
         // Get a relative starting offset of neighbor list at `level`.
         final long o = faissHnsw.getOffsetsReader().get(internalVectorId);
 
@@ -77,14 +57,13 @@ public class FaissHnswGraph extends HnswGraph {
         final long begin = o + faissHnsw.getCumNumberNeighborPerLevel()[level];
         final long end = o + faissHnsw.getCumNumberNeighborPerLevel()[level + 1];
         loadNeighborIdList(begin, end);
-        nativeVectorScorer.bulkScoring(neighborIdList, numNeighbors);
     }
 
     private void loadNeighborIdList(final long begin, final long end) {
         // Make sure we have sufficient space for neighbor list
         final long maxLength = end - begin;
-        if (neighborIdList == null || neighborIdList.byteSize() < (Integer.BYTES * maxLength)) {
-            neighborIdList = arena.allocate(2 * Integer.BYTES * maxLength, ValueLayout.JAVA_INT.byteAlignment());
+        if (neighborIdList == null || neighborIdList.length < maxLength) {
+            neighborIdList = new int[(int) (maxLength)];
         }
 
         // Seek to the first offset of neighbor list
@@ -99,18 +78,13 @@ public class FaissHnswGraph extends HnswGraph {
         try {
             for (long i = begin; i < end; i++) {
                 final int neighborId = indexInput.readInt();
-
-                KdyPrint.println("________________________ neighbor id=" + neighborId);
-
                 // The idea is that a vector does not always have a complete list of neighbor vectors.
                 // FAISS assigns a fixed size to the neighbor list and uses -1 to indicate missing entries.
                 // Therefore, we can safely stop once hit -1.
                 // For example, if the neighbor list size is 16 and a vector has only 8 neighbors, the list would appear as:
                 // [1, 4, 6, 8, 13, 17, 60, 88, -1, -1, ..., -1].
                 if (neighborId >= 0) {
-                    if (visited.getAndSet(neighborId) == false) {
-                        neighborIdList.setAtIndex(ValueLayout.JAVA_INT, index++, neighborId);
-                    }
+                    neighborIdList[index++] = neighborId;
                 } else {
                     break;
                 }
@@ -132,7 +106,7 @@ public class FaissHnswGraph extends HnswGraph {
     @Override
     public int nextNeighbor() {
         if (nextNeighborIndex < numNeighbors) {
-            return neighborIdList.getAtIndex(ValueLayout.JAVA_INT, nextNeighborIndex++);
+            return neighborIdList[nextNeighborIndex++];
         }
 
         // Neighbor list has been exhausted.
