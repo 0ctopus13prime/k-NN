@@ -22,8 +22,11 @@ import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.opensearch.knn.common.FieldInfoExtractor;
 import org.opensearch.knn.index.VectorDataType;
+import org.opensearch.knn.index.memory.NativeMemoryAllocation;
+import org.opensearch.knn.jni.FaissService;
 
 import java.io.IOException;
+import java.lang.foreign.MemorySegment;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -122,6 +125,103 @@ public final class KNNVectorValuesFactory {
         } else {
             throw new IllegalArgumentException("Invalid Vector encoding provided, hence cannot return VectorValues");
         }
+    }
+
+    public static <T> KNNVectorValues<T> getFloatVectorValuesForPoc(final FieldInfo fieldInfo, final NativeMemoryAllocation indexAllocation)
+        throws IOException {
+        System.out.println("______________ getFloatVectorValuesForPoc");
+
+        // It's never null! We're doing POC!
+        assert (indexAllocation != null);
+
+        // Returned info
+        // - info[0] = Flat vector pointer
+        // - info[1] = Dimension
+        // - info[2] = Total #vectors
+
+        final long[] info = new long[3];
+        FaissService.getFlatVectorValues(indexAllocation.getMemoryAddress(), info);
+        final long flatVectorAddress = info[0];
+        final int dimension = (int) info[1];
+        final int totalNumberOfVectors = (int) info[2];
+        final long oneVectorSize = 4L * dimension;
+        final long flatVectorBlockSize = oneVectorSize * totalNumberOfVectors;
+        final MemorySegment flatVectors = MemorySegment.ofAddress(flatVectorAddress).reinterpret(flatVectorBlockSize);
+
+        final FloatVectorValues floatVectorValues = new FloatVectorValues() {
+            final float[] buffer = new float[dimension];
+
+            @Override
+            public DocIndexIterator iterator() {
+                return new DocIndexIterator() {
+                    int docId = -1;
+
+                    @Override
+                    public int docID() {
+                        System.out.println("______________ docID(), docId=" + docId);
+                        return docId;
+                    }
+
+                    @Override
+                    public int nextDoc() throws IOException {
+                        System.out.println("_______________nextDoc, docId=" + docId);
+                        ++docId;
+                        if (docId < totalNumberOfVectors) {
+                            return docId;
+                        }
+                        return docId = NO_MORE_DOCS;
+                    }
+
+                    @Override
+                    public int advance(int i) throws IOException {
+                        System.out.println("______________ advance, i=" + i + ", docId=" + docId);
+                        docId = i;
+                        if (docId < totalNumberOfVectors) {
+                            return docId;
+                        }
+                        return docId = NO_MORE_DOCS;
+                    }
+
+                    @Override
+                    public long cost() {
+                        return totalNumberOfVectors;
+                    }
+
+                    @Override
+                    public int index() {
+                        // It's dense case, where docId == ord
+                        return docId;
+                    }
+                };
+            }
+
+            @Override
+            public float[] vectorValue(int internalVectorId) throws IOException {
+                System.out.println("________________ vectorValue, internalVectorId=" + internalVectorId);
+                flatVectors.asSlice(internalVectorId * oneVectorSize).asByteBuffer().asFloatBuffer().get(buffer);
+                return buffer;
+            }
+
+            @Override
+            public FloatVectorValues copy() throws IOException {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public int dimension() {
+                return dimension;
+            }
+
+            @Override
+            public int size() {
+                return totalNumberOfVectors;
+            }
+        };
+
+        return getVectorValues(
+            FieldInfoExtractor.extractVectorDataType(fieldInfo),
+            new KNNVectorValuesIterator.DocIdsIteratorValues(floatVectorValues)
+        );
     }
 
     /**

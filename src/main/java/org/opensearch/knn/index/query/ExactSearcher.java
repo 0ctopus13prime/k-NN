@@ -21,6 +21,7 @@ import org.opensearch.common.lucene.Lucene;
 import org.opensearch.knn.common.FieldInfoExtractor;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
+import org.opensearch.knn.index.memory.NativeMemoryAllocation;
 import org.opensearch.knn.index.query.iterators.BinaryVectorIdsKNNIterator;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.query.iterators.ByteVectorIdsKNNIterator;
@@ -59,19 +60,31 @@ public class ExactSearcher {
      */
     public Map<Integer, Float> searchLeaf(final LeafReaderContext leafReaderContext, final ExactSearcherContext exactSearcherContext)
         throws IOException {
-        final KNNIterator iterator = getKNNIterator(leafReaderContext, exactSearcherContext);
-        // because of any reason if we are not able to get KNNIterator, return an empty map
-        if (iterator == null) {
-            return Collections.emptyMap();
+
+        System.out.println("_____________ ES::searchLeaf");
+
+        // Assume we acquired lock. Of course, there's a case where we fail to obtain a lock, but let it slice we're in POC!
+        exactSearcherContext.indexAllocation.readLock();
+        exactSearcherContext.indexAllocation.incRef();
+
+        try {
+            final KNNIterator iterator = getKNNIterator(leafReaderContext, exactSearcherContext);
+            // because of any reason if we are not able to get KNNIterator, return an empty map
+            if (iterator == null) {
+                return Collections.emptyMap();
+            }
+            if (exactSearcherContext.getKnnQuery().getRadius() != null) {
+                return doRadialSearch(leafReaderContext, exactSearcherContext, iterator);
+            }
+            if (exactSearcherContext.getMatchedDocsIterator() != null
+                && exactSearcherContext.numberOfMatchedDocs <= exactSearcherContext.getK()) {
+                return scoreAllDocs(iterator);
+            }
+            return searchTopCandidates(iterator, exactSearcherContext.getK(), Predicates.alwaysTrue());
+        } finally {
+            exactSearcherContext.indexAllocation.readUnlock();
+            exactSearcherContext.indexAllocation.decRef();
         }
-        if (exactSearcherContext.getKnnQuery().getRadius() != null) {
-            return doRadialSearch(leafReaderContext, exactSearcherContext, iterator);
-        }
-        if (exactSearcherContext.getMatchedDocsIterator() != null
-            && exactSearcherContext.numberOfMatchedDocs <= exactSearcherContext.getK()) {
-            return scoreAllDocs(iterator);
-        }
-        return searchTopCandidates(iterator, exactSearcherContext.getK(), Predicates.alwaysTrue());
     }
 
     /**
@@ -209,7 +222,11 @@ public class ExactSearcher {
             quantizedQueryVector = null;
         }
 
-        final KNNVectorValues<float[]> vectorValues = KNNVectorValuesFactory.getVectorValues(fieldInfo, reader);
+        final KNNVectorValues<float[]> vectorValues = KNNVectorValuesFactory.getFloatVectorValuesForPoc(
+            fieldInfo,
+            exactSearcherContext.indexAllocation
+        );
+
         if (isNestedRequired) {
             return new NestedVectorIdsKNNIterator(
                 matchedDocs,
@@ -221,6 +238,7 @@ public class ExactSearcher {
                 segmentLevelQuantizationInfo
             );
         }
+
         return new VectorIdsKNNIterator(
             matchedDocs,
             knnQuery.getQueryVector(),
@@ -253,5 +271,6 @@ public class ExactSearcher {
          * needs to be used.
          */
         boolean isParentHits;
+        NativeMemoryAllocation indexAllocation;
     }
 }

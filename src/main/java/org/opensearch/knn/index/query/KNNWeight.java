@@ -31,11 +31,11 @@ import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.util.KNNCodecUtil;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
+import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.memory.NativeMemoryAllocation;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManager;
 import org.opensearch.knn.index.memory.NativeMemoryEntryContext;
 import org.opensearch.knn.index.memory.NativeMemoryLoadStrategy;
-import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.quantizationservice.QuantizationService;
 import org.opensearch.knn.index.query.ExactSearcher.ExactSearcherContext.ExactSearcherContextBuilder;
 import org.opensearch.knn.index.query.explain.KnnExplanation;
@@ -79,6 +79,7 @@ public class KNNWeight extends Weight {
     private static ExactSearcher DEFAULT_EXACT_SEARCHER;
     private final QuantizationService quantizationService;
     private final KnnExplanation knnExplanation;
+    private NativeIndexKeyObjects nativeIndexKeyObjects;
 
     public KNNWeight(KNNQuery query, float boost) {
         super(query);
@@ -314,7 +315,7 @@ public class KNNWeight extends Weight {
          * . Hence, if filtered results are less than K and filter query is present we should shift to exact search.
          * This improves the recall.
          */
-        if (isFilteredExactSearchPreferred(cardinality)) {
+        if (true || isFilteredExactSearchPreferred(cardinality)) {
             Map<Integer, Float> result = doExactSearch(context, new BitSetIterator(filterBitSet, cardinality), cardinality, k);
             return new PerLeafResult(filterWeight == null ? null : filterBitSet, result);
         }
@@ -326,7 +327,7 @@ public class KNNWeight extends Weight {
         final BitSet annFilter = (filterWeight != null && cardinality == maxDoc) ? null : filterBitSet;
 
         StopWatch annStopWatch = startStopWatch();
-        final Map<Integer, Float> docIdsToScoreMap = doANNSearch(reader, context, annFilter, cardinality, k);
+        final Map<Integer, Float> docIdsToScoreMap = doANNSearch(context, annFilter, cardinality, k);
         stopStopWatchAndLog(annStopWatch, "ANN search", segmentName);
         if (knnQuery.isExplain()) {
             knnExplanation.addLeafResult(context.id(), docIdsToScoreMap.size());
@@ -408,6 +409,13 @@ public class KNNWeight extends Weight {
         final long numberOfAcceptedDocs,
         final int k
     ) throws IOException {
+        System.out.println("_____________ doExactSearch");
+        // Native index optimization
+        final NativeIndexKeyObjects keyObjects = getNativeIndexKeyObjects(context);
+        // We're doing POC! it is never null.
+        assert (keyObjects != null);
+        final NativeMemoryAllocation indexAllocation = getAllocation(keyObjects);
+
         final ExactSearcherContextBuilder exactSearcherContextBuilder = ExactSearcher.ExactSearcherContext.builder()
             .isParentHits(true)
             .k(k)
@@ -416,94 +424,27 @@ public class KNNWeight extends Weight {
             .useQuantizedVectorsForSearch(true)
             .knnQuery(knnQuery)
             .matchedDocsIterator(acceptedDocs)
-            .numberOfMatchedDocs(numberOfAcceptedDocs);
+            .numberOfMatchedDocs(numberOfAcceptedDocs)
+            .indexAllocation(indexAllocation);
         return exactSearch(context, exactSearcherContextBuilder.build());
     }
 
     private Map<Integer, Float> doANNSearch(
-        final SegmentReader reader,
         final LeafReaderContext context,
         final BitSet filterIdsBitSet,
         final int cardinality,
         final int k
     ) throws IOException {
-        FieldInfo fieldInfo = FieldInfoExtractor.getFieldInfo(reader, knnQuery.getField());
-
-        if (fieldInfo == null) {
-            log.debug("[KNN] Field info not found for {}:{}", knnQuery.getField(), reader.getSegmentName());
+        final NativeIndexKeyObjects keyObjects = getNativeIndexKeyObjects(context);
+        if (keyObjects == null) {
             return Collections.emptyMap();
         }
-
-        KNNEngine knnEngine;
-        SpaceType spaceType;
-        VectorDataType vectorDataType;
-
-        // Check if a modelId exists. If so, the space type and engine will need to be picked up from the model's
-        // metadata.
-        String modelId = fieldInfo.getAttribute(MODEL_ID);
-        if (modelId != null) {
-            ModelMetadata modelMetadata = modelDao.getMetadata(modelId);
-            if (!ModelUtil.isModelCreated(modelMetadata)) {
-                throw new RuntimeException("Model \"" + modelId + "\" is not created.");
-            }
-
-            knnEngine = modelMetadata.getKnnEngine();
-            spaceType = modelMetadata.getSpaceType();
-            vectorDataType = modelMetadata.getVectorDataType();
-        } else {
-            String engineName = fieldInfo.attributes().getOrDefault(KNN_ENGINE, KNNEngine.DEFAULT.getName());
-            knnEngine = KNNEngine.getEngine(engineName);
-            String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
-            spaceType = SpaceType.getSpace(spaceTypeName);
-            vectorDataType = VectorDataType.get(
-                fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue())
-            );
-        }
-
-        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
-            reader,
-            fieldInfo,
-            knnQuery.getField()
-        );
-        // TODO: Change type of vector once more quantization methods are supported
-        final byte[] quantizedVector = SegmentLevelQuantizationUtil.quantizeVector(knnQuery.getQueryVector(), segmentLevelQuantizationInfo);
-
-        List<String> engineFiles = KNNCodecUtil.getEngineFiles(knnEngine.getExtension(), knnQuery.getField(), reader.getSegmentInfo().info);
-        if (engineFiles.isEmpty()) {
-            log.debug("[KNN] No native engine files found for field {} for segment {}", knnQuery.getField(), reader.getSegmentName());
-            return Collections.emptyMap();
-        }
-
-        final String vectorIndexFileName = engineFiles.get(0);
-        final String cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(vectorIndexFileName, reader.getSegmentInfo().info);
 
         final KNNQueryResult[] results;
         KNNCounter.GRAPH_QUERY_REQUESTS.increment();
 
         // We need to first get index allocation
-        NativeMemoryAllocation indexAllocation;
-        try {
-            indexAllocation = nativeMemoryCacheManager.get(
-                new NativeMemoryEntryContext.IndexEntryContext(
-                    reader.directory(),
-                    cacheKey,
-                    NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
-                    getParametersAtLoading(
-                        spaceType,
-                        knnEngine,
-                        knnQuery.getIndexName(),
-                        // TODO: In the future, more vector data types will be supported with quantization
-                        quantizedVector == null ? vectorDataType : VectorDataType.BINARY
-                    ),
-                    knnQuery.getIndexName(),
-                    modelId
-                ),
-                true
-            );
-        } catch (ExecutionException e) {
-            GRAPH_QUERY_ERRORS.increment();
-            throw new RuntimeException(e);
-        }
+        final NativeMemoryAllocation indexAllocation = getAllocation(keyObjects);
 
         // From cardinality select different filterIds type
         FilterIdsSelector filterIdsSelector = FilterIdsSelector.getFilterIdSelector(filterIdsBitSet, cardinality);
@@ -518,15 +459,14 @@ public class KNNWeight extends Weight {
             }
             int[] parentIds = getParentIdsArray(context);
             if (k > 0) {
-                if (knnQuery.getVectorDataType() == VectorDataType.BINARY
-                    || quantizedVector != null && quantizationService.getVectorDataTypeForTransfer(fieldInfo) == VectorDataType.BINARY) {
+                if (knnQuery.getVectorDataType() == VectorDataType.BINARY || false/*We're doing POC! Float vector type only*/) {
                     results = JNIService.queryBinaryIndex(
                         indexAllocation.getMemoryAddress(),
                         // TODO: In the future, quantizedVector can have other data types than byte
-                        quantizedVector == null ? knnQuery.getByteQueryVector() : quantizedVector,
+                        knnQuery.getByteQueryVector(),
                         k,
                         knnQuery.getMethodParameters(),
-                        knnEngine,
+                        keyObjects.knnEngine,
                         filterIds,
                         filterType.getValue(),
                         parentIds
@@ -537,7 +477,7 @@ public class KNNWeight extends Weight {
                         knnQuery.getQueryVector(),
                         k,
                         knnQuery.getMethodParameters(),
-                        knnEngine,
+                        keyObjects.knnEngine,
                         filterIds,
                         filterType.getValue(),
                         parentIds
@@ -549,7 +489,7 @@ public class KNNWeight extends Weight {
                     knnQuery.getQueryVector(),
                     knnQuery.getRadius(),
                     knnQuery.getMethodParameters(),
-                    knnEngine,
+                    keyObjects.knnEngine,
                     knnQuery.getContext().getMaxResultWindow(),
                     filterIds,
                     filterType.getValue(),
@@ -569,7 +509,8 @@ public class KNNWeight extends Weight {
         }
         if (knnQuery.isExplain()) {
             Arrays.stream(results).forEach(result -> {
-                if (KNNEngine.FAISS.getName().equals(knnEngine.getName()) && SpaceType.INNER_PRODUCT.equals(spaceType)) {
+                if (KNNEngine.FAISS.getName().equals(keyObjects.knnEngine.getName())
+                    && SpaceType.INNER_PRODUCT.equals(keyObjects.spaceType)) {
                     knnExplanation.addRawScore(result.getId(), -1 * result.getScore());
                 } else {
                     knnExplanation.addRawScore(result.getId(), result.getScore());
@@ -577,12 +518,34 @@ public class KNNWeight extends Weight {
             });
         }
 
-        if (quantizedVector != null) {
-            return Arrays.stream(results)
-                .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), SpaceType.HAMMING)));
-        }
+        // We're doing a POC!
+        // if (quantizedVector != null) {
+        // return Arrays.stream(results)
+        // .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), SpaceType.HAMMING)));
+        // }
         return Arrays.stream(results)
-            .collect(Collectors.toMap(KNNQueryResult::getId, result -> knnEngine.score(result.getScore(), spaceType)));
+            .collect(
+                Collectors.toMap(KNNQueryResult::getId, result -> keyObjects.knnEngine.score(result.getScore(), keyObjects.spaceType))
+            );
+    }
+
+    private NativeMemoryAllocation getAllocation(final NativeIndexKeyObjects keyObjects) {
+        try {
+            return nativeMemoryCacheManager.get(
+                new NativeMemoryEntryContext.IndexEntryContext(
+                    keyObjects.reader.directory(),
+                    keyObjects.cacheKey,
+                    NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
+                    getParametersAtLoading(keyObjects.spaceType, keyObjects.knnEngine, knnQuery.getIndexName(), keyObjects.vectorDataType),
+                    knnQuery.getIndexName(),
+                    null
+                ),
+                true
+            );
+        } catch (ExecutionException e) {
+            GRAPH_QUERY_ERRORS.increment();
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -736,5 +699,72 @@ public class KNNWeight extends Weight {
             return new StopWatch().start();
         }
         return null;
+    }
+
+    private NativeIndexKeyObjects getNativeIndexKeyObjects(final LeafReaderContext context) {
+        if (nativeIndexKeyObjects != null) {
+            return nativeIndexKeyObjects;
+        }
+
+        final NativeIndexKeyObjects objects = new NativeIndexKeyObjects();
+
+        // Segment reader
+        objects.reader = Lucene.segmentReader(context.reader());
+
+        final FieldInfo fieldInfo = FieldInfoExtractor.getFieldInfo(objects.reader, knnQuery.getField());
+        if (fieldInfo == null) {
+            return null;
+        }
+
+        // Acquire engine + meta info
+        // Check if a modelId exists. If so, the space type and engine will need to be picked up from the model's
+        // metadata.
+        String modelId = fieldInfo.getAttribute(MODEL_ID);
+        if (modelId != null) {
+            ModelMetadata modelMetadata = modelDao.getMetadata(modelId);
+            if (!ModelUtil.isModelCreated(modelMetadata)) {
+                throw new RuntimeException("Model \"" + modelId + "\" is not created.");
+            }
+
+            objects.knnEngine = modelMetadata.getKnnEngine();
+            objects.spaceType = modelMetadata.getSpaceType();
+            objects.vectorDataType = modelMetadata.getVectorDataType();
+        } else {
+            String engineName = fieldInfo.attributes().getOrDefault(KNN_ENGINE, KNNEngine.DEFAULT.getName());
+            objects.knnEngine = KNNEngine.getEngine(engineName);
+            String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
+            objects.spaceType = SpaceType.getSpace(spaceTypeName);
+            objects.vectorDataType = VectorDataType.get(
+                fieldInfo.attributes().getOrDefault(VECTOR_DATA_TYPE_FIELD, VectorDataType.FLOAT.getValue())
+            );
+        }
+
+        // Cache key
+        final List<String> engineFiles = KNNCodecUtil.getEngineFiles(
+            objects.knnEngine.getExtension(),
+            knnQuery.getField(),
+            objects.reader.getSegmentInfo().info
+        );
+        if (engineFiles.isEmpty()) {
+            log.debug(
+                "[KNN] No native engine files found for field {} for segment {}",
+                knnQuery.getField(),
+                objects.reader.getSegmentName()
+            );
+            return null;
+        }
+
+        final String vectorIndexFileName = engineFiles.get(0);
+        objects.cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(vectorIndexFileName, objects.reader.getSegmentInfo().info);
+
+        return nativeIndexKeyObjects = objects;
+    }
+
+    private static class NativeIndexKeyObjects {
+        public SegmentReader reader;
+        public String cacheKey;
+        public SpaceType spaceType;
+        public KNNEngine knnEngine;
+        public VectorDataType vectorDataType;
     }
 }
