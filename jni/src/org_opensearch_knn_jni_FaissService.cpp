@@ -481,3 +481,8 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
     }
     return nullptr;
 }
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_getFlatVectorValues
+  (JNIEnv * env, jclass cls, jlong indexPointerJ, jlongArray info) {
+    knn_jni::faiss_wrapper::GetFlatVectorValues(&jniUtil, env, indexPointerJ, info);
+}

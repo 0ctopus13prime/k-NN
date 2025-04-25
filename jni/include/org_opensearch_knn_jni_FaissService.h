@@ -268,6 +268,14 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
   (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    getFlatVectorValues
+ * Signature: (J[J)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_getFlatVectorValues
+  (JNIEnv *, jclass, jlong, jlongArray);
+
 #ifdef __cplusplus
 }
 #endif

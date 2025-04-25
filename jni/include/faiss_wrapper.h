@@ -43,6 +43,8 @@ namespace knn_jni {
                                          jlong vectorsAddressJ, jint dimJ, jobject output, jbyteArray templateIndexJ,
                                          jobject parametersJ);
 
+        void GetFlatVectorValues(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong indexPointerJ, jlongArray info);
+
         // Load an index from indexPathJ into memory.
         //
         // Return a pointer to the loaded index

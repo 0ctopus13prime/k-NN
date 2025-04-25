@@ -1229,3 +1229,24 @@ jobjectArray knn_jni::faiss_wrapper::RangeSearchWithFilter(knn_jni::JNIUtilInter
 
     return results;
 }
+
+void knn_jni::faiss_wrapper::GetFlatVectorValues(knn_jni::JNIUtilInterface * jniUtil,
+                                                 JNIEnv * env,
+                                                 jlong indexPointerJ,
+                                                 jlongArray info) {
+    auto *indexReader = reinterpret_cast<faiss::IndexIDMap *>(indexPointerJ);
+    auto hnswReader = dynamic_cast<faiss::IndexHNSW*>(indexReader->index);
+    auto flatStorage = dynamic_cast<faiss::IndexFlatCodes*>(hnswReader->storage);
+
+    // Returned info
+    // - info[0] = Flat vector pointer
+    // - info[1] = Dimension
+    // - info[2] = Total #vectors
+
+    auto flatVectorPointer = (jlong) flatStorage->codes.data();
+    jlong infoValues[3] = {flatVectorPointer, indexReader->d, indexReader->ntotal};
+    env->SetLongArrayRegion(info, 0, 3, infoValues);
+
+    std::cout << "________________ " << flatVectorPointer << ", "
+              << indexReader->d << ", " << indexReader->ntotal << std::endl;
+}
