@@ -61,7 +61,7 @@ public class ExactSearcher {
     public Map<Integer, Float> searchLeaf(final LeafReaderContext leafReaderContext, final ExactSearcherContext exactSearcherContext)
         throws IOException {
 
-        System.out.println("_____________ ES::searchLeaf");
+        // System.out.println("_____________ ES::searchLeaf");
 
         // Assume we acquired lock. Of course, there's a case where we fail to obtain a lock, but let it slice we're in POC!
         exactSearcherContext.indexAllocation.readLock();

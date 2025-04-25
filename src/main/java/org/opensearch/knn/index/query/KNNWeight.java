@@ -409,7 +409,7 @@ public class KNNWeight extends Weight {
         final long numberOfAcceptedDocs,
         final int k
     ) throws IOException {
-        System.out.println("_____________ doExactSearch");
+        // System.out.println("_____________ doExactSearch");
         // Native index optimization
         final NativeIndexKeyObjects keyObjects = getNativeIndexKeyObjects(context);
         // We're doing POC! it is never null.

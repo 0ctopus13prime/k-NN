@@ -27,6 +27,7 @@ import org.opensearch.knn.jni.FaissService;
 
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -129,7 +130,7 @@ public final class KNNVectorValuesFactory {
 
     public static <T> KNNVectorValues<T> getFloatVectorValuesForPoc(final FieldInfo fieldInfo, final NativeMemoryAllocation indexAllocation)
         throws IOException {
-        System.out.println("______________ getFloatVectorValuesForPoc");
+        // System.out.println("______________ getFloatVectorValuesForPoc");
 
         // It's never null! We're doing POC!
         assert (indexAllocation != null);
@@ -158,13 +159,13 @@ public final class KNNVectorValuesFactory {
 
                     @Override
                     public int docID() {
-                        System.out.println("______________ docID(), docId=" + docId);
+                        // System.out.println("______________ docID(), docId=" + docId);
                         return docId;
                     }
 
                     @Override
                     public int nextDoc() throws IOException {
-                        System.out.println("_______________nextDoc, docId=" + docId);
+                        // System.out.println("_______________nextDoc, docId=" + docId);
                         ++docId;
                         if (docId < totalNumberOfVectors) {
                             return docId;
@@ -174,7 +175,7 @@ public final class KNNVectorValuesFactory {
 
                     @Override
                     public int advance(int i) throws IOException {
-                        System.out.println("______________ advance, i=" + i + ", docId=" + docId);
+                        // System.out.println("______________ advance, i=" + i + ", docId=" + docId);
                         docId = i;
                         if (docId < totalNumberOfVectors) {
                             return docId;
@@ -197,8 +198,12 @@ public final class KNNVectorValuesFactory {
 
             @Override
             public float[] vectorValue(int internalVectorId) throws IOException {
-                System.out.println("________________ vectorValue, internalVectorId=" + internalVectorId);
-                flatVectors.asSlice(internalVectorId * oneVectorSize).asByteBuffer().asFloatBuffer().get(buffer);
+                // System.out.println("________________ vectorValue, internalVectorId=" + internalVectorId);
+                // flatVectors.asSlice(internalVectorId * oneVectorSize).asByteBuffer().asFloatBuffer().get(buffer);
+                final long offset = internalVectorId * dimension;
+                for (int i = 0; i < dimension; ++i) {
+                    buffer[i] = flatVectors.get(ValueLayout.JAVA_FLOAT, offset + i);
+                }
                 return buffer;
             }
 

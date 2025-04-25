@@ -71,7 +71,7 @@ public class VectorIdsKNNIterator implements KNNIterator {
      */
     @Override
     public int nextDoc() throws IOException {
-        System.out.println("________________ VectorIdsKNNIterator#nextDoc");
+        // System.out.println("________________ VectorIdsKNNIterator#nextDoc");
 
         if (docId == DocIdSetIterator.NO_MORE_DOCS) {
             return DocIdSetIterator.NO_MORE_DOCS;
@@ -88,7 +88,7 @@ public class VectorIdsKNNIterator implements KNNIterator {
     }
 
     protected float computeScore() throws IOException {
-        System.out.println("________________ VectorIdsKNNIterator#computeScore");
+        // System.out.println("________________ VectorIdsKNNIterator#computeScore");
 
         final float[] vector = knnFloatVectorValues.getVector();
         if (segmentLevelQuantizationInfo != null && quantizedQueryVector != null) {
@@ -102,13 +102,13 @@ public class VectorIdsKNNIterator implements KNNIterator {
     }
 
     protected int getNextDocId() throws IOException {
-        System.out.println("________________ VectorIdsKNNIterator#getNextDocId, filterIdsIterator=" + filterIdsIterator);
+        // System.out.println("________________ VectorIdsKNNIterator#getNextDocId, filterIdsIterator=" + filterIdsIterator);
 
         if (filterIdsIterator == null) {
             return knnFloatVectorValues.nextDoc();
         }
         int nextDocID = this.filterIdsIterator.nextDoc();
-        System.out.println("________________ VectorIdsKNNIterator#getNextDocId, nextDocID=" + nextDocID);
+        // System.out.println("________________ VectorIdsKNNIterator#getNextDocId, nextDocID=" + nextDocID);
         // For filter case, advance vector values to corresponding doc id from filter bit set
         if (nextDocID != DocIdSetIterator.NO_MORE_DOCS) {
             knnFloatVectorValues.advance(nextDocID);
