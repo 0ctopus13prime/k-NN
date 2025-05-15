@@ -33,8 +33,11 @@ import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.memory.NativeMemoryCacheManager;
 import org.opensearch.knn.index.quantizationservice.QuantizationService;
+import org.opensearch.knn.index.query.SegmentLevelQuantizationInfo;
+import org.opensearch.knn.index.query.SegmentLevelQuantizationUtil;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.VectorSearcherFactory;
+import org.opensearch.knn.quantization.models.quantizationParams.QuantizationParams;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationState;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationStateCacheManager;
 import org.opensearch.knn.quantization.models.quantizationState.QuantizationStateReadConfig;
@@ -146,28 +149,52 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
      */
     @Override
     public void search(String field, float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        // TODO: This is a temporary hack where we are using KNNCollector to initialize the quantization state.
-        if (knnCollector instanceof QuantizationConfigKNNCollector) {
-            String cacheKey = quantizationStateCacheKeyPerField.get(field);
-            FieldInfo fieldInfo = segmentReadState.fieldInfos.fieldInfo(field);
-            QuantizationState quantizationState = QuantizationStateCacheManager.getInstance()
-                .getQuantizationState(
-                    new QuantizationStateReadConfig(
-                        segmentReadState,
-                        QuantizationService.getInstance().getQuantizationParams(fieldInfo),
-                        field,
-                        cacheKey
-                    )
-                );
-            ((QuantizationConfigKNNCollector) knnCollector).setQuantizationState(quantizationState);
+//        // TODO: This is a temporary hack where we are using KNNCollector to initialize the quantization state.
+//        if (knnCollector instanceof QuantizationConfigKNNCollector) {
+//            String cacheKey = quantizationStateCacheKeyPerField.get(field);
+//            FieldInfo fieldInfo = segmentReadState.fieldInfos.fieldInfo(field);
+//            QuantizationState quantizationState = QuantizationStateCacheManager.getInstance()
+//                .getQuantizationState(
+//                    new QuantizationStateReadConfig(
+//                        segmentReadState,
+//                        QuantizationService.getInstance().getQuantizationParams(fieldInfo),
+//                        field,
+//                        cacheKey
+//                    )
+//                );
+//            ((QuantizationConfigKNNCollector) knnCollector).setQuantizationState(quantizationState);
+//            return;
+//        }
+//
+//        if (trySearchWithMemoryOptimizedSearch(field, target, knnCollector, acceptDocs, true)) {
+//            return;
+//        }
+//
+//        throw new UnsupportedOperationException("Search functionality using codec is not supported with Native Engine Reader");
+
+
+        final String cacheKey = quantizationStateCacheKeyPerField.get(field);
+        final FieldInfo fieldInfo = segmentReadState.fieldInfos.fieldInfo(field);
+        final QuantizationParams quantizationParams = QuantizationService.getInstance().getQuantizationParams(fieldInfo);
+        final QuantizationState quantizationState = QuantizationStateCacheManager.getInstance()
+            .getQuantizationState(
+                new QuantizationStateReadConfig(
+                    segmentReadState,
+                    QuantizationService.getInstance().getQuantizationParams(fieldInfo),
+                    field,
+                    cacheKey
+                )
+            );
+        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo =
+            new SegmentLevelQuantizationInfo(quantizationParams, quantizationState);
+
+        final byte[] quantizedVector = SegmentLevelQuantizationUtil.quantizeVector(target, segmentLevelQuantizationInfo);
+
+        if (trySearchWithMemoryOptimizedSearch(field, quantizedVector, knnCollector, acceptDocs, false)) {
             return;
         }
 
-        if (trySearchWithMemoryOptimizedSearch(field, target, knnCollector, acceptDocs, true)) {
-            return;
-        }
-
-        throw new UnsupportedOperationException("Search functionality using codec is not supported with Native Engine Reader");
+        throw new UnsupportedOperationException("XXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
     }
 
     /**

@@ -174,6 +174,7 @@ public class FaissIndexBinaryFlatTests extends KNNTestCase {
         0,
         0,
         -60 };
+
     private static final byte[] LAST_VECTOR = new byte[] {
         -13,
         -2,

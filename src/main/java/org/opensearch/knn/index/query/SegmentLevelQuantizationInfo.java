@@ -5,7 +5,6 @@
 
 package org.opensearch.knn.index.query;
 
-import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.apache.lucene.index.FieldInfo;
@@ -20,7 +19,7 @@ import java.io.IOException;
  * This class encapsulate the necessary details to do the quantization of the vectors present in a lucene segment.
  */
 @Getter
-@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
+@RequiredArgsConstructor
 public class SegmentLevelQuantizationInfo {
     private final QuantizationParams quantizationParams;
     private final QuantizationState quantizationState;
