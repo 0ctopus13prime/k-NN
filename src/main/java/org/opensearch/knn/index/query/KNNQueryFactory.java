@@ -72,8 +72,7 @@ public class KNNQueryFactory extends BaseQueryFactory {
             );
         }
 
-        if (memoryOptimizedSearchSupported == false
-            && KNNEngine.getEnginesThatCreateCustomSegmentFiles().contains(createQueryRequest.getKnnEngine())) {
+        if (KNNEngine.getEnginesThatCreateCustomSegmentFiles().contains(createQueryRequest.getKnnEngine())) {
             final Query validatedFilterQuery = validateFilterQuerySupport(filterQuery, createQueryRequest.getKnnEngine());
 
             log.debug(
@@ -99,6 +98,7 @@ public class KNNQueryFactory extends BaseQueryFactory {
                         .vectorDataType(vectorDataType)
                         .rescoreContext(rescoreContext)
                         .shardId(shardId)
+                        .isMemoryOptimizedSearch(memoryOptimizedSearchSupported)
                         .build();
                     break;
                 default:
@@ -113,6 +113,7 @@ public class KNNQueryFactory extends BaseQueryFactory {
                         .vectorDataType(vectorDataType)
                         .rescoreContext(rescoreContext)
                         .shardId(shardId)
+                        .isMemoryOptimizedSearch(memoryOptimizedSearchSupported)
                         .build();
             }
 

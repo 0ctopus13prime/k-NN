@@ -56,6 +56,7 @@ public class KNNQuery extends Query {
     @Setter
     @Getter
     private boolean explain;
+    private boolean isMemoryOptimizedSearch;
 
     // Note: ideally query should not have to deal with shard level information. Adding it for logging purposes only
     // TODO: ThreadContext does not work with logger, remove this from here once its figured out
@@ -189,10 +190,11 @@ public class KNNQuery extends Query {
             );
         }
 
-        if (filterWeight != null) {
-            return new KNNWeight(this, boost, filterWeight);
+        if (isMemoryOptimizedSearch) {
+            return new MemoryOptimizedKNNWeight(this, boost, filterWeight, searcher, k);
+        } else {
+            return new NativeKNNWeight(this, boost, filterWeight);
         }
-        return new KNNWeight(this, boost);
     }
 
     private Weight getFilterWeight(IndexSearcher searcher) throws IOException {
