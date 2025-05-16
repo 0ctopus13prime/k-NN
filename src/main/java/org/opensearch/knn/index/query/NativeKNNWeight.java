@@ -36,10 +36,6 @@ import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
 public class NativeKNNWeight extends KNNWeight {
     private final NativeMemoryCacheManager nativeMemoryCacheManager;
 
-    public NativeKNNWeight(KNNQuery query, float boost) {
-        this(query, boost, null);
-    }
-
     public NativeKNNWeight(KNNQuery query, float boost, Weight filterWeight) {
         super(query, boost, filterWeight);
         this.nativeMemoryCacheManager = NativeMemoryCacheManager.getInstance();

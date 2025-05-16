@@ -5,7 +5,6 @@
 
 package org.opensearch.knn.index.query;
 
-import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
@@ -59,26 +58,22 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             visitedLimit = Integer.MAX_VALUE;
         }
 
+        // Create a collector
         final KnnCollector knnCollector = knnCollectorManager.newCollector(visitedLimit, context);
-        final ByteVectorValues byteVectorValues = reader.getByteVectorValues(knnQuery.getField());
-        if (byteVectorValues == null) {
-            ByteVectorValues.checkField(reader, knnQuery.getField());
-            return Collections.emptyMap();
-        }
 
-        if (Math.min(knnCollector.k(), byteVectorValues.size()) == 0) {
-            return Collections.emptyMap();
-        }
-
+        // Do ANN search
+        final BitSet bitSet = cardinality == 0 ? null : filterIdsBitSet;
         final byte[] target = quantizedVector == null ? knnQuery.getByteQueryVector() : quantizedVector;
+        reader.getVectorReader().search(knnQuery.getField(), target, knnCollector, bitSet);
+        final TopDocs topDocs = knnCollector.topDocs();
 
-        reader.searchNearestVectors(knnQuery.getField(), target, knnCollector, filterIdsBitSet);
-        TopDocs topDocs = knnCollector.topDocs();
         if (topDocs != null && topDocs.scoreDocs != null && topDocs.scoreDocs.length > 0) {
+            // Add explanations if required, then return results
             final KNNQueryResult[] results = new KNNQueryResult[topDocs.scoreDocs.length];
             int i = 0;
             for (final ScoreDoc scoreDoc : topDocs.scoreDocs) {
                 results[i] = new KNNQueryResult(scoreDoc.doc, scoreDoc.score);
+                ++i;
             }
 
             addExplainIfRequired(results, knnEngine, spaceType);
