@@ -11,7 +11,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.IOSupplier;
+import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.OrdinalTranslatedKnnCollector;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
@@ -53,21 +53,25 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        search(
-            VectorEncoding.FLOAT32,
-            () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, faissIndex.getFloatValues(indexInput), target),
-            knnCollector,
-            acceptDocs
+        search(VectorEncoding.FLOAT32,
+               (indexInput) -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction,
+                                                                       faissIndex.getFloatValues(indexInput),
+                                                                       target
+               ),
+               knnCollector,
+               acceptDocs
         );
     }
 
     @Override
     public void search(byte[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        search(
-            VectorEncoding.BYTE,
-            () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, faissIndex.getByteValues(indexInput), target),
-            knnCollector,
-            acceptDocs
+        search(VectorEncoding.BYTE,
+               (indexInput) -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction,
+                                                                       faissIndex.getByteValues(indexInput),
+                                                                       target
+               ),
+               knnCollector,
+               acceptDocs
         );
     }
 
@@ -78,7 +82,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     private void search(
         final VectorEncoding vectorEncoding,
-        final IOSupplier<RandomVectorScorer> scorerSupplier,
+        final IOFunction<IndexInput, RandomVectorScorer> scorerSupplier,
         final KnnCollector knnCollector,
         final Bits acceptDocs
     ) throws IOException {
@@ -88,23 +92,21 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
         if (faissIndex.getVectorEncoding() != vectorEncoding) {
             throw new IllegalArgumentException(
-                "Search for vector encoding ["
-                    + vectorEncoding
-                    + "] is not supported in "
-                    + "an index vector whose encoding is ["
-                    + faissIndex.getVectorEncoding()
-                    + "]"
-            );
+                "Search for vector encoding [" + vectorEncoding + "] is not supported in " + "an index vector whose encoding is ["
+                + faissIndex.getVectorEncoding() + "]");
         }
 
+        // Get a cloned index input
+        final IndexInput vectorIndexInput = indexInput.clone();
+
         // Set up required components for vector search
-        final RandomVectorScorer scorer = scorerSupplier.get();
+        final RandomVectorScorer scorer = scorerSupplier.apply(vectorIndexInput);
         final KnnCollector collector = new OrdinalTranslatedKnnCollector(knnCollector, scorer::ordToDoc);
         final Bits acceptedOrds = scorer.getAcceptOrds(acceptDocs);
 
         if (knnCollector.k() < scorer.maxOrd()) {
             // Do ANN search with Lucene's HNSW graph searcher.
-            HnswGraphSearcher.search(scorer, collector, new FaissHnswGraph(hnsw, indexInput), acceptedOrds);
+            HnswGraphSearcher.search(scorer, collector, new FaissHnswGraph(hnsw, vectorIndexInput), acceptedOrds);
         } else {
             // If k is larger than the number of vectors, we can just iterate over all vectors
             // and collect them.
