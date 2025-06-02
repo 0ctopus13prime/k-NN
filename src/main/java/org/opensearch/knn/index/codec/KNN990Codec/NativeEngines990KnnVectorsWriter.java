@@ -91,7 +91,7 @@ public class NativeEngines990KnnVectorsWriter extends KnnVectorsWriter {
      */
     @Override
     public void flush(int maxDoc, final Sorter.DocMap sortMap) throws IOException {
-        flatVectorsWriter.flush(maxDoc, sortMap);
+        // flatVectorsWriter.flush(maxDoc, sortMap);
 
         for (final NativeEngineFieldVectorsWriter<?> field : fields) {
             final FieldInfo fieldInfo = field.getFieldInfo();
@@ -135,7 +135,7 @@ public class NativeEngines990KnnVectorsWriter extends KnnVectorsWriter {
     @Override
     public void mergeOneField(final FieldInfo fieldInfo, final MergeState mergeState) throws IOException {
         // This will ensure that we are merging the FlatIndex during force merge.
-        flatVectorsWriter.mergeOneField(fieldInfo, mergeState);
+        // flatVectorsWriter.mergeOneField(fieldInfo, mergeState);
 
         final VectorDataType vectorDataType = extractVectorDataType(fieldInfo);
         final Supplier<KNNVectorValues<?>> knnVectorValuesSupplier = getKNNVectorValuesSupplierForMerge(

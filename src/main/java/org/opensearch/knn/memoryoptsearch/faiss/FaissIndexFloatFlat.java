@@ -94,6 +94,49 @@ public class FaissIndexFloatFlat extends FaissIndex {
             }
 
             @Override
+            public DocIndexIterator iterator() {
+                return new DocIndexIterator() {
+                    int internalVectorId = -1;
+
+                    @Override
+                    public int index() {
+                        return internalVectorId;  // Internal vector id
+                    }
+
+                    @Override
+                    public int docID() {
+                        return internalVectorId;  // internal vector id == Lucene doc id.
+                    }
+
+                    @Override
+                    public int nextDoc() throws IOException {
+                        int nextIndex = internalVectorId + 1;
+                        if (nextIndex < totalNumberOfVectors) {
+                            return internalVectorId = nextIndex;
+                        }
+
+                        return internalVectorId = NO_MORE_DOCS;
+                    }
+
+                    @Override
+                    public int advance(int i) throws IOException {
+                        final int nextIndex = i;
+
+                        if (nextIndex < totalNumberOfVectors) {
+                            return internalVectorId = nextIndex;
+                        }
+
+                        return internalVectorId = NO_MORE_DOCS;
+                    }
+
+                    @Override
+                    public long cost() {
+                        return totalNumberOfVectors;
+                    }
+                };
+            }
+
+            @Override
             public FloatVectorValues copy() {
                 return new FloatVectorValuesImpl(indexInput.clone());
             }

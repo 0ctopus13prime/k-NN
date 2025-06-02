@@ -5,6 +5,7 @@
 
 package org.opensearch.knn.memoryoptsearch;
 
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.util.Bits;
 
@@ -51,4 +52,6 @@ public interface VectorSearcher extends Closeable {
      *     if they are all allowed to match.
      */
     void search(byte[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException;
+
+    FloatVectorValues getFloatVectorValues(final String field) throws IOException;
 }

@@ -78,9 +78,11 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
 
         loadCacheKeyMap();
 
-        if (memoryOptimizedSearchEnabled && state.context.context() != IOContext.Context.MERGE) {
-            loadMemoryOptimizedSearcherIfRequired();
-        }
+        // if (memoryOptimizedSearchEnabled && state.context.context() != IOContext.Context.MERGE) {
+        //     loadMemoryOptimizedSearcherIfRequired();
+        // }
+
+        loadMemoryOptimizedSearcherIfRequired();
     }
 
     /**
@@ -104,7 +106,10 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
      */
     @Override
     public FloatVectorValues getFloatVectorValues(final String field) throws IOException {
-        return flatVectorsReader.getFloatVectorValues(field);
+        final VectorSearcher memoryOptimizedSearcher = vectorSearchers.get(field);
+        return memoryOptimizedSearcher.getFloatVectorValues(field);
+
+        // return flatVectorsReader.getFloatVectorValues(field);
     }
 
     /**
@@ -319,6 +324,7 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
                     }
                 }
 
+                System.out.println("___________________________ len(vectorSearchers)=" + vectorSearcherPerField.size());
                 vectorSearchers = vectorSearcherPerField;
             } catch (Exception e) {
                 // Close opened searchers first, then suppress

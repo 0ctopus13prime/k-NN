@@ -6,6 +6,7 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.KnnCollector;
@@ -69,6 +70,11 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             knnCollector,
             acceptDocs
         );
+    }
+
+    @Override
+    public FloatVectorValues getFloatVectorValues(final String field) throws IOException {
+        return faissIndex.getFloatValues(indexInput.clone());
     }
 
     @Override
