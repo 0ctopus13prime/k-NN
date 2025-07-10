@@ -36,6 +36,7 @@ public class IndexTypeToFaissIndexMapping {
         mapping.put(FaissIndexFloatFlat.IXFI, FaissIndexFloatFlat::new);
         mapping.put(FaissIndexScalarQuantizedFlat.IXSQ, (indexType) -> new FaissIndexScalarQuantizedFlat());
         mapping.put(FaissHNSWCagraIndex.IHNC, (indexType) -> new FaissHNSWCagraIndex());
+        mapping.put(FaissEmptyFlatVectors.NULL, (indexType) -> new FaissEmptyFlatVectors());
 
         // Binary index
         mapping.put(FaissIndexBinaryFlat.IBXF, (indexType) -> new FaissIndexBinaryFlat());
