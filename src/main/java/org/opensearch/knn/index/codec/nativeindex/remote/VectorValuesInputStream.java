@@ -25,7 +25,8 @@ import static org.opensearch.knn.index.VectorDataType.FLOAT;
 import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorValues;
 
 /**
- * {@link InputStream} implementation backed by {@link KNNVectorValues} rather than any file. Intended for use by {@link RemoteIndexBuildStrategy}
+ * {@link InputStream} implementation backed by {@link KNNVectorValues} rather than any file. Intended for use by
+ * {@link RemoteIndexBuildStrategy}
  */
 @Log4j2
 class VectorValuesInputStream extends InputStream {
@@ -41,13 +42,16 @@ class VectorValuesInputStream extends InputStream {
 
     /**
      * Used to represent a part of a {@link KNNVectorValues} as an {@link InputStream}. Expected to be used with
-     * {@link org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer#asyncBlobUpload}. The repository will interact with this class only through the constructor and the read methods.
+     * {@link org.opensearch.common.blobstore.AsyncMultiStreamBlobContainer#asyncBlobUpload}. The repository will interact with this
+     * class only through the constructor and the read methods.
      * <p>
-     *     Note: For S3 (but generically too), the retryable input stream is backed by a buffer with the same size as the stream, so all bytes are loaded onto heap
+     *     Note: For S3 (but generically too), the retryable input stream is backed by a buffer with the same size as the stream, so all
+     *     bytes are loaded onto heap
      *     at once (16mb chunks by default) when a given {@link VectorValuesInputStream} is being processed.
      * </p>
      * <p>
-     *     Note: The S3 implementation will only request up to {@param size} bytes from this InputStream. However, that is implementation specific and may not be
+     *     Note: The S3 implementation will only request up to {@param size} bytes from this InputStream. However, that is implementation
+     *     specific and may not be
      *     true for all implementations, so we do our own size enforcement here as well.
      * </p>
      *
@@ -173,12 +177,12 @@ class VectorValuesInputStream extends InputStream {
         }
 
         long bytesSkipped = 0;
-        int vectorsToSkip = (int) (n / bytesPerVector);
+        int vectorsToSkip = (int) (n / (bytesPerVector / 2));
         log.debug("Skipping {} bytes, {} vectors", n, vectorsToSkip);
         int docId = knnVectorValues.docId();
         while (docId != -1 && docId != DocIdSetIterator.NO_MORE_DOCS && vectorsToSkip > 0) {
             docId = knnVectorValues.nextDoc();
-            bytesSkipped += bytesPerVector;
+            bytesSkipped += (bytesPerVector / 2);
             vectorsToSkip--;
         }
 
@@ -199,8 +203,17 @@ class VectorValuesInputStream extends InputStream {
     private void reloadBuffer() throws IOException {
         currentBuffer.clear();
         if (vectorDataType == FLOAT) {
+            // float[] floatVector = ((KNNFloatVectorValues) knnVectorValues).getVector();
+            // currentBuffer.asFloatBuffer().put(floatVector);
+
             float[] floatVector = ((KNNFloatVectorValues) knnVectorValues).getVector();
-            currentBuffer.asFloatBuffer().put(floatVector);
+            byte[] convertedFP16 = new byte[floatVector.length * 2];
+            for (int i = 0, j = 0; j < floatVector.length; ++i) {
+                final short bytes = Float.floatToFloat16(floatVector[i]);
+                convertedFP16[j++] = (byte) (bytes & 0xFF);
+                convertedFP16[j++] = (byte) (bytes >> 8);
+            }
+            currentBuffer.put(convertedFP16);
         } else if (vectorDataType == BYTE) {
             byte[] byteVector = ((KNNByteVectorValues) knnVectorValues).getVector();
             currentBuffer.put(byteVector);
