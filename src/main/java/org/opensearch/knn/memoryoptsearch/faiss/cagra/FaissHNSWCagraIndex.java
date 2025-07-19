@@ -65,6 +65,11 @@ public class FaissHNSWCagraIndex extends AbstractFaissHNSWIndex {
         baseLevelOnly = input.readByte() != 0;
         numBaseLevelSearchEntryPoint = input.readInt();
 
+        // TMP
+        // Read NumericType
+        input.readInt();
+        // TMP
+
         // Partial load HNSW graph
         faissHnsw.load(input, getTotalNumberOfVectors());
         ((FaissCagraHNSW) faissHnsw).setNumBaseLevelSearchEntryPoints(numBaseLevelSearchEntryPoint);

@@ -339,7 +339,8 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
                 "Repository type " + repositoryType + " is not supported by the remote build service"
             );
         }
-        String vectorDataType = indexInfo.getVectorDataType().getValue();
+        // String vectorDataType = indexInfo.getVectorDataType().getValue();
+        String vectorDataType = "float16";
 
         KNNVectorValues<?> vectorValues = indexInfo.getKnnVectorValuesSupplier().get();
         initializeVectorValues(vectorValues);

@@ -129,13 +129,14 @@ public class Faiss extends NativeLibrary {
      */
     @Override
     public boolean supportsRemoteIndexBuild(KNNLibraryIndexingContext knnLibraryIndexingContext) {
-        if (knnLibraryIndexingContext != null) {
-            Map<String, Object> parameters = knnLibraryIndexingContext.getLibraryParameters();
-            if (METHOD_HNSW.equals(parameters.get(NAME))) {
-                return FaissHNSWMethod.supportsRemoteIndexBuild(parameters);
-            }
-        }
-        return false;
+        // if (knnLibraryIndexingContext != null) {
+        // Map<String, Object> parameters = knnLibraryIndexingContext.getLibraryParameters();
+        // if (METHOD_HNSW.equals(parameters.get(NAME))) {
+        // return FaissHNSWMethod.supportsRemoteIndexBuild(parameters);
+        // }
+        // }
+        // return false;
+        return true;
     }
 
     @Override

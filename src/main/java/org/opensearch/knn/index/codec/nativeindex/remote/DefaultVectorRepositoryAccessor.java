@@ -67,11 +67,8 @@ public class DefaultVectorRepositoryAccessor implements VectorRepositoryAccessor
         assert blobContainer != null;
         KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
         initializeVectorValues(knnVectorValues);
-        long vectorBlobLength = (long) knnVectorValues.bytesPerVector() * totalLiveDocs;
-
-        // TMP
-        vectorBlobLength = vectorBlobLength / 2;
-        // TMP
+        // long vectorBlobLength = (long) knnVectorValues.bytesPerVector() * totalLiveDocs;
+        final long vectorBlobLength = ((long) knnVectorValues.bytesPerVector() * totalLiveDocs) / 2;
 
         if (blobContainer instanceof AsyncMultiStreamBlobContainer asyncBlobContainer) {
             // First initiate vectors upload

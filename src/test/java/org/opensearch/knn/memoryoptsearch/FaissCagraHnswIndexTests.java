@@ -12,12 +12,16 @@ import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopKnnCollector;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.IOConsumer;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissMemoryOptimizedSearcher;
 
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -30,6 +34,17 @@ public class FaissCagraHnswIndexTests extends KNNTestCase {
     private static final int EF_SEARCH = 100;
     private static final int DIMENSION = 768;
     private static final int TOTAL_NUMBER_OF_VECTORS = 300;
+
+    @SneakyThrows
+    public void testKdy() {
+        final String path = "/Users/kdooyong/workspace/gpu-fp16-support/data-node/kdytmp";
+        try (final Directory directory = new MMapDirectory(Paths.get(path))) {
+            try (final IndexInput input = directory.openInput("_0_165_target_field.faiss", IOContext.READONCE)) {
+                final FaissIndex index = FaissIndex.load(input);
+                System.out.println(index);
+            }
+        }
+    }
 
     public void testKNNSearch() {
         // Exhaustive search test
