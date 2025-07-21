@@ -68,6 +68,18 @@ public final class NativeIndexBuildStrategyFactory {
         initializeVectorValues(knnVectorValues);
         long vectorBlobLength = ((long) knnVectorValues.bytesPerVector()) * totalLiveDocs;
 
+        System.out.println("_____________ isKNNRemoteVectorBuildEnabled() -> " + isKNNRemoteVectorBuildEnabled());
+        System.out.println("_____________ (repositoriesServiceSupplier != null) -> " + (repositoriesServiceSupplier != null));
+        System.out.println("_____________ (indexSettings != null) -> " + (indexSettings != null));
+        System.out.println(
+            "_____________ knnEngine.supportsRemoteIndexBuild(knnLibraryIndexingContext) -> "
+                + (knnEngine.supportsRemoteIndexBuild(knnLibraryIndexingContext))
+        );
+        System.out.println(
+            "_____________ RemoteIndexBuildStrategy.shouldBuildIndexRemotely(indexSettings, vectorBlobLength) -> "
+                + RemoteIndexBuildStrategy.shouldBuildIndexRemotely(indexSettings, vectorBlobLength)
+        );
+
         if (isKNNRemoteVectorBuildEnabled()
             && repositoriesServiceSupplier != null
             && indexSettings != null

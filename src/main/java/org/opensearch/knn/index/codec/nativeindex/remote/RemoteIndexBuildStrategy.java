@@ -90,17 +90,23 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
      * @return true if remote index build should be used, else false
      */
     public static boolean shouldBuildIndexRemotely(IndexSettings indexSettings, long vectorBlobLength) {
+        System.out.println("_________________ indexSettings == null -> " + (indexSettings == null));
         if (indexSettings == null) {
             return false;
         }
 
         // If setting is not enabled, return false
+        System.out.println(
+            "_____________ indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SETTING) -> "
+                + indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SETTING)
+        );
         if (!indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SETTING)) {
             log.debug("Remote index build is disabled for index: [{}]", indexSettings.getIndex().getName());
             return false;
         }
 
         // If vector repo is not configured, return false
+        System.out.println("_____________ repo -> " + KNNSettings.state().getSettingValue(KNN_REMOTE_VECTOR_REPOSITORY_SETTING.getKey()));
         String vectorRepo = KNNSettings.state().getSettingValue(KNN_REMOTE_VECTOR_REPOSITORY_SETTING.getKey());
         if (vectorRepo == null || vectorRepo.isEmpty()) {
             log.debug("Vector repo is not configured, falling back to local build for index: [{}]", indexSettings.getIndex().getName());
@@ -108,6 +114,11 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         }
 
         // If size threshold is not met, return false
+        System.out.println("_____________ vectorBlobLength = " + vectorBlobLength);
+        System.out.println(
+            "_____________ indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SIZE_MIN_SETTING).getBytes() -> "
+                + indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SIZE_MIN_SETTING).getBytes()
+        );
         if (vectorBlobLength < indexSettings.getValue(KNN_INDEX_REMOTE_VECTOR_BUILD_SIZE_MIN_SETTING).getBytes()) {
             log.debug(
                 "Data size [{}] is less than remote index build threshold [{}], falling back to local build for index [{}]",
@@ -120,6 +131,7 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
 
         // If size threshold is exceeded, return false
         ByteSizeValue upperBound = KNNSettings.state().getSettingValue(KNN_REMOTE_VECTOR_BUILD_SIZE_MAX_SETTING.getKey());
+        System.out.println("_____________ upperBound -> " + upperBound);
         if (upperBound.getBytes() > 0 && vectorBlobLength > upperBound.getBytes()) {
             log.debug(
                 "Data size [{}] is greater than remote index build upper bound [{}], falling back to local build for index [{}]",

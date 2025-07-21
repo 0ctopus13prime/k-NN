@@ -157,6 +157,8 @@ public class KNNIndexShard {
                 warmUpOffHeapIndex(engineFileContexts, directory);
                 log.info("[KNN] Loaded off-heap indices for fields {}", engineFileContexts.stream().map(ctx -> ctx.fieldName));
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
