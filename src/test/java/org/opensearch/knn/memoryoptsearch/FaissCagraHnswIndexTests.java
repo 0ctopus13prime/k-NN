@@ -23,6 +23,7 @@ import org.opensearch.knn.memoryoptsearch.faiss.FaissMemoryOptimizedSearcher;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -39,9 +40,22 @@ public class FaissCagraHnswIndexTests extends KNNTestCase {
     public void testKdy() {
         final String path = "/Users/kdooyong/workspace/gpu-fp16-support/data-node/kdytmp";
         try (final Directory directory = new MMapDirectory(Paths.get(path))) {
-            try (final IndexInput input = directory.openInput("_0_165_target_field.faiss", IOContext.READONCE)) {
+            try (final IndexInput input = directory.openInput("_a_165_target_field.faiss", IOContext.READONCE)) {
                 final FaissIndex index = FaissIndex.load(input);
                 System.out.println(index);
+
+                final FloatVectorValues values = index.getFloatValues(input);
+                float[] vec = values.vectorValue(0);
+                System.out.println("len=" + vec.length);
+                System.out.println(Arrays.toString(vec));
+                int i = 0;
+                for (float v : vec) {
+                    if (v == 0) {
+                        System.out.println("i=" + i);
+                        break;
+                    }
+                    ++i;
+                }
             }
         }
     }

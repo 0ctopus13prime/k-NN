@@ -14,6 +14,7 @@
 #include <jni.h>
 
 #include <vector>
+#include <arm_neon.h>
 
 #include "faiss_wrapper.h"
 #include "jni_util.h"
@@ -494,4 +495,34 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
         jniUtil.CatchCppExceptionAndThrowJava(env);
     }
     return nullptr;
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_convertFp32ToByte
+  (JNIEnv * env, jclass, jfloatArray inputFP32, jbyteArray outputFP16, jint length) {
+    if (length <= 0) return;
+
+    const float* input = static_cast<const float*>(env->GetPrimitiveArrayCritical(inputFP32, nullptr));
+    uint16_t* output = reinterpret_cast<uint16_t*>(env->GetPrimitiveArrayCritical(outputFP16, nullptr));
+
+    int i = 0;
+
+    // Process 8 FP32 values at a time
+    for (; i + 8 <= length; i += 8) {
+        float32x4_t f0 = vld1q_f32(&input[i]);
+        float32x4_t f1 = vld1q_f32(&input[i + 4]);
+
+        float16x4_t h0 = vcvt_f16_f32(f0);
+        float16x4_t h1 = vcvt_f16_f32(f1);
+
+        float16x8_t h = vcombine_f16(h0, h1);
+        vst1q_f16(reinterpret_cast<__fp16*>(&output[i]), h);
+    }
+
+    // Tail conversion
+    for (; i < length; ++i) {
+        reinterpret_cast<__fp16&>(output[i]) = static_cast<__fp16>(input[i]);
+    }
+
+    env->ReleasePrimitiveArrayCritical(inputFP32, const_cast<float*>(input), JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(outputFP16, reinterpret_cast<jbyte*>(output), 0);
 }

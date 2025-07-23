@@ -557,4 +557,9 @@ public class AdvancedFilteringUseCasesIT extends KNNRestTestCase {
 
         return builder.toString();
     }
+
+    @Override
+    public boolean preserveClusterUponCompletion() {
+        return true;
+    }
 }

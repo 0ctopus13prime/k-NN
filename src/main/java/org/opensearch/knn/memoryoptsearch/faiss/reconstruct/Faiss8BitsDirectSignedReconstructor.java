@@ -21,3 +21,8 @@ public class Faiss8BitsDirectSignedReconstructor extends FaissQuantizedValueReco
         }
     }
 }
+
+/*
+(X & 0xFF) - 128 = Y
+
+ */

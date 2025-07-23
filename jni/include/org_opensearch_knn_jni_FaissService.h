@@ -276,6 +276,15 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
   (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    convertFp32ToByte
+ * Signature: ([F[BI)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_convertFp32ToByte
+  (JNIEnv *, jclass, jfloatArray, jbyteArray, jint);
+
+
 #ifdef __cplusplus
 }
 #endif

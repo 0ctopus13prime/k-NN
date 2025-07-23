@@ -12,12 +12,14 @@ import org.opensearch.knn.index.vectorvalues.KNNBinaryVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNByteVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNFloatVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
+import org.opensearch.knn.jni.FaissService;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.opensearch.knn.jni.FaissService;
 
 import static org.opensearch.knn.index.VectorDataType.BINARY;
 import static org.opensearch.knn.index.VectorDataType.BYTE;
@@ -39,6 +41,7 @@ class VectorValuesInputStream extends InputStream {
     private long bytesRemaining;
     private final VectorDataType vectorDataType;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private byte[] convertedFP16 = null;
 
     /**
      * Used to represent a part of a {@link KNNVectorValues} as an {@link InputStream}. Expected to be used with
@@ -68,7 +71,7 @@ class VectorValuesInputStream extends InputStream {
         this.knnVectorValues = knnVectorValues;
         this.vectorDataType = vectorDataType;
         initializeVectorValues(this.knnVectorValues);
-        this.bytesPerVector = this.knnVectorValues.bytesPerVector();
+        this.bytesPerVector = this.knnVectorValues.bytesPerVector() / 2;
         // We use currentBuffer == null to indicate that there are no more vectors to be read
         this.currentBuffer = ByteBuffer.allocate(bytesPerVector).order(ByteOrder.LITTLE_ENDIAN);
         // Position the InputStream at the specific byte within the specific vector that startPosition references
@@ -177,12 +180,12 @@ class VectorValuesInputStream extends InputStream {
         }
 
         long bytesSkipped = 0;
-        int vectorsToSkip = (int) (n / (bytesPerVector / 2));
+        int vectorsToSkip = (int) (n / bytesPerVector);
         log.debug("Skipping {} bytes, {} vectors", n, vectorsToSkip);
         int docId = knnVectorValues.docId();
         while (docId != -1 && docId != DocIdSetIterator.NO_MORE_DOCS && vectorsToSkip > 0) {
             docId = knnVectorValues.nextDoc();
-            bytesSkipped += (bytesPerVector / 2);
+            bytesSkipped += bytesPerVector;
             vectorsToSkip--;
         }
 
@@ -207,12 +210,19 @@ class VectorValuesInputStream extends InputStream {
             // currentBuffer.asFloatBuffer().put(floatVector);
 
             float[] floatVector = ((KNNFloatVectorValues) knnVectorValues).getVector();
-            byte[] convertedFP16 = new byte[floatVector.length * 2];
-            for (int i = 0, j = 0; j < floatVector.length; ++i) {
-                final short bytes = Float.floatToFloat16(floatVector[i]);
-                convertedFP16[j++] = (byte) (bytes & 0xFF);
-                convertedFP16[j++] = (byte) (bytes >> 8);
+            final int l = floatVector.length * 2;
+            if (convertedFP16 == null) {
+                convertedFP16 = new byte[l];
             }
+
+            FaissService.convertFp32ToByte(floatVector, convertedFP16, floatVector.length);
+
+            // for (int i = 0, j = 0; i < floatVector.length; ++i) {
+            // final short bytes = Float.floatToFloat16(floatVector[i]);
+            // convertedFP16[j++] = (byte) (bytes & 0xFF);
+            // convertedFP16[j++] = (byte) (bytes >> 8);
+            // }
+
             currentBuffer.put(convertedFP16);
         } else if (vectorDataType == BYTE) {
             byte[] byteVector = ((KNNByteVectorValues) knnVectorValues).getVector();
