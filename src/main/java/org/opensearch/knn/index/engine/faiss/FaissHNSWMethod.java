@@ -31,17 +31,14 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.opensearch.knn.common.KNNConstants.ENCODER_FLAT;
 import static org.opensearch.knn.common.KNNConstants.FAISS_HNSW_DESCRIPTION;
 import static org.opensearch.knn.common.KNNConstants.METHOD_ENCODER_PARAMETER;
 import static org.opensearch.knn.common.KNNConstants.METHOD_HNSW;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_SEARCH;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_M;
-import static org.opensearch.knn.common.KNNConstants.NAME;
 import static org.opensearch.knn.common.KNNConstants.PARAMETERS;
 import static org.opensearch.knn.common.KNNConstants.SPACE_TYPE;
-import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 
 /**
  * Faiss HNSW method implementation
@@ -200,16 +197,20 @@ public class FaissHNSWMethod extends AbstractFaissMethod {
      */
     @SuppressWarnings("unchecked")
     static boolean supportsRemoteIndexBuild(Map<String, Object> parameters) {
-        try {
-            Map<String, Object> innerMap = (Map<String, Object>) parameters.get(PARAMETERS);
-            Map<String, Object> encoderMap = (Map<String, Object>) innerMap.get(METHOD_ENCODER_PARAMETER);
-            String dataType = getStringFromMap(parameters, VECTOR_DATA_TYPE_FIELD);
-            String encoder = getStringFromMap(encoderMap, NAME);
-            return SUPPORTED_REMOTE_INDEX_DATA_TYPES.contains(VectorDataType.get(dataType)) && ENCODER_FLAT.equals(encoder);
-        } catch (IllegalArgumentException e) {
-            log.error("Unrecognized indexing parameters in KNNLibraryIndexingContext", e);
-            return false;
-        }
+        // try {
+        // Map<String, Object> innerMap = (Map<String, Object>) parameters.get(PARAMETERS);
+        // Map<String, Object> encoderMap = (Map<String, Object>) innerMap.get(METHOD_ENCODER_PARAMETER);
+        // String dataType = getStringFromMap(parameters, VECTOR_DATA_TYPE_FIELD);
+        // String encoder = getStringFromMap(encoderMap, NAME);
+        // return SUPPORTED_REMOTE_INDEX_DATA_TYPES.contains(VectorDataType.get(dataType)) && ENCODER_FLAT.equals(encoder);
+        // } catch (IllegalArgumentException e) {
+        // log.error("Unrecognized indexing parameters in KNNLibraryIndexingContext", e);
+        // return false;
+        // }
+
+        // TMP
+        return true;
+        // TMP
     }
 
     /**
