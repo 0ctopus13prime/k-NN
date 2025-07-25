@@ -16,6 +16,7 @@ import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.index.IndexSettings;
 import org.opensearch.knn.common.exception.TerminalIOException;
 import org.opensearch.knn.index.KNNSettings;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategy;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.engine.KNNLibraryIndexingContext;
@@ -188,7 +189,7 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
                 repositoryContext.blobName,
                 indexInfo.getTotalLiveDocs(),
                 indexInfo.getVectorDataType(),
-                indexInfo.getKnnVectorValuesSupplier()
+                decorateVectorValuesSupplier(indexInfo)
             );
             success = true;
         } catch (InterruptedException | IOException e) {
@@ -196,6 +197,14 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         } finally {
             metrics.endRepositoryWriteMetrics(success);
         }
+    }
+
+    private static Supplier<KNNVectorValues<?>> decorateVectorValuesSupplier(final BuildIndexParams indexInfo) {
+        if (indexInfo.getVectorDataType() == VectorDataType.BINARY && indexInfo.getQuantizationState() != null) {
+            return new QuantizedKNNVectorValuesSupplier(indexInfo);
+        }
+
+        return indexInfo.getKnnVectorValuesSupplier();
     }
 
     /**
