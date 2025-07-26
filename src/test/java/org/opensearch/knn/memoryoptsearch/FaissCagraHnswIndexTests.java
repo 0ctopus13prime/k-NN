@@ -6,19 +6,25 @@
 package org.opensearch.knn.memoryoptsearch;
 
 import lombok.SneakyThrows;
+import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopKnnCollector;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.IOConsumer;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissMemoryOptimizedSearcher;
 
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -30,6 +36,30 @@ public class FaissCagraHnswIndexTests extends KNNTestCase {
     private static final int EF_SEARCH = 100;
     private static final int DIMENSION = 768;
     private static final int TOTAL_NUMBER_OF_VECTORS = 300;
+
+    @SneakyThrows
+    public void testKdy() {
+        final String path = "/Users/kdooyong/workspace/gpu-fp16-support/data-node/kdytmp";
+        try (final Directory directory = new MMapDirectory(Paths.get(path))) {
+            try (final IndexInput input = directory.openInput("8EFcQ5gB65CDUnLenq7A_target_field__0.faiss", IOContext.READONCE)) {
+                final FaissIndex index = FaissIndex.load(input);
+                System.out.println(index);
+
+                final ByteVectorValues values = index.getByteValues(input);
+                byte[] vec = values.vectorValue(0);
+                System.out.println("len=" + vec.length);
+                System.out.println(Arrays.toString(vec));
+                int i = 0;
+                for (float v : vec) {
+                    if (v == 0) {
+                        System.out.println("i=" + i);
+                        break;
+                    }
+                    ++i;
+                }
+            }
+        }
+    }
 
     public void testKNNSearch() {
         // Exhaustive search test

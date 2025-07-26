@@ -33,7 +33,11 @@ public class QuantizedKNNBinaryVectorValues extends KNNVectorValues<byte[]> {
 
     @Override
     public byte[] getVector() throws IOException {
-        return (byte[]) QuantizationIndexUtils.processAndReturnVector(knnFloatVectorValues, indexBuildSetup);
+        final byte[] quantizedVector = (byte[]) QuantizationIndexUtils.processAndReturnVector(
+            knnFloatVectorValues, indexBuildSetup);
+        this.dimension = quantizedVector.length * Byte.SIZE;
+        this.bytesPerVector = quantizedVector.length;
+        return quantizedVector;
     }
 
     @Override

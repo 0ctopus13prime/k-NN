@@ -12,6 +12,7 @@ import org.opensearch.knn.index.vectorvalues.KNNBinaryVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNByteVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNFloatVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
+import org.opensearch.knn.index.vectorvalues.QuantizedKNNBinaryVectorValues;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -205,7 +206,12 @@ class VectorValuesInputStream extends InputStream {
             byte[] byteVector = ((KNNByteVectorValues) knnVectorValues).getVector();
             currentBuffer.put(byteVector);
         } else if (vectorDataType == BINARY) {
-            byte[] binaryVector = ((KNNBinaryVectorValues) knnVectorValues).getVector();
+            final byte[] binaryVector;
+            if (knnVectorValues instanceof QuantizedKNNBinaryVectorValues quantizedKNNBinaryVectorValues) {
+                binaryVector = quantizedKNNBinaryVectorValues.getVector();
+            } else {
+                binaryVector = ((KNNBinaryVectorValues) knnVectorValues).getVector();
+            }
             currentBuffer.put(binaryVector);
         } else {
             throw new IllegalArgumentException("Unsupported vector data type: " + vectorDataType);

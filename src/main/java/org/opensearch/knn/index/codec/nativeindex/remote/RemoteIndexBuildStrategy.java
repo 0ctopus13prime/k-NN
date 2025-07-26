@@ -350,7 +350,7 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         }
         String vectorDataType = indexInfo.getVectorDataType().getValue();
 
-        KNNVectorValues<?> vectorValues = indexInfo.getKnnVectorValuesSupplier().get();
+        KNNVectorValues<?> vectorValues = decorateVectorValuesSupplier(indexInfo).get();
         initializeVectorValues(vectorValues);
         assert (vectorValues.dimension() > 0);
 
