@@ -14,7 +14,6 @@ import org.opensearch.common.annotation.ExperimentalApi;
 import org.opensearch.common.blobstore.BlobPath;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.index.IndexSettings;
-import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.common.exception.TerminalIOException;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
@@ -58,6 +57,7 @@ import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorV
 @Log4j2
 @ExperimentalApi
 public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
+    private static final String FLOAT16_VECTOR_TYPE_STRING = "float16";
 
     private final Supplier<RepositoriesService> repositoriesServiceSupplier;
     private final NativeIndexBuildStrategy fallbackStrategy;
@@ -327,9 +327,8 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
 
     private static String determineVectorDataType(final VectorDataType dataType, final Map<String, Object> parameters) {
         if (dataType == VectorDataType.FLOAT) {
-            if (parameters.getOrDefault(
-                KNNConstants.INDEX_DESCRIPTION_PARAMETER, "").equals(FaissHNSWMethod.FP16_HNSW_INDEX_DESCRIPTION)) {
-                return "float16";
+            if (FaissHNSWMethod.isFloat16Index(parameters)) {
+                return FLOAT16_VECTOR_TYPE_STRING;
             }
         }
 
