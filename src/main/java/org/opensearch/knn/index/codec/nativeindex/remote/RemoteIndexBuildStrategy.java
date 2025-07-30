@@ -14,12 +14,14 @@ import org.opensearch.common.annotation.ExperimentalApi;
 import org.opensearch.common.blobstore.BlobPath;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.index.IndexSettings;
+import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.common.exception.TerminalIOException;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategy;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.engine.KNNLibraryIndexingContext;
+import org.opensearch.knn.index.engine.faiss.FaissHNSWMethod;
 import org.opensearch.knn.index.remote.RemoteIndexWaiter;
 import org.opensearch.knn.index.remote.RemoteIndexWaiterFactory;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
@@ -323,6 +325,17 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         return new RepositoryContext(repository, blobPath, vectorRepositoryAccessor, blobName);
     }
 
+    private static String determineVectorDataType(final VectorDataType dataType, final Map<String, Object> parameters) {
+        if (dataType == VectorDataType.FLOAT) {
+            if (parameters.getOrDefault(
+                KNNConstants.INDEX_DESCRIPTION_PARAMETER, "").equals(FaissHNSWMethod.FP16_HNSW_INDEX_DESCRIPTION)) {
+                return "float16";
+            }
+        }
+
+        return dataType.getValue();
+    }
+
     /**
      * Constructor for RemoteBuildRequest.
      *
@@ -340,15 +353,16 @@ public class RemoteIndexBuildStrategy implements NativeIndexBuildStrategy {
         String fullPath,
         Map<String, Object> parameters
     ) throws IOException {
-        String repositoryType = repositoryMetadata.type();
-        String containerName;
+        final String repositoryType = repositoryMetadata.type();
+        final String containerName;
         switch (repositoryType) {
             case S3 -> containerName = repositoryMetadata.settings().get(BUCKET);
             default -> throw new IllegalArgumentException(
                 "Repository type " + repositoryType + " is not supported by the remote build service"
             );
         }
-        String vectorDataType = indexInfo.getVectorDataType().getValue();
+
+        final String vectorDataType = determineVectorDataType(indexInfo.getVectorDataType(), parameters);
 
         KNNVectorValues<?> vectorValues = decorateVectorValuesSupplier(indexInfo).get();
         initializeVectorValues(vectorValues);

@@ -213,7 +213,7 @@ public class RemoteIndexBuildStrategyTests extends RemoteIndexBuildTests {
         );
         return Map.of(
             INDEX_DESCRIPTION_PARAMETER,
-            "HNSW12,Flat",
+            "HNSW16,Flat",
             SPACE_TYPE,
             INNER_PRODUCT.getValue(),
             NAME,

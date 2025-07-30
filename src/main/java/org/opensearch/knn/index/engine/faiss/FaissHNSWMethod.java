@@ -6,8 +6,8 @@
 package org.opensearch.knn.index.engine.faiss;
 
 import com.google.common.collect.ImmutableSet;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
@@ -31,7 +31,9 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.opensearch.knn.common.KNNConstants.ENCODER_FLAT;
 import static org.opensearch.knn.common.KNNConstants.FAISS_HNSW_DESCRIPTION;
+import static org.opensearch.knn.common.KNNConstants.INDEX_DESCRIPTION_PARAMETER;
 import static org.opensearch.knn.common.KNNConstants.METHOD_ENCODER_PARAMETER;
 import static org.opensearch.knn.common.KNNConstants.METHOD_HNSW;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION;
@@ -39,6 +41,7 @@ import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_SEARCH;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_M;
 import static org.opensearch.knn.common.KNNConstants.PARAMETERS;
 import static org.opensearch.knn.common.KNNConstants.SPACE_TYPE;
+import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 
 /**
  * Faiss HNSW method implementation
@@ -53,6 +56,9 @@ public class FaissHNSWMethod extends AbstractFaissMethod {
     );
 
     private static final Set<VectorDataType> SUPPORTED_REMOTE_INDEX_DATA_TYPES = ImmutableSet.of(VectorDataType.FLOAT);
+    public static final String FP16_HNSW_INDEX_DESCRIPTION = "HNSW16,SQfp16";
+    private static final Set<String> SUPPORTED_REMOTE_INDEX_DESCRIPTIONS =
+        Set.of("HNSW16,Flat", FP16_HNSW_INDEX_DESCRIPTION, "HNSW16,SQ8_direct_signed", "BHNSW16,Flat");
 
     public final static List<SpaceType> SUPPORTED_SPACES = Arrays.asList(
         SpaceType.UNDEFINED,
@@ -63,7 +69,7 @@ public class FaissHNSWMethod extends AbstractFaissMethod {
     );
 
     private final static MethodComponentContext DEFAULT_ENCODER_CONTEXT = new MethodComponentContext(
-        KNNConstants.ENCODER_FLAT,
+        ENCODER_FLAT,
         Collections.emptyMap()
     );
 
@@ -179,7 +185,7 @@ public class FaissHNSWMethod extends AbstractFaissMethod {
      * @param parameters Map of method parameters including encoder information
      * Example JSON structure:
      * {
-     *   "index_description": "HNSW12,Flat",
+     *   "index_description": "HNSW16,Flat",
      *   "spaceType": "innerproduct",
      *   "name": "hnsw",
      *   "data_type": "float",
@@ -197,20 +203,15 @@ public class FaissHNSWMethod extends AbstractFaissMethod {
      */
     @SuppressWarnings("unchecked")
     static boolean supportsRemoteIndexBuild(Map<String, Object> parameters) {
-        // try {
-        // Map<String, Object> innerMap = (Map<String, Object>) parameters.get(PARAMETERS);
-        // Map<String, Object> encoderMap = (Map<String, Object>) innerMap.get(METHOD_ENCODER_PARAMETER);
-        // String dataType = getStringFromMap(parameters, VECTOR_DATA_TYPE_FIELD);
-        // String encoder = getStringFromMap(encoderMap, NAME);
-        // return SUPPORTED_REMOTE_INDEX_DATA_TYPES.contains(VectorDataType.get(dataType)) && ENCODER_FLAT.equals(encoder);
-        // } catch (IllegalArgumentException e) {
-        // log.error("Unrecognized indexing parameters in KNNLibraryIndexingContext", e);
-        // return false;
-        // }
-
-        // TMP
-        return true;
-        // TMP
+        try {
+            final String indexDescription = getStringFromMap(parameters, INDEX_DESCRIPTION_PARAMETER);
+            final String dataType = getStringFromMap(parameters, VECTOR_DATA_TYPE_FIELD);
+            return SUPPORTED_REMOTE_INDEX_DATA_TYPES.contains(VectorDataType.get(dataType))
+                   && SUPPORTED_REMOTE_INDEX_DESCRIPTIONS.contains(indexDescription);
+        } catch (IllegalArgumentException e) {
+            log.error("Unrecognized indexing parameters in KNNLibraryIndexingContext", e);
+            return false;
+        }
     }
 
     /**
