@@ -62,8 +62,8 @@ public class FaissHNSWCagraIndex extends AbstractFaissHNSWIndex {
         readCommonHeader(input);
 
         // Read CAGRA meta info
-        keepMaxSizeLevel0 = input.readByte() != 0;
-        baseLevelOnly = input.readByte() != 0;
+        keepMaxSizeLevel0 = input.readByte() == 1;
+        baseLevelOnly = input.readByte() == 1;
         numBaseLevelSearchEntryPoint = input.readInt();
 
         if (indexType.equals(IHNC2)) {
