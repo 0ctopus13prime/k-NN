@@ -276,6 +276,13 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSearchIndex
   (JNIEnv *, jclass, jlong, jfloatArray, jfloat, jobject, jint, jintArray);
 
+// TMP
+
+// Ex: bulkScoreMethodHandle.invoke(query.address(), tmpBuffers, numVectorsToCalculate, scores.address(), i, dimension);
+JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
+  (JNIEnv *, jclass, jlong, jobjectArray, jint, jlong, jint, jint);
+// TMP
+
 #ifdef __cplusplus
 }
 #endif

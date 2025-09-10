@@ -25,8 +25,8 @@ import static org.opensearch.knn.index.KNNSettings.isFaissAVX2Disabled;
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX512Disabled;
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX512SPRDisabled;
 import static org.opensearch.knn.jni.PlatformUtils.isAVX2SupportedBySystem;
-import static org.opensearch.knn.jni.PlatformUtils.isAVX512SupportedBySystem;
 import static org.opensearch.knn.jni.PlatformUtils.isAVX512SPRSupportedBySystem;
+import static org.opensearch.knn.jni.PlatformUtils.isAVX512SupportedBySystem;
 
 /**
  * Service to interact with faiss jni layer. Class dependencies should be minimal
@@ -36,7 +36,7 @@ import static org.opensearch.knn.jni.PlatformUtils.isAVX512SPRSupportedBySystem;
  *      src/main/java/org/opensearch/knn/index/query/KNNQueryResult.java
  *      src/main/java/org/opensearch/knn/common/KNNConstants.java
  */
-class FaissService {
+public class FaissService {
 
     static {
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
@@ -170,12 +170,7 @@ class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createIndexFromTemplate(
-        int[] ids,
-        long vectorsAddress,
-        int dim,
-        IndexOutputWithBuffer output,
-        byte[] templateIndex,
-        Map<String, Object> parameters
+        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
     );
 
     /**
@@ -189,12 +184,7 @@ class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createBinaryIndexFromTemplate(
-        int[] ids,
-        long vectorsAddress,
-        int dim,
-        IndexOutputWithBuffer output,
-        byte[] templateIndex,
-        Map<String, Object> parameters
+        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
     );
 
     /**
@@ -208,12 +198,7 @@ class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createByteIndexFromTemplate(
-        int[] ids,
-        long vectorsAddress,
-        int dim,
-        IndexOutputWithBuffer output,
-        byte[] templateIndex,
-        Map<String, Object> parameters
+        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
     );
 
     /**
@@ -234,16 +219,16 @@ class FaissService {
     public static native long loadIndexWithStream(IndexInputWithBuffer readStream);
 
     /**
-      * Load an index into memory via a wrapping having Lucene's IndexInput with ADC
-      *
-      * @param readStream IndexInput wrapper having a Lucene's IndexInput reference.
-      * @param parameters Map<String, Object> containing the following:
-      *                 SpaceType: l2 or innerproduct
-      *          quantizationlevel: Based on the ScalarQuantizationParams type identifier passed in.
+     * Load an index into memory via a wrapping having Lucene's IndexInput with ADC
+     *
+     * @param readStream IndexInput wrapper having a Lucene's IndexInput reference.
+     * @param parameters Map<String, Object> containing the following:
+     *                 SpaceType: l2 or innerproduct
+     *          quantizationlevel: Based on the ScalarQuantizationParams type identifier passed in.
      *                   Currently only ScalarQuantizationParams_1 is supported for one-bit ADC
      *                    (@see ScalarQuantizationParams#generateTypeIdentifier)
-      * @return pointer to location in memory the index resides in
-      */
+     * @return pointer to location in memory the index resides in
+     */
     public static native long loadIndexWithStreamADCParams(IndexInputWithBuffer readStream, Map<String, Object> parameters);
 
     /**
@@ -304,11 +289,7 @@ class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndex(
-        long indexPointer,
-        float[] queryVector,
-        int k,
-        Map<String, ?> methodParameters,
-        int[] parentIds
+        long indexPointer, float[] queryVector, int k, Map<String, ?> methodParameters, int[] parentIds
     );
 
     /**
@@ -323,13 +304,7 @@ class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndexWithFilter(
-        long indexPointer,
-        float[] queryVector,
-        int k,
-        Map<String, ?> methodParameters,
-        long[] filterIds,
-        int filterIdsType,
-        int[] parentIds
+        long indexPointer, float[] queryVector, int k, Map<String, ?> methodParameters, long[] filterIds, int filterIdsType, int[] parentIds
     );
 
     /**
@@ -344,13 +319,7 @@ class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
-        long indexPointer,
-        byte[] queryVector,
-        int k,
-        Map<String, ?> methodParameters,
-        long[] filterIds,
-        int filterIdsType,
-        int[] parentIds
+        long indexPointer, byte[] queryVector, int k, Map<String, ?> methodParameters, long[] filterIds, int filterIdsType, int[] parentIds
     );
 
     /**
@@ -364,12 +333,7 @@ class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
-        long indexPointer,
-        byte[] queryVector,
-        int k,
-        long[] filterIds,
-        int filterIdsType,
-        int[] parentIds
+        long indexPointer, byte[] queryVector, int k, long[] filterIds, int filterIdsType, int[] parentIds
     );
 
     /**
@@ -456,11 +420,15 @@ class FaissService {
      * @return KNNQueryResult array of neighbors within radius
      */
     public static native KNNQueryResult[] rangeSearchIndex(
-        long indexPointer,
-        float[] queryVector,
-        float radius,
-        Map<String, ?> methodParameters,
-        int indexMaxResultWindow,
-        int[] parentIds
+        long indexPointer, float[] queryVector, float radius, Map<String, ?> methodParameters, int indexMaxResultWindow, int[] parentIds
+    );
+
+    public static native void bulkScoring1(
+        long queryAddr,
+        byte[][] vectors,
+        int numVectors,
+        long scoresAddr,
+        int scoresIndex,
+        int dimension
     );
 }

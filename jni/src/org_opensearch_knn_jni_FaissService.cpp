@@ -10,6 +10,7 @@
  */
 
 #include "org_opensearch_knn_jni_FaissService.h"
+#include "faiss/impl/ScalarQuantizer.h"
 
 #include <jni.h>
 
@@ -495,3 +496,30 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
     }
     return nullptr;
 }
+
+// TMP
+
+// Ex: bulkScoreMethodHandle.invoke(query.address(), tmpBuffers, numVectorsToCalculate, scores.address(), i, dimension);
+JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
+  (JNIEnv * env, jclass cls, jlong queryAddr, jobjectArray vectors, jint numVectors, jlong scoresAddr, jint scoreIdx, jint dimension) {
+    static auto dist = faiss::ScalarQuantizer {128, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
+
+    // Set query
+    dist->q = (float*) queryAddr;
+
+    // Get scores[]
+    auto scores = (float*) scoresAddr;
+
+    // Bulk scoring
+    for (int i = 0 ; i < numVectors ; ++i) {
+        auto vec = (jbyteArray) env->GetObjectArrayElement(vectors, i);
+        auto ptr_vec = (jbyte*) env->GetPrimitiveArrayCritical(vec, 0);
+        const float score = dist->query_to_code((const uint8_t*) ptr_vec);
+        env->ReleasePrimitiveArrayCritical(vec, ptr_vec, 0);
+        scores[scoreIdx++] = score;
+    }
+}
+
+// TMP
+
+

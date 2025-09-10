@@ -132,13 +132,21 @@ public class FaissIndexScalarQuantizedFlat extends FaissIndex {
         @RequiredArgsConstructor
         final class ByteVectorValuesImpl extends ByteVectorValues {
             final IndexInput indexInput;
-            final byte[] buffer = new byte[(int) oneVectorByteSize];
+            final byte[][] buffers = new byte[][] {
+                new byte[(int) oneVectorByteSize],
+                new byte[(int) oneVectorByteSize],
+                new byte[(int) oneVectorByteSize],
+                new byte[(int) oneVectorByteSize],
+            };
+            int bufferIndex = 0;
 
             @Override
             public byte[] vectorValue(int internalVectorId) throws IOException {
                 indexInput.seek(flatVectors.getBaseOffset() + internalVectorId * oneVectorByteSize);
+                final byte[] buffer = buffers[bufferIndex];
                 indexInput.readBytes(buffer, 0, buffer.length);
-                reconstructor.reconstruct(buffer, buffer);
+                // reconstructor.reconstruct(buffer, buffer);
+                bufferIndex = (bufferIndex + 1) & 3;
                 return buffer;
             }
 
