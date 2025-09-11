@@ -6,7 +6,6 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import lombok.Getter;
-import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.opensearch.knn.jni.FaissService;
 
@@ -15,7 +14,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
-public class NativeRandomVectorScorer1 implements RandomVectorScorer {
+public class NativeRandomVectorScorer2 implements RandomVectorScorer {
     private final int maxOrd;
     @Getter
     private final Arena arena;
@@ -23,12 +22,12 @@ public class NativeRandomVectorScorer1 implements RandomVectorScorer {
     private final int dimension;
     private int numNeighbors;
     private int nextNeighborIndex;
-    private int[] neighborList;
+    private MemorySegment neighborList;
     private MemorySegment scores;
-    private final ByteVectorValues bytes;
+    private MMapByteVectorValues mmapByteVectorValues;
     private final byte[][] tmpBuffers;
 
-    public NativeRandomVectorScorer1(final int maxOrd, final int dimension, final float[] target, final ByteVectorValues bytes) {
+    public NativeRandomVectorScorer2(final int maxOrd, final int dimension, final float[] target, final MMapByteVectorValues vectorValues) {
         this.maxOrd = maxOrd;
         this.dimension = dimension;
         this.arena = Arena.ofShared();
@@ -36,8 +35,8 @@ public class NativeRandomVectorScorer1 implements RandomVectorScorer {
         for (int i = 0; i < target.length; i++) {
             this.query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
         }
-        this.bytes = bytes;
-        this.tmpBuffers = new byte[4][];
+        this.mmapByteVectorValues = vectorValues;
+        this.tmpBuffers = new byte[1][];
     }
 
     public void close() {
@@ -47,13 +46,13 @@ public class NativeRandomVectorScorer1 implements RandomVectorScorer {
     @Override
     public float score(int internalVectorId) throws IOException {
         if (nextNeighborIndex < numNeighbors) {
-            final int expectedId = neighborList[nextNeighborIndex];
+            final int expectedId = neighborList.getAtIndex(ValueLayout.JAVA_INT, nextNeighborIndex);
             if (expectedId == internalVectorId) {
                 return scores.getAtIndex(ValueLayout.JAVA_FLOAT, nextNeighborIndex++);
             }
         }
 
-        tmpBuffers[0] = bytes.vectorValue(internalVectorId);
+        tmpBuffers[0] = mmapByteVectorValues.vectorValue(internalVectorId);
         if (scores == null || scores.byteSize() < 16) {
             scores = arena.allocate(16 * Float.BYTES, 64);
         }
@@ -61,28 +60,21 @@ public class NativeRandomVectorScorer1 implements RandomVectorScorer {
         return scores.getAtIndex(ValueLayout.JAVA_FLOAT, 0);
     }
 
-    public void bulkScoring(final int[] neighborList, final int numNeighbors) {
-        try {
-            this.neighborList = neighborList;
-            this.nextNeighborIndex = 0;
-            this.numNeighbors = numNeighbors;
-            if (scores == null || scores.byteSize() < (Float.BYTES * numNeighbors)) {
-                scores = arena.allocate(2 * numNeighbors * Float.BYTES, 64);
-            }
-
-            int i = 0;
-            while (i < numNeighbors) {
-                final int numVectorsToPass = Math.min(numNeighbors - i, 4);
-                for (int j = 0; j < numVectorsToPass; ++j) {
-                    final int vectorId = neighborList[i + j];
-                    tmpBuffers[j] = bytes.vectorValue(vectorId);
-                }
-                FaissService.bulkScoring1(query.address(), tmpBuffers, numVectorsToPass, scores.address(), i, dimension);
-                i += 4;
-            }
-        } catch (Throwable e) {
-            throw new RuntimeException("!!!!!!!!!!!!!!!!!!!!!!!!!!!", e);
+    public void bulkScoring(final MemorySegment neighborList, final int numNeighbors) {
+        this.neighborList = neighborList;
+        this.nextNeighborIndex = 0;
+        this.numNeighbors = numNeighbors;
+        if (scores == null || scores.byteSize() < (Float.BYTES * numNeighbors)) {
+            scores = arena.allocate(2 * numNeighbors * Float.BYTES, 64);
         }
+        FaissService.bulkScoring2(
+            query.address(),
+            neighborList.address(),
+            numNeighbors,
+            mmapByteVectorValues.getMemorySegments()[0].address() + mmapByteVectorValues.getBaseOffset(),
+            scores.address(),
+            (int) mmapByteVectorValues.getOneVectorByteSize()
+        );
     }
 
     @Override

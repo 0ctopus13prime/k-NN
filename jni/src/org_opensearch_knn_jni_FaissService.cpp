@@ -520,6 +520,33 @@ JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
     }
 }
 
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    bulkScoring2
+ * Signature: (JJIJJI)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring2
+  (JNIEnv *env, jclass clazz, jlong queryAddr, jlong neighborsAddr, jint numNeighbors, jlong flatVectorSectionAddr, jlong scoresAddr, jint oneVectorByteSize) {
+    static auto dist = faiss::ScalarQuantizer {128, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
+
+    // Set query
+    dist->q = (float*) queryAddr;
+
+    // Get scores[]
+    auto scores = (float*) scoresAddr;
+
+    // Bulk scoring
+    auto* neighbors = (const int32_t*) neighborsAddr;
+    auto* flatVectors = (const uint8_t*) flatVectorSectionAddr;
+    int scoreIdx  = 0;
+
+    for (int i = 0 ; i < numNeighbors ; ++i) {
+        auto ptr_vec = flatVectors + (neighbors[i] * oneVectorByteSize);
+        const float score = dist->query_to_code((const uint8_t*) ptr_vec);
+        scores[scoreIdx++] = score;
+    }
+}
+
 // TMP
 
 

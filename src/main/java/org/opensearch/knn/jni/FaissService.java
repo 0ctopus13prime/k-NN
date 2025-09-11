@@ -170,7 +170,12 @@ public class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createIndexFromTemplate(
-        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
+        int[] ids,
+        long vectorsAddress,
+        int dim,
+        IndexOutputWithBuffer output,
+        byte[] templateIndex,
+        Map<String, Object> parameters
     );
 
     /**
@@ -184,7 +189,12 @@ public class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createBinaryIndexFromTemplate(
-        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
+        int[] ids,
+        long vectorsAddress,
+        int dim,
+        IndexOutputWithBuffer output,
+        byte[] templateIndex,
+        Map<String, Object> parameters
     );
 
     /**
@@ -198,7 +208,12 @@ public class FaissService {
      * @param parameters additional build time parameters
      */
     public static native void createByteIndexFromTemplate(
-        int[] ids, long vectorsAddress, int dim, IndexOutputWithBuffer output, byte[] templateIndex, Map<String, Object> parameters
+        int[] ids,
+        long vectorsAddress,
+        int dim,
+        IndexOutputWithBuffer output,
+        byte[] templateIndex,
+        Map<String, Object> parameters
     );
 
     /**
@@ -289,7 +304,11 @@ public class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndex(
-        long indexPointer, float[] queryVector, int k, Map<String, ?> methodParameters, int[] parentIds
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        int[] parentIds
     );
 
     /**
@@ -304,7 +323,13 @@ public class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndexWithFilter(
-        long indexPointer, float[] queryVector, int k, Map<String, ?> methodParameters, long[] filterIds, int filterIdsType, int[] parentIds
+        long indexPointer,
+        float[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
     );
 
     /**
@@ -319,7 +344,13 @@ public class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
-        long indexPointer, byte[] queryVector, int k, Map<String, ?> methodParameters, long[] filterIds, int filterIdsType, int[] parentIds
+        long indexPointer,
+        byte[] queryVector,
+        int k,
+        Map<String, ?> methodParameters,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
     );
 
     /**
@@ -333,7 +364,12 @@ public class FaissService {
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
-        long indexPointer, byte[] queryVector, int k, long[] filterIds, int filterIdsType, int[] parentIds
+        long indexPointer,
+        byte[] queryVector,
+        int k,
+        long[] filterIds,
+        int filterIdsType,
+        int[] parentIds
     );
 
     /**
@@ -420,7 +456,12 @@ public class FaissService {
      * @return KNNQueryResult array of neighbors within radius
      */
     public static native KNNQueryResult[] rangeSearchIndex(
-        long indexPointer, float[] queryVector, float radius, Map<String, ?> methodParameters, int indexMaxResultWindow, int[] parentIds
+        long indexPointer,
+        float[] queryVector,
+        float radius,
+        Map<String, ?> methodParameters,
+        int indexMaxResultWindow,
+        int[] parentIds
     );
 
     public static native void bulkScoring1(
@@ -430,5 +471,14 @@ public class FaissService {
         long scoresAddr,
         int scoresIndex,
         int dimension
+    );
+
+    public static native void bulkScoring2(
+        long queryAddr,
+        long neighborsAddr,
+        int numNeighbors,
+        long flatVectorSectionAddr,
+        long scoresAddr,
+        int oneVectorByteSize
     );
 }

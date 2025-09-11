@@ -5,11 +5,13 @@
 
 package org.opensearch.knn.memoryoptsearch.faiss;
 
-import org.apache.lucene.index.FieldInfo;
 import lombok.extern.log4j.Log4j2;
+import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.store.ReadAdvice;
 import org.apache.lucene.util.IOUtils;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
@@ -28,6 +30,18 @@ public class FaissMemoryOptimizedSearcherFactory implements VectorSearcherFactor
     @Override
     public VectorSearcher createVectorSearcher(final Directory directory, final String fileName, final FieldInfo fieldInfo)
         throws IOException {
+
+        // TMP
+        Directory actualDirectory = directory;
+        while (actualDirectory instanceof FilterDirectory filterDirectory) {
+            actualDirectory = filterDirectory.getDelegate();
+        }
+
+        if ((actualDirectory instanceof MMapDirectory) == false) {
+            throw new RuntimeException("!!! WWWWWWWWWWWWWWWWWWWWWW");
+        }
+        // TMP
+
         final IndexInput indexInput = directory.openInput(
             fileName,
             new IOContext(IOContext.Context.DEFAULT, null, null, ReadAdvice.RANDOM)

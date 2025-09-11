@@ -136,8 +136,7 @@ public class FaissIndexScalarQuantizedFlat extends FaissIndex {
                 new byte[(int) oneVectorByteSize],
                 new byte[(int) oneVectorByteSize],
                 new byte[(int) oneVectorByteSize],
-                new byte[(int) oneVectorByteSize],
-            };
+                new byte[(int) oneVectorByteSize], };
             int bufferIndex = 0;
 
             @Override
@@ -166,7 +165,9 @@ public class FaissIndexScalarQuantizedFlat extends FaissIndex {
             }
         }
 
-        return new ByteVectorValuesImpl(indexInput);
+        // return new ByteVectorValuesImpl(indexInput);
+
+        return new MMapByteVectorValues(indexInput, oneVectorByteSize, flatVectors.getBaseOffset(), dimension, totalNumberOfVectors);
     }
 
     @Override

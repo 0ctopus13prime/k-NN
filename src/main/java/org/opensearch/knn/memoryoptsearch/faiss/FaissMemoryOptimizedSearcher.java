@@ -6,6 +6,7 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -78,33 +79,55 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        //        search(
-        //            VectorEncoding.FLOAT32,
-        //            () -> flatVectorsScorer.getRandomVectorScorer(
-        //                vectorSimilarityFunction,
-        //                isAdc ? faissIndex.getByteValues(getSlicedIndexInput()) : faissIndex.getFloatValues(getSlicedIndexInput()),
-        //                target
-        //            ),
-        //            knnCollector,
-        //            acceptDocs
-        //        );
+        // Baseline
+        // search(
+        // VectorEncoding.FLOAT32,
+        // () -> flatVectorsScorer.getRandomVectorScorer(
+        // vectorSimilarityFunction,
+        // isAdc ? faissIndex.getByteValues(getSlicedIndexInput()) : faissIndex.getFloatValues(getSlicedIndexInput()),
+        // target
+        // ),
+        // knnCollector,
+        // acceptDocs
+        // );
 
-        search(VectorEncoding.FLOAT32, () -> new NativeRandomVectorScorer1((int) (hnsw.getTotalNumberOfVectors() - 1),
-                                                                       faissIndex.dimension,
-                                                                       target,
-                                                                       faissIndex.getByteValues(indexInput)
-        ), knnCollector, acceptDocs);
+        // Opt-1
+        // search(VectorEncoding.FLOAT32, () -> new NativeRandomVectorScorer1((int) (hnsw.getTotalNumberOfVectors() - 1),
+        // faissIndex.dimension,
+        // target,
+        // faissIndex.getByteValues(indexInput)
+        // ), knnCollector, acceptDocs);
+
+        // Opt-2
+        final ByteVectorValues vectorValues = faissIndex.getByteValues(indexInput);
+        if ((vectorValues instanceof MMapByteVectorValues) == false) {
+            throw new RuntimeException("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+        }
+
+        search(
+            VectorEncoding.FLOAT32,
+            () -> new NativeRandomVectorScorer2(
+                (int) (hnsw.getTotalNumberOfVectors() - 1),
+                faissIndex.dimension,
+                target,
+                (MMapByteVectorValues) vectorValues
+            ),
+            knnCollector,
+            acceptDocs
+        );
     }
 
     @Override
     public void search(byte[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
-        search(VectorEncoding.BYTE,
-               () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction,
-                                                             faissIndex.getByteValues(getSlicedIndexInput()),
-                                                             target
-               ),
-               knnCollector,
-               acceptDocs
+        search(
+            VectorEncoding.BYTE,
+            () -> flatVectorsScorer.getRandomVectorScorer(
+                vectorSimilarityFunction,
+                faissIndex.getByteValues(getSlicedIndexInput()),
+                target
+            ),
+            knnCollector,
+            acceptDocs
         );
     }
 
@@ -125,8 +148,13 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
         if (!this.isAdc && faissIndex.getVectorEncoding() != vectorEncoding) {
             throw new IllegalArgumentException(
-                "Search for vector encoding [" + vectorEncoding + "] is not supported in " + "an index vector whose encoding is ["
-                + faissIndex.getVectorEncoding() + "]");
+                "Search for vector encoding ["
+                    + vectorEncoding
+                    + "] is not supported in "
+                    + "an index vector whose encoding is ["
+                    + faissIndex.getVectorEncoding()
+                    + "]"
+            );
         }
 
         // Set up required components for vector search
@@ -136,7 +164,14 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
         if (knnCollector.k() < scorer.maxOrd()) {
             // Do ANN search with Lucene's HNSW graph searcher.
-            HnswGraphSearcher.search(scorer, collector, new FaissHnswGraph(hnsw, getSlicedIndexInput(), (NativeRandomVectorScorer1) scorer), acceptedOrds);
+            // HnswGraphSearcher.search(scorer, collector, new FaissHnswGraph(hnsw, getSlicedIndexInput(), (NativeRandomVectorScorer2)
+            // scorer), acceptedOrds);
+            HnswGraphSearcher.search(
+                scorer,
+                collector,
+                new FaissHnswGraph2(hnsw, getSlicedIndexInput(), (NativeRandomVectorScorer2) scorer),
+                acceptedOrds
+            );
         } else {
             // If k is larger than the number of vectors, we can just iterate over all vectors
             // and collect them.
@@ -151,6 +186,13 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
                 }
             }
         }  // End if
+
+        if (scorer instanceof NativeRandomVectorScorer1 nativeScorer) {
+            nativeScorer.close();
+        }
+        if (scorer instanceof NativeRandomVectorScorer2 nativeScorer) {
+            nativeScorer.close();
+        }
     }
 
     private IndexInput getSlicedIndexInput() throws IOException {
@@ -164,9 +206,10 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             return new KnnCollector.Decorator(ordinalTranslatedKnnCollector) {
                 @Override
                 public KnnSearchStrategy getSearchStrategy() {
-                    return new RandomEntryPointsKnnSearchStrategy(cagraHNSW.getNumBaseLevelSearchEntryPoints(),
-                                                                  cagraHNSW.getTotalNumberOfVectors(),
-                                                                  knnCollector.getSearchStrategy()
+                    return new RandomEntryPointsKnnSearchStrategy(
+                        cagraHNSW.getNumBaseLevelSearchEntryPoints(),
+                        cagraHNSW.getTotalNumberOfVectors(),
+                        knnCollector.getSearchStrategy()
                     );
                 }
             };
@@ -182,11 +225,14 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
      */
     static class RandomEntryPointsKnnSearchStrategy extends KnnSearchStrategy.Seeded {
         public RandomEntryPointsKnnSearchStrategy(
-            final int numberOfEntryPoints, final long totalNumberOfVectors, final KnnSearchStrategy originalStrategy
+            final int numberOfEntryPoints,
+            final long totalNumberOfVectors,
+            final KnnSearchStrategy originalStrategy
         ) {
-            super(generateRandomEntryPoints(numberOfEntryPoints, Math.toIntExact(totalNumberOfVectors)),
-                  numberOfEntryPoints,
-                  originalStrategy
+            super(
+                generateRandomEntryPoints(numberOfEntryPoints, Math.toIntExact(totalNumberOfVectors)),
+                numberOfEntryPoints,
+                originalStrategy
             );
         }
 
