@@ -91,13 +91,6 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         // acceptDocs
         // );
 
-        // Opt-1
-        // search(VectorEncoding.FLOAT32, () -> new NativeRandomVectorScorer1((int) (hnsw.getTotalNumberOfVectors() - 1),
-        // faissIndex.dimension,
-        // target,
-        // faissIndex.getByteValues(indexInput)
-        // ), knnCollector, acceptDocs);
-
         // Opt-2
         final ByteVectorValues vectorValues = faissIndex.getByteValues(indexInput);
         if ((vectorValues instanceof MMapByteVectorValues) == false) {
@@ -187,9 +180,6 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             }
         }  // End if
 
-        if (scorer instanceof NativeRandomVectorScorer1 nativeScorer) {
-            nativeScorer.close();
-        }
         if (scorer instanceof NativeRandomVectorScorer2 nativeScorer) {
             nativeScorer.close();
         }

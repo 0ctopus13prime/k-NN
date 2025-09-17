@@ -11,14 +11,18 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopKnnCollector;
+import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.join.DiversifyingNearestChildrenKnnCollectorManager;
 import org.apache.lucene.search.knn.KnnCollectorManager;
 import org.apache.lucene.search.knn.KnnSearchStrategy;
-import org.apache.lucene.search.knn.TopKnnCollectorManager;
+import org.apache.lucene.search.knn.MultiLeafKnnCollector;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Version;
+import org.apache.lucene.util.hnsw.BlockingFloatHeap;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.KNNEngine;
@@ -43,6 +47,46 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
 
     private final KnnCollectorManager knnCollectorManager;
 
+    public static class KdyTopKnnCollectorManager implements KnnCollectorManager {
+        private final int k;
+        private final BlockingFloatHeap globalScoreQueue;
+
+        public KdyTopKnnCollectorManager(int k) {
+            this.k = k;
+            this.globalScoreQueue = null;
+        }
+
+        public KnnCollector newCollector(int visitedLimit, KnnSearchStrategy searchStrategy, LeafReaderContext context) throws IOException {
+            return (KnnCollector) (this.globalScoreQueue == null
+                ? new TopKnnCollector(this.k, visitedLimit, searchStrategy)
+                : new MultiLeafKnnCollector(this.k, this.globalScoreQueue, new TopKnnCollector(this.k, visitedLimit, searchStrategy)));
+        }
+    }
+
+    public static class TakeTopKnnCollector extends TopKnnCollector {
+        private int originalK;
+
+        public TakeTopKnnCollector(int originalK, int k, int visitLimit, KnnSearchStrategy searchStrategy) {
+            super(k, visitLimit, searchStrategy);
+        }
+
+        public TopDocs topDocs() {
+            assert this.queue.size() <= this.k() : "Tried to collect more results than the maximum number allowed";
+
+            final ScoreDoc[] scoreDocs = new ScoreDoc[originalK];
+
+            for (int i = 1; i <= scoreDocs.length; ++i) {
+                scoreDocs[scoreDocs.length - i] = new ScoreDoc(this.queue.topNode(), this.queue.topScore());
+                this.queue.pop();
+            }
+
+            TotalHits.Relation relation = this.earlyTerminated()
+                ? TotalHits.Relation.GREATER_THAN_OR_EQUAL_TO
+                : TotalHits.Relation.EQUAL_TO;
+            return new TopDocs(new TotalHits(this.visitedCount(), relation), scoreDocs);
+        }
+    }
+
     public MemoryOptimizedKNNWeight(KNNQuery query, float boost, final Weight filterWeight, IndexSearcher searcher, int k) {
         super(query, boost, filterWeight);
 
@@ -50,7 +94,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             // ANN Search
             if (query.getParentsFilter() == null) {
                 // Non-nested case
-                this.knnCollectorManager = new TopKnnCollectorManager(k, searcher);
+                // this.knnCollectorManager = new TopKnnCollectorManager(k, searcher);
+                this.knnCollectorManager = new KdyTopKnnCollectorManager(k);
             } else {
                 // Nested case
                 this.knnCollectorManager = new DiversifyingNearestChildrenKnnCollectorManager(k, query.getParentsFilter(), searcher);

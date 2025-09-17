@@ -31,15 +31,13 @@ public class FaissHnswGraph extends HnswGraph {
     private int[] neighborIdList;
     private int numNeighbors;
     private int nextNeighborIndex;
-    private final NativeRandomVectorScorer1 scorer1;
 
-    public FaissHnswGraph(final FaissHNSW faissHNSW, final IndexInput indexInput, final NativeRandomVectorScorer1 scorer1) {
+    public FaissHnswGraph(final FaissHNSW faissHNSW, final IndexInput indexInput) {
         this.faissHnsw = faissHNSW;
         // Offset readers MUST non null.
         Objects.requireNonNull(faissHNSW.getOffsetsReader());
         this.indexInput = indexInput;
         this.numVectors = Math.toIntExact(faissHNSW.getTotalNumberOfVectors());
-        this.scorer1 = scorer1;
     }
 
     /**
@@ -59,7 +57,6 @@ public class FaissHnswGraph extends HnswGraph {
         final long begin = o + faissHnsw.getCumNumberNeighborPerLevel()[level];
         final long end = o + faissHnsw.getCumNumberNeighborPerLevel()[level + 1];
         loadNeighborIdList(begin, end);
-        scorer1.bulkScoring(neighborIdList, numNeighbors);
     }
 
     private void loadNeighborIdList(final long begin, final long end) {

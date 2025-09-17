@@ -15,6 +15,8 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 public class NativeRandomVectorScorer2 implements RandomVectorScorer {
+    private final static ThreadLocal<Arena> ARENA = ThreadLocal.withInitial(Arena::ofShared);
+
     private final int maxOrd;
     @Getter
     private final Arena arena;
@@ -25,22 +27,21 @@ public class NativeRandomVectorScorer2 implements RandomVectorScorer {
     private MemorySegment neighborList;
     private MemorySegment scores;
     private MMapByteVectorValues mmapByteVectorValues;
-    private final byte[][] tmpBuffers;
 
     public NativeRandomVectorScorer2(final int maxOrd, final int dimension, final float[] target, final MMapByteVectorValues vectorValues) {
         this.maxOrd = maxOrd;
         this.dimension = dimension;
-        this.arena = Arena.ofShared();
+        // this.arena = Arena.ofShared();
+        this.arena = ARENA.get();
         this.query = arena.allocate(Float.BYTES * target.length, ValueLayout.JAVA_FLOAT.byteAlignment());
         for (int i = 0; i < target.length; i++) {
             this.query.setAtIndex(ValueLayout.JAVA_FLOAT, i, target[i]);
         }
         this.mmapByteVectorValues = vectorValues;
-        this.tmpBuffers = new byte[1][];
     }
 
     public void close() {
-        arena.close();
+        // arena.close();
     }
 
     @Override
@@ -52,11 +53,11 @@ public class NativeRandomVectorScorer2 implements RandomVectorScorer {
             }
         }
 
-        tmpBuffers[0] = mmapByteVectorValues.vectorValue(internalVectorId);
         if (scores == null || scores.byteSize() < 16) {
             scores = arena.allocate(16 * Float.BYTES, 64);
         }
-        FaissService.bulkScoring1(query.address(), tmpBuffers, 1, scores.address(), 0, dimension);
+        neighborList.setAtIndex(ValueLayout.OfInt.JAVA_INT, 0, internalVectorId);
+        FaissService.bulkScoring2(query.address(), neighborList.address(), 1, scores.address(), 0, dimension);
         return scores.getAtIndex(ValueLayout.JAVA_FLOAT, 0);
     }
 

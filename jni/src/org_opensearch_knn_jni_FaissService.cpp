@@ -499,24 +499,93 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 
 // TMP
 
-// Ex: bulkScoreMethodHandle.invoke(query.address(), tmpBuffers, numVectorsToCalculate, scores.address(), i, dimension);
-JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
-  (JNIEnv * env, jclass cls, jlong queryAddr, jobjectArray vectors, jint numVectors, jlong scoresAddr, jint scoreIdx, jint dimension) {
-    static auto dist = faiss::ScalarQuantizer {128, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
+void batch_inner_product_4_fp16_targets(
+    const float *query,
+    const uint8_t *d0,
+    const uint8_t *d1,
+    const uint8_t *d2,
+    const uint8_t *d3,
+    size_t dim,
+    float& score0,
+    float& score1,
+    float& score2,
+    float& score3) {
 
-    // Set query
-    dist->q = (float*) queryAddr;
+//     std::cout << "_____________ q=" << ((uint64_t) query)
+//            << ", d0=" << ((uint64_t) d0)
+//            << ", d1=" << ((uint64_t) d1)
+//            << ", d2=" << ((uint64_t) d2)
+//            << ", d3=" << ((uint64_t) d3)
+//            << ", dim=" << dim
+//            << std::endl;
+//
 
-    // Get scores[]
-    auto scores = (float*) scoresAddr;
+    float32x4_t acc0 = vdupq_n_f32(0.0f);
+    float32x4_t acc1 = vdupq_n_f32(0.0f);
+    float32x4_t acc2 = vdupq_n_f32(0.0f);
+    float32x4_t acc3 = vdupq_n_f32(0.0f);
 
-    // Bulk scoring
-    for (int i = 0 ; i < numVectors ; ++i) {
-        auto vec = (jbyteArray) env->GetObjectArrayElement(vectors, i);
-        auto ptr_vec = (jbyte*) env->GetPrimitiveArrayCritical(vec, 0);
-        const float score = dist->query_to_code((const uint8_t*) ptr_vec);
-        env->ReleasePrimitiveArrayCritical(vec, ptr_vec, 0);
-        scores[scoreIdx++] = score;
+    size_t i = 0;
+    for (; i + 8 <= dim; i += 8) {
+        // Load 8 FP32 query elements
+        float32x4_t q0 = vld1q_f32(query + i);
+        float32x4_t q1 = vld1q_f32(query + i + 4);
+
+        // Load 8 FP16 elements from each target and convert to FP32
+        float16x8_t h0 = vld1q_f16((const __fp16 *)(d0 + i * 2));
+        float16x8_t h1 = vld1q_f16((const __fp16 *)(d1 + i * 2));
+        float16x8_t h2 = vld1q_f16((const __fp16 *)(d2 + i * 2));
+        float16x8_t h3 = vld1q_f16((const __fp16 *)(d3 + i * 2));
+
+        float32x4_t d0_lo = vcvt_f32_f16(vget_low_f16(h0));
+        float32x4_t d0_hi = vcvt_f32_f16(vget_high_f16(h0));
+        float32x4_t d1_lo = vcvt_f32_f16(vget_low_f16(h1));
+        float32x4_t d1_hi = vcvt_f32_f16(vget_high_f16(h1));
+        float32x4_t d2_lo = vcvt_f32_f16(vget_low_f16(h2));
+        float32x4_t d2_hi = vcvt_f32_f16(vget_high_f16(h2));
+        float32x4_t d3_lo = vcvt_f32_f16(vget_low_f16(h3));
+        float32x4_t d3_hi = vcvt_f32_f16(vget_high_f16(h3));
+
+        // Post-load prefetch: next 8 elements
+        if (i + 8 < dim) {
+            __builtin_prefetch(query + i + 8);
+            __builtin_prefetch(d0 + (i + 8) * 2);
+            __builtin_prefetch(d1 + (i + 8) * 2);
+            __builtin_prefetch(d2 + (i + 8) * 2);
+            __builtin_prefetch(d3 + (i + 8) * 2);
+        }
+
+        // Accumulate FMA
+        acc0 = vfmaq_f32(acc0, q0, d0_lo);
+        acc0 = vfmaq_f32(acc0, q1, d0_hi);
+
+        acc1 = vfmaq_f32(acc1, q0, d1_lo);
+        acc1 = vfmaq_f32(acc1, q1, d1_hi);
+
+        acc2 = vfmaq_f32(acc2, q0, d2_lo);
+        acc2 = vfmaq_f32(acc2, q1, d2_hi);
+
+        acc3 = vfmaq_f32(acc3, q0, d3_lo);
+        acc3 = vfmaq_f32(acc3, q1, d3_hi);
+    }
+
+    // Horizontal sum
+    score0 = vaddvq_f32(acc0);
+    score1 = vaddvq_f32(acc1);
+    score2 = vaddvq_f32(acc2);
+    score3 = vaddvq_f32(acc3);
+
+    // Scalar tail
+    for (; i < dim; i++) {
+        __fp16 h0 = *((const __fp16 *)(d0 + i * 2));
+        __fp16 h1 = *((const __fp16 *)(d1 + i * 2));
+        __fp16 h2 = *((const __fp16 *)(d2 + i * 2));
+        __fp16 h3 = *((const __fp16 *)(d3 + i * 2));
+        const float qv = query[i];
+        score0 += qv * (float)h0;
+        score1 += qv * (float)h1;
+        score2 += qv * (float)h2;
+        score3 += qv * (float)h3;
     }
 }
 
@@ -525,9 +594,9 @@ JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
  * Method:    bulkScoring2
  * Signature: (JJIJJI)V
  */
-JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring2
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring1
   (JNIEnv *env, jclass clazz, jlong queryAddr, jlong neighborsAddr, jint numNeighbors, jlong flatVectorSectionAddr, jlong scoresAddr, jint oneVectorByteSize) {
-    static auto dist = faiss::ScalarQuantizer {128, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
+    thread_local static auto dist = faiss::ScalarQuantizer {768, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
 
     // Set query
     dist->q = (float*) queryAddr;
@@ -539,11 +608,50 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring2
     auto* neighbors = (const int32_t*) neighborsAddr;
     auto* flatVectors = (const uint8_t*) flatVectorSectionAddr;
     int scoreIdx  = 0;
+    const uint64_t oneVectorByteSizeL = oneVectorByteSize;
 
     for (int i = 0 ; i < numNeighbors ; ++i) {
-        auto ptr_vec = flatVectors + (neighbors[i] * oneVectorByteSize);
+        auto ptr_vec = flatVectors + (neighbors[i] * oneVectorByteSizeL);
+        const float score = dist->query_to_code(ptr_vec);
+        scores[scoreIdx++] = score;
+    }
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring2
+  (JNIEnv *env, jclass clazz, jlong queryAddr, jlong neighborsAddr, jint numNeighbors, jlong flatVectorSectionAddr, jlong scoresAddr, jint oneVectorByteSize) {
+    thread_local static auto dist = faiss::ScalarQuantizer {768, faiss::ScalarQuantizer::QuantizerType::QT_fp16}.get_distance_computer(faiss::MetricType::METRIC_INNER_PRODUCT);
+    // Get scores[]
+    auto scores = (float*) scoresAddr;
+
+    // Bulk scoring
+    float fourScores[4];
+    uint8_t* fp16Vecs[4];
+    auto* neighbors = (const int32_t*) neighborsAddr;
+    auto* flatVectors = (const uint8_t*) flatVectorSectionAddr;
+    int scoreIdx  = 0;
+    const size_t dimension = 768;
+    const uint64_t oneVectorByteSizeL = oneVectorByteSize;
+
+    int i = 0;
+    for ( ; (i + 4) <= numNeighbors ; i += 4) {
+        for (int j = 0 ; j < 4 ; ++j) {
+            fp16Vecs[j] = (uint8_t*) (flatVectorSectionAddr + (neighbors[i + j] * oneVectorByteSizeL));
+        }
+
+        batch_inner_product_4_fp16_targets((float*) queryAddr, fp16Vecs[0], fp16Vecs[1], fp16Vecs[2], fp16Vecs[3], dimension,
+                                           fourScores[0], fourScores[1], fourScores[2], fourScores[3]);
+
+        for (int j = 0 ; j < 4 ; ++j) {
+            scores[scoreIdx++] = fourScores[j];
+        }
+    }
+
+    dist->q = (float*) queryAddr;
+    while (i < numNeighbors) {
+        auto ptr_vec = (uint8_t*) (flatVectorSectionAddr + (neighbors[i] * oneVectorByteSizeL));
         const float score = dist->query_to_code((const uint8_t*) ptr_vec);
         scores[scoreIdx++] = score;
+     i += 1;
     }
 }
 

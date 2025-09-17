@@ -38,7 +38,7 @@ public class FaissMemoryOptimizedSearcherFactory implements VectorSearcherFactor
         }
 
         if ((actualDirectory instanceof MMapDirectory) == false) {
-            throw new RuntimeException("!!! WWWWWWWWWWWWWWWWWWWWWW");
+            throw new RuntimeException("!!! WWWWWWWWWWWWWWWWWWWWWW // " + actualDirectory.getClass() + " // " + actualDirectory);
         }
         // TMP
 

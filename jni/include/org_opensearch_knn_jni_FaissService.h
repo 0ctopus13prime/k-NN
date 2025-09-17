@@ -278,18 +278,11 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
 
 // TMP
 
-// Ex: bulkScoreMethodHandle.invoke(query.address(), tmpBuffers, numVectorsToCalculate, scores.address(), i, dimension);
-JNIEXPORT void Java_org_opensearch_knn_jni_FaissService_bulkScoring1
-  (JNIEnv *, jclass, jlong, jobjectArray, jint, jlong, jint, jint);
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring1
+  (JNIEnv *env, jclass clazz, jlong queryAddr, jlong neighborsAddr, jint numNeighbors, jlong flatVectorSectionAddr, jlong scoresAddr, jint oneVectorByteSize);
 
-/*
- * Class:     org_opensearch_knn_jni_FaissService
- * Method:    bulkScoring2
- * Signature: (JJIJJI)V
- */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bulkScoring2
-  (JNIEnv *, jclass, jlong, jlong, jint, jlong, jlong, jint);
-// TMP
+  (JNIEnv *env, jclass clazz, jlong queryAddr, jlong neighborsAddr, jint numNeighbors, jlong flatVectorSectionAddr, jlong scoresAddr, jint oneVectorByteSize);
 
 #ifdef __cplusplus
 }

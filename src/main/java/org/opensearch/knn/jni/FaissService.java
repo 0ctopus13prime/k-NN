@@ -466,11 +466,11 @@ public class FaissService {
 
     public static native void bulkScoring1(
         long queryAddr,
-        byte[][] vectors,
-        int numVectors,
+        long neighborsAddr,
+        int numNeighbors,
+        long flatVectorSectionAddr,
         long scoresAddr,
-        int scoresIndex,
-        int dimension
+        int oneVectorByteSize
     );
 
     public static native void bulkScoring2(
