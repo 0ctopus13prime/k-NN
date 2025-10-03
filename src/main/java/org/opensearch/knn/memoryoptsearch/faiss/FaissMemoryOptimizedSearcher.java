@@ -6,7 +6,6 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
-import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.index.VectorEncoding;
@@ -27,6 +26,7 @@ import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
+import org.opensearch.knn.jni.SimdVectorComputeService;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.faiss.cagra.FaissCagraHNSW;
 
@@ -44,6 +44,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private final VectorSimilarityFunction vectorSimilarityFunction;
     private final long fileSize;
     private boolean isAdc;
+    private SimdVectorComputeService.SimilarityFunctionType nativeSimilarityFunctionType;
 
     public FaissMemoryOptimizedSearcher(final IndexInput indexInput, final FieldInfo fieldInfo) throws IOException {
         this.indexInput = indexInput;
@@ -69,6 +70,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         this.flatVectorsScorer = FlatVectorsScorerProvider.getFlatVectorsScorer(knnVectorSimilarityFunction, isAdc, spaceType);
 
         this.hnsw = extractFaissHnsw(faissIndex);
+        this.nativeSimilarityFunctionType = determineNativeFunctionType();
     }
 
     private static FaissHNSW extractFaissHnsw(final FaissIndex faissIndex) {
@@ -81,44 +83,41 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, AcceptDocs acceptDocs) throws IOException {
-        final KnnVectorValues knnVectorValues;
-        final boolean useNativeScoring;
-        if (isAdc) {
-            knnVectorValues = faissIndex.getByteValues(getSlicedIndexInput());
-            useNativeScoring = knnVectorValues instanceof MMapByteVectorValues;
-        } else {
-            knnVectorValues = faissIndex.getFloatValues(getSlicedIndexInput());
-            useNativeScoring = knnVectorValues instanceof MMapFloatVectorValues;
-        }
+        final KnnVectorValues knnVectorValues = faissIndex.getByteValues(getSlicedIndexInput());
+        final boolean useNativeScoring = knnVectorValues instanceof MMapVectorValues;
+        final IOSupplier<RandomVectorScorer> scorerSupplier;
 
         if (useNativeScoring) {
             // We can use native scoring.
-            // TODO : This will be covered in Part-2 PR.
+            scorerSupplier = () -> new NativeRandomVectorScorer(target, knnVectorValues, nativeSimilarityFunctionType);
+        } else {
+            // Falling back to default scoring using pure Java.
+            scorerSupplier = () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, knnVectorValues, target);
         }
 
-        // Falling back to default scoring using pure Java.
-        search(
-            VectorEncoding.FLOAT32,
-            () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, knnVectorValues, target),
-            knnCollector,
-            acceptDocs
-        );
+        search(VectorEncoding.FLOAT32, scorerSupplier, knnCollector, acceptDocs);
+    }
+
+    private SimdVectorComputeService.SimilarityFunctionType determineNativeFunctionType() {
+        if (vectorSimilarityFunction == VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT) {
+            return SimdVectorComputeService.SimilarityFunctionType.MAXIMUM_INNER_PRODUCT;
+        } else if (vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN) {
+            return SimdVectorComputeService.SimilarityFunctionType.L2;
+        }
+
+        // At the moment, we only support FP16, it's fine to return null.
+        return null;
     }
 
     @Override
     public void search(byte[] target, KnnCollector knnCollector, AcceptDocs acceptDocs) throws IOException {
-        final ByteVectorValues byteVectorValues = faissIndex.getByteValues(getSlicedIndexInput());
-        if (byteVectorValues instanceof MMapByteVectorValues) {
-            // We can use native scoring.
-            // TODO : This will be covered in Part-2 PR.
-        }
-
-        // Falling back to default scoring using pure Java.
-        search(
-            VectorEncoding.BYTE,
-            () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, byteVectorValues, target),
-            knnCollector,
-            acceptDocs
+        search(VectorEncoding.BYTE,
+               () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction,
+                                                             faissIndex.getByteValues(getSlicedIndexInput()),
+                                                             target
+               ),
+               knnCollector,
+               acceptDocs
         );
     }
 
@@ -139,13 +138,8 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
         if (!this.isAdc && faissIndex.getVectorEncoding() != vectorEncoding) {
             throw new IllegalArgumentException(
-                "Search for vector encoding ["
-                    + vectorEncoding
-                    + "] is not supported in "
-                    + "an index vector whose encoding is ["
-                    + faissIndex.getVectorEncoding()
-                    + "]"
-            );
+                "Search for vector encoding [" + vectorEncoding + "] is not supported in " + "an index vector whose encoding is ["
+                + faissIndex.getVectorEncoding() + "]");
         }
 
         // Set up required components for vector search
@@ -169,7 +163,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
                     }
                 }
             }
-        }  // End if
+        }
     }
 
     private IndexInput getSlicedIndexInput() throws IOException {
@@ -183,10 +177,9 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             return new KnnCollector.Decorator(ordinalTranslatedKnnCollector) {
                 @Override
                 public KnnSearchStrategy getSearchStrategy() {
-                    return new RandomEntryPointsKnnSearchStrategy(
-                        cagraHNSW.getNumBaseLevelSearchEntryPoints(),
-                        cagraHNSW.getTotalNumberOfVectors(),
-                        knnCollector.getSearchStrategy()
+                    return new RandomEntryPointsKnnSearchStrategy(cagraHNSW.getNumBaseLevelSearchEntryPoints(),
+                                                                  cagraHNSW.getTotalNumberOfVectors(),
+                                                                  knnCollector.getSearchStrategy()
                     );
                 }
             };
@@ -202,14 +195,11 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
      */
     static class RandomEntryPointsKnnSearchStrategy extends KnnSearchStrategy.Seeded {
         public RandomEntryPointsKnnSearchStrategy(
-            final int numberOfEntryPoints,
-            final long totalNumberOfVectors,
-            final KnnSearchStrategy originalStrategy
+            final int numberOfEntryPoints, final long totalNumberOfVectors, final KnnSearchStrategy originalStrategy
         ) {
-            super(
-                generateRandomEntryPoints(numberOfEntryPoints, Math.toIntExact(totalNumberOfVectors)),
-                numberOfEntryPoints,
-                originalStrategy
+            super(generateRandomEntryPoints(numberOfEntryPoints, Math.toIntExact(totalNumberOfVectors)),
+                  numberOfEntryPoints,
+                  originalStrategy
             );
         }
 

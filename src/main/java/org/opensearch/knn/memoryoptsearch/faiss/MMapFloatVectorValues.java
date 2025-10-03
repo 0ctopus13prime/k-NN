@@ -20,9 +20,8 @@ import java.io.IOException;
  * Users can still retrieve vector bytes via the {@code vectorValue} API, which lazily creates
  * an internal buffer and returns it after filling in the requested bytes.
  */
-public class MMapFloatVectorValues extends FloatVectorValues {
+public class MMapFloatVectorValues extends FloatVectorValues implements MMapVectorValues {
     private final IndexInput indexInput;
-    @Getter
     // oneVectorByteSize == Float.BYTES * Dimension. Ex: 3072 bytes for 768 dimensions.
     private final long oneVectorByteSize;
     @Getter
@@ -43,11 +42,7 @@ public class MMapFloatVectorValues extends FloatVectorValues {
     private float[] buffer;
 
     public MMapFloatVectorValues(
-        final IndexInput indexInput,
-        final long baseOffset,
-        final int dimension,
-        final int totalNumberOfVectors,
-        final long[] addressAndSize
+        final IndexInput indexInput, final long baseOffset, final int dimension, final int totalNumberOfVectors, final long[] addressAndSize
     ) {
         this.indexInput = indexInput;
         this.oneVectorByteSize = Float.BYTES * dimension;
@@ -56,11 +51,8 @@ public class MMapFloatVectorValues extends FloatVectorValues {
         this.totalNumberOfVectors = totalNumberOfVectors;
         if (addressAndSize == null || addressAndSize.length == 0) {
             throw new IllegalArgumentException(
-                "Empty `addressAndSize` was provided in "
-                    + MMapFloatVectorValues.class.getSimpleName()
-                    + ". Is null?="
-                    + (addressAndSize == null)
-            );
+                "Empty `addressAndSize` was provided in " + MMapFloatVectorValues.class.getSimpleName() + ". Is null?=" + (addressAndSize
+                                                                                                                           == null));
         }
         this.addressAndSize = addressAndSize;
     }

@@ -129,11 +129,13 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
                 return vectorValues.dimension();
             }
 
+            @Override
             public int ordToDoc(int internalVectorId) {
                 // Convert an internal vector id to Lucene document id.
                 return (int) idMappingReader.get(internalVectorId);
             }
 
+            @Override
             public Bits getAcceptOrds(final Bits acceptDocs) {
                 if (acceptDocs != null) {
                     final Bits internalBits = vectorValues.getAcceptOrds(acceptDocs);
@@ -195,11 +197,13 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
                 return vectorValues.dimension();
             }
 
+            @Override
             public int ordToDoc(int internalVectorId) {
                 // Convert an internal vector id to Lucene document id.
                 return (int) idMappingReader.get(internalVectorId);
             }
 
+            @Override
             public Bits getAcceptOrds(final Bits acceptDocs) {
                 if (acceptDocs != null) {
                     final Bits internalBits = vectorValues.getAcceptOrds(acceptDocs);
