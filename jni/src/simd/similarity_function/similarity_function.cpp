@@ -23,3 +23,4 @@
 #else
   #include "default_simd_similarity_function.cpp"
 #endif
+

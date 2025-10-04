@@ -100,9 +100,9 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     private SimdVectorComputeService.SimilarityFunctionType determineNativeFunctionType() {
         if (vectorSimilarityFunction == VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT) {
-            return SimdVectorComputeService.SimilarityFunctionType.MAXIMUM_INNER_PRODUCT;
+            return SimdVectorComputeService.SimilarityFunctionType.FP16_MAXIMUM_INNER_PRODUCT;
         } else if (vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN) {
-            return SimdVectorComputeService.SimilarityFunctionType.L2;
+            return SimdVectorComputeService.SimilarityFunctionType.FP16_L2;
         }
 
         // At the moment, we only support FP16, it's fine to return null.

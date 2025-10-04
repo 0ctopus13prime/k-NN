@@ -16,6 +16,7 @@ set(TARGET_LIB_UTIL opensearchknn_util)
 set(TARGET_LIB_COMMON opensearchknn_common)  # common lib for JNI
 set(TARGET_LIB_NMSLIB opensearchknn_nmslib)  # nmslib JNI
 set(TARGET_LIB_FAISS opensearchknn_faiss)    # faiss JNI
+set(TARGET_LIB_SIMD opensearchknn_simd)      # SIMD computing JNI
 set(TARGET_LIBS "")  # Libs to be installed
 
 set(CMAKE_CXX_STANDARD 17)
@@ -133,7 +134,6 @@ if (${CONFIG_FAISS} STREQUAL ON OR ${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} S
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/init-simd.cmake)
 
     # Set target library + source
-    set(TARGET_LIB_SIMD opensearchknn_simd)
     set(SIMD_COMPUTING_SRCS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/org_opensearch_knn_jni_SimdVectorComputeService.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/simd/similarity_function/similarity_function.cpp
@@ -146,7 +146,7 @@ if (${CONFIG_FAISS} STREQUAL ON OR ${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} S
     target_compile_options(${TARGET_LIB_SIMD} PRIVATE ${FP16_SIMD_FLAGS} ${SIMD_FLAGS})
 
     # Link util library
-    target_link_libraries(${TARGET_LIB_SIMD} ${TARGET_LIB_UTIL})
+    target_link_libraries(${TARGET_LIB_SIMD} ${TARGET_LIB_UTIL} ${TARGET_LINK_FAISS_LIB})
 
     # Add include headers
     target_include_directories(${TARGET_LIB_SIMD} PRIVATE
@@ -154,6 +154,7 @@ if (${CONFIG_FAISS} STREQUAL ON OR ${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} S
         ${CMAKE_CURRENT_SOURCE_DIR}/jni/include
         $ENV{JAVA_HOME}/include
         $ENV{JAVA_HOME}/include/${JVM_OS_TYPE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/faiss
     )
 
     # Set common properties

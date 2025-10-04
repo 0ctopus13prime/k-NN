@@ -5,32 +5,52 @@
 #include <vector>
 
 namespace knn_jni::simd::similarity_function {
+    enum class NativeSimilarityFunctionType {
+        FP16_MAXIMUM_INNER_PRODUCT,
+        FP16_L2
+    };
+
+    struct SimilarityFunction;
+
     struct SimdVectorSearchContext {
         void* queryVectorSimdAligned = nullptr;
-        int32_t oneVectorByteSize = 0;
+        int32_t queryVectorByteSize = 0;
+        int32_t dimension = 0;
+        int64_t oneVectorByteSize = 0;
         std::vector<void*> mmapPages;
         std::vector<int64_t> mmapPageSizes;
         int32_t nativeFunctionTypeOrd = -1;
+        SimilarityFunction* similarityFunction;
 
         ~SimdVectorSearchContext();
+
+        void getVectorOffsetsInBulk(uint8_t* vector[], int32_t* internalVectorIds, int32_t numVectors);
+
+        uint8_t* getVectorOffsets(int32_t internalVectorId);
     };
 
     struct SimilarityFunction {
+        virtual ~SimilarityFunction() = default;
+
         static SimdVectorSearchContext* saveSearchContext(
                    uint8_t* queryPtr,
                    int32_t queryByteSize,
+                   int32_t dimension,
                    int64_t* mmapAddressAndSize,
                    int32_t numAddressAndSize,
                    int32_t nativeFunctionTypeOrd);
 
-        static float calculateSimilarityInBulk(int32_t** internalVectorIds,
-                                               int32_t numVectors,
-                                               float* scores);
+        static SimdVectorSearchContext* getSearchContext();
 
-        static float calculateSimilarity(int32_t internalVectorId);
+        virtual void calculateSimilarityInBulk(SimdVectorSearchContext* srchContext,
+                                               int32_t* internalVectorIds,
+                                               float* scores,
+                                               int32_t numVectors) = 0;
+
+        virtual float calculateSimilarity(SimdVectorSearchContext* srchContext, int32_t internalVectorId) = 0;
 
       private:
-        SimilarityFunction() = delete;
+        static SimilarityFunction* selectSimilarityFunction(NativeSimilarityFunctionType nativeFunctionType);
     };
 }
 
