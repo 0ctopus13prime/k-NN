@@ -175,10 +175,6 @@ public abstract class AbstractMemoryOptimizedKnnSearchIT extends KNNRestTestCase
         log.info("Flushing " + INDEX_NAME);
         flushIndex(INDEX_NAME);
 
-        // Force merge
-        log.info("Force merging " + INDEX_NAME);
-        forceMergeKnnIndex(INDEX_NAME, 1);
-
         // Do search tests
         doKnnSearchTest(documents, schema, indexingType, spaceType, isRadial, false, true);
         doKnnSearchTest(documents, schema, indexingType, spaceType, isRadial, false, false);
