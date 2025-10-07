@@ -20,9 +20,11 @@ import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.Weight;
+import org.apache.lucene.search.knn.TopKnnCollectorManager;
 import org.apache.lucene.util.Bits;
 import org.opensearch.common.StopWatch;
 import org.opensearch.knn.index.KNNSettings;
+import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.query.ExactSearcher;
 import org.opensearch.knn.index.query.KNNQuery;
 import org.opensearch.knn.index.query.KNNWeight;
@@ -30,6 +32,9 @@ import org.opensearch.knn.index.query.TopDocsDISI;
 import org.opensearch.knn.index.query.PerLeafResult;
 import org.opensearch.knn.index.query.ResultUtil;
 import org.opensearch.knn.index.query.common.QueryUtils;
+import org.opensearch.knn.index.query.memoryoptsearch.MemoryOptimizedKNNWeight;
+import org.opensearch.knn.index.query.memoryoptsearch.optimistic.Optimistic2ndSearchUtils;
+import org.opensearch.knn.index.query.memoryoptsearch.optimistic.ReentrantKnnCollectorManager;
 import org.opensearch.knn.index.query.rescore.RescoreContext;
 import org.opensearch.knn.profile.KNNProfileUtil;
 import org.opensearch.knn.profile.LongMetric;
@@ -41,7 +46,9 @@ import org.opensearch.search.profile.query.QueryProfiler;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -236,11 +243,76 @@ public class NativeEngineKnnVectorQuery extends Query {
         KNNWeight knnWeight,
         int k
     ) throws IOException {
+        // Collect search tasks
         List<Callable<PerLeafResult>> tasks = new ArrayList<>(leafReaderContexts.size());
         for (LeafReaderContext leafReaderContext : leafReaderContexts) {
             tasks.add(() -> searchLeaf(leafReaderContext, knnWeight, k));
         }
-        return indexSearcher.getTaskExecutor().invokeAll(tasks);
+
+        // Execute search tasks
+        final List<PerLeafResult> perLeafResults = indexSearcher.getTaskExecutor().invokeAll(tasks);
+
+        // For memory optimized search, it should kick off 2nd search if optimistic
+        if (perLeafResults.size() > 1 && knnQuery.isMemoryOptimizedSearch() && knnQuery.getVectorDataType() == VectorDataType.FLOAT) {
+            assert (knnWeight instanceof MemoryOptimizedKNNWeight);
+
+            // Get collector manager first
+            final MemoryOptimizedKNNWeight memoryOptKNNWeight = (MemoryOptimizedKNNWeight) knnWeight;
+
+            // How many results have we collected?
+            int totalResults = 0;
+            for (int i = 0; i < perLeafResults.size(); i++) {
+                totalResults += perLeafResults.get(i).getResult().scoreDocs.length;
+            }
+
+            // If we got empty results, then return immediately
+            if (totalResults == 0) {
+                return perLeafResults;
+            }
+
+            // Build segment to results table
+            final Map<Integer, TopDocs> segmentOrdToResults = new HashMap<>(leafReaderContexts.size());
+            for (int i = 0; i < perLeafResults.size(); i++) {
+                segmentOrdToResults.put(leafReaderContexts.get(i).ord, perLeafResults.get(i).getResult());
+            }
+
+            // Start 2nd deep dive
+            final ReentrantKnnCollectorManager knnCollectorManagerPhase2 = new ReentrantKnnCollectorManager(
+                new TopKnnCollectorManager(k, indexSearcher),
+                segmentOrdToResults,
+                knnQuery.getField(),
+                knnQuery.getQueryVector()
+            );
+
+            // Make weight use reentrant collector manager
+            memoryOptKNNWeight.setOptimistic2ndKnnCollectorManager(knnCollectorManagerPhase2);
+
+            // Get the minimum bar
+            final float minTopKScore = Optimistic2ndSearchUtils.findKthLargestScore(perLeafResults, knnQuery.getK(), totalResults);
+
+            // Select candidate segments for 2nd search
+            final List<Callable<PerLeafResult>> secondDeepDiveTasks = new ArrayList<>();
+            final List<Integer> contextIndices = new ArrayList<>();
+            for (int i = 0; i < leafReaderContexts.size(); ++i) {
+                final LeafReaderContext leafReaderContext = leafReaderContexts.get(i);
+                final TopDocs perLeaf = segmentOrdToResults.get(leafReaderContext.ord);
+                if (perLeaf.scoreDocs.length > 0 && perLeaf.scoreDocs[perLeaf.scoreDocs.length - 1].score >= minTopKScore) {
+                    // All this leaf's hits are at or above the global topK min score; explore it further
+                    secondDeepDiveTasks.add(() -> searchLeaf(leafReaderContext, knnWeight, k));
+                    contextIndices.add(i);
+                }
+            }
+
+            // Kick off 2nd search tasks
+            final List<PerLeafResult> deepDivePerLeafResults = indexSearcher.getTaskExecutor().invokeAll(secondDeepDiveTasks);
+
+            // Override results for target context
+            for (int i = 0; i < deepDivePerLeafResults.size(); ++i) {
+                perLeafResults.set(contextIndices.get(i), deepDivePerLeafResults.get(i));
+            }
+        }
+
+        return perLeafResults;
     }
 
     private List<PerLeafResult> doRescore(
@@ -283,7 +355,6 @@ public class NativeEngineKnnVectorQuery extends Query {
         final PerLeafResult perLeafResult = queryWeight.searchLeaf(ctx, k);
         final Bits liveDocs = ctx.reader().getLiveDocs();
         if (liveDocs != null) {
-
             List<ScoreDoc> list = new ArrayList<>();
             for (ScoreDoc scoreDoc : perLeafResult.getResult().scoreDocs) {
                 if (liveDocs.get(scoreDoc.doc)) {
