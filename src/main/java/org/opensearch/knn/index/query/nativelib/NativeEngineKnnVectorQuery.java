@@ -279,9 +279,7 @@ public class NativeEngineKnnVectorQuery extends Query {
             // Start 2nd deep dive
             final ReentrantKnnCollectorManager knnCollectorManagerPhase2 = new ReentrantKnnCollectorManager(
                 new TopKnnCollectorManager(k, indexSearcher),
-                segmentOrdToResults,
-                knnQuery.getField(),
-                knnQuery.getQueryVector()
+                segmentOrdToResults
             );
 
             // Make weight use reentrant collector manager

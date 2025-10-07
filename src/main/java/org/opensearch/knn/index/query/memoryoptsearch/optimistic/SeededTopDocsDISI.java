@@ -5,7 +5,6 @@
 
 package org.opensearch.knn.index.query.memoryoptsearch.optimistic;
 
-import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.TopDocs;
 
@@ -16,11 +15,11 @@ public class SeededTopDocsDISI extends DocIdSetIterator {
     private final int[] sortedDocIds;
     private int idx = -1;
 
-    public SeededTopDocsDISI(TopDocs topDocs, LeafReaderContext ctx) {
+    public SeededTopDocsDISI(final TopDocs topDocs) {
         sortedDocIds = new int[topDocs.scoreDocs.length];
         for (int i = 0; i < topDocs.scoreDocs.length; i++) {
             // Remove the doc base as added by the collector
-            sortedDocIds[i] = topDocs.scoreDocs[i].doc - ctx.docBase;
+            sortedDocIds[i] = topDocs.scoreDocs[i].doc;
         }
         Arrays.sort(sortedDocIds);
     }
