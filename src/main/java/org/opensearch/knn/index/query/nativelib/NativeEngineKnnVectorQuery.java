@@ -34,7 +34,7 @@ import org.opensearch.knn.index.query.ResultUtil;
 import org.opensearch.knn.index.query.common.QueryUtils;
 import org.opensearch.knn.index.query.memoryoptsearch.MemoryOptimizedKNNWeight;
 import org.opensearch.knn.index.query.memoryoptsearch.optimistic.Optimistic2ndSearchUtils;
-import org.opensearch.knn.index.query.memoryoptsearch.optimistic.ReentrantKnnCollectorManager;
+import org.opensearch.knn.index.query.memoryoptsearch.optimistic.ReentrantKnnCollectorManagerV2;
 import org.opensearch.knn.index.query.rescore.RescoreContext;
 import org.opensearch.knn.profile.KNNProfileUtil;
 import org.opensearch.knn.profile.LongMetric;
@@ -253,7 +253,7 @@ public class NativeEngineKnnVectorQuery extends Query {
         final List<PerLeafResult> perLeafResults = indexSearcher.getTaskExecutor().invokeAll(tasks);
 
         // For memory optimized search, it should kick off 2nd search if optimistic
-        if (perLeafResults.size() > 1 && knnQuery.isMemoryOptimizedSearch() && knnQuery.getVectorDataType() == VectorDataType.FLOAT) {
+        if (true/*perLeafResults.size() > 1 && knnQuery.isMemoryOptimizedSearch() && knnQuery.getVectorDataType() == VectorDataType.FLOAT*/) {
             assert (knnWeight instanceof MemoryOptimizedKNNWeight);
 
             // Get collector manager first
@@ -277,9 +277,15 @@ public class NativeEngineKnnVectorQuery extends Query {
             }
 
             // Start 2nd deep dive
-            final ReentrantKnnCollectorManager knnCollectorManagerPhase2 = new ReentrantKnnCollectorManager(
+            // final ReentrantKnnCollectorManager knnCollectorManagerPhase2 = new ReentrantKnnCollectorManager(
+            // new TopKnnCollectorManager(k, indexSearcher),
+            // segmentOrdToResults
+            // );
+            final ReentrantKnnCollectorManagerV2 knnCollectorManagerPhase2 = new ReentrantKnnCollectorManagerV2(
                 new TopKnnCollectorManager(k, indexSearcher),
-                segmentOrdToResults
+                segmentOrdToResults,
+                knnQuery.getQueryVector(),
+                knnQuery.getField()
             );
 
             // Make weight use reentrant collector manager
@@ -294,7 +300,7 @@ public class NativeEngineKnnVectorQuery extends Query {
             for (int i = 0; i < leafReaderContexts.size(); ++i) {
                 final LeafReaderContext leafReaderContext = leafReaderContexts.get(i);
                 final TopDocs perLeaf = segmentOrdToResults.get(leafReaderContext.ord);
-                if (perLeaf.scoreDocs.length > 0 && perLeaf.scoreDocs[perLeaf.scoreDocs.length - 1].score >= minTopKScore) {
+                if (true/*perLeaf.scoreDocs.length > 0 && perLeaf.scoreDocs[perLeaf.scoreDocs.length - 1].score >= minTopKScore*/) {
                     // All this leaf's hits are at or above the global topK min score; explore it further
                     secondDeepDiveTasks.add(() -> searchLeaf(leafReaderContext, knnWeight, k));
                     contextIndices.add(i);
