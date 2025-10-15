@@ -20,7 +20,7 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scor
  * Method:    saveSearchContext
  * Signature: ([F[JI)V
  */
-JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSearchContext
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSearchContext___3F_3JI
   (JNIEnv *, jclass, jfloatArray, jlongArray, jint);
 
 /*
