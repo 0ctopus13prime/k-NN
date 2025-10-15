@@ -50,6 +50,7 @@ public class SimdVectorComputeService {
         FP16_MAXIMUM_INNER_PRODUCT,
         // FP16 Maximum Inner Product. The result will be the same as we acquired from VectorSimilarityFunction.EUCLIDEAN.
         FP16_L2,
+        HAMMING
     }
 
     /**
@@ -75,6 +76,8 @@ public class SimdVectorComputeService {
      * @param nativeFunctionTypeOrd  Similarity function type index.
      */
     public native static void saveSearchContext(float[] query, long[] addressAndSize, int nativeFunctionTypeOrd);
+
+    public native static void saveSearchContext(byte[] query, long[] addressAndSize, int nativeFunctionTypeOrd);
 
     /**
      * Perform similarity search on a single vector.

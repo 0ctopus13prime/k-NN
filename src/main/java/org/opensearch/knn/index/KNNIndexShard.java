@@ -97,7 +97,10 @@ public class KNNIndexShard {
     }
 
     private Set<String> warmUpMemoryOptimizedSearcher(
-        final LeafReader leafReader, final MapperService mapperService, final String indexName, final Directory directory
+        final LeafReader leafReader,
+        final MapperService mapperService,
+        final String indexName,
+        final Directory directory
     ) {
         final Directory bottomDirectory = FilterDirectory.unwrap(directory);
         final String baseDirectoryPath;
@@ -141,8 +144,11 @@ public class KNNIndexShard {
                 } else {
                     // It's FSDirectory, let's directly warm up the file.
                     final KNNEngine knnEngine = extractKNNEngine(field);
-                    final List<String> engineFiles =
-                        KNNCodecUtil.getEngineFiles(knnEngine.getExtension(), field.getName(), segmentReader.getSegmentInfo().info);
+                    final List<String> engineFiles = KNNCodecUtil.getEngineFiles(
+                        knnEngine.getExtension(),
+                        field.getName(),
+                        segmentReader.getSegmentInfo().info
+                    );
                     if (engineFiles.isEmpty()) {
                         log.warn("Could not find an engine file for field [{}]", field.getName());
                         continue;
@@ -194,15 +200,20 @@ public class KNNIndexShard {
         try (Engine.Searcher searcher = indexShard.acquireSearcher("knn-warmup-mem")) {
             for (final LeafReaderContext leafReaderContext : searcher.getIndexReader().leaves()) {
                 // Load memory optimized searcher in a single segment first.
-                final Set<String> loadedFieldNames =
-                    warmUpMemoryOptimizedSearcher(leafReaderContext.reader(), mapperService, indexName, directory);
+                final Set<String> loadedFieldNames = warmUpMemoryOptimizedSearcher(
+                    leafReaderContext.reader(),
+                    mapperService,
+                    indexName,
+                    directory
+                );
                 log.info("[KNN] Loaded memory optimized searchers for fields {}", loadedFieldNames);
 
                 // Load off-heap index
                 final List<EngineFileContext> engineFileContexts = getAllEngineFileContexts(loadedFieldNames, leafReaderContext);
                 warmUpOffHeapIndex(engineFileContexts, directory);
-                log.info("[KNN] Loaded off-heap indices for fields {}",
-                         engineFileContexts.stream().map(ctx -> ctx.fieldName).collect(Collectors.toSet())
+                log.info(
+                    "[KNN] Loaded off-heap indices for fields {}",
+                    engineFileContexts.stream().map(ctx -> ctx.fieldName).collect(Collectors.toSet())
                 );
             }
         } catch (Exception e) {
@@ -216,24 +227,30 @@ public class KNNIndexShard {
         for (final EngineFileContext engineFileContext : engineFileContexts) {
             try {
                 // Get cache key for an off-heap index
-                final String cacheKey =
-                    NativeMemoryCacheKeyHelper.constructCacheKey(engineFileContext.vectorFileName, engineFileContext.segmentInfo);
+                final String cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(
+                    engineFileContext.vectorFileName,
+                    engineFileContext.segmentInfo
+                );
 
                 // Load an off-heap index
-                nativeMemoryCacheManager.get(new NativeMemoryEntryContext.IndexEntryContext(directory,
-                                                                                            cacheKey,
-                                                                                            NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
-                                                                                            getParametersAtLoading(engineFileContext.getSpaceType(),
-                                                                                                                   KNNEngine.getEngineNameFromPath(
-                                                                                                                       engineFileContext.getVectorFileName()),
-                                                                                                                   getIndexName(),
-                                                                                                                   engineFileContext.getVectorDataType(),
-                                                                                                                   engineFileContext.getSegmentLevelQuantizationInfo()
+                nativeMemoryCacheManager.get(
+                    new NativeMemoryEntryContext.IndexEntryContext(
+                        directory,
+                        cacheKey,
+                        NativeMemoryLoadStrategy.IndexLoadStrategy.getInstance(),
+                        getParametersAtLoading(
+                            engineFileContext.getSpaceType(),
+                            KNNEngine.getEngineNameFromPath(engineFileContext.getVectorFileName()),
+                            getIndexName(),
+                            engineFileContext.getVectorDataType(),
+                            engineFileContext.getSegmentLevelQuantizationInfo()
 
-                                                                                            ),
-                                                                                            getIndexName(),
-                                                                                            engineFileContext.getModelId()
-                ), true);
+                        ),
+                        getIndexName(),
+                        engineFileContext.getModelId()
+                    ),
+                    true
+                );
             } catch (ExecutionException ex) {
                 throw new RuntimeException(ex);
             }
@@ -256,8 +273,10 @@ public class KNNIndexShard {
             try (Engine.Searcher searcher = indexShard.acquireSearcher(INDEX_SHARD_CLEAR_CACHE_SEARCHER)) {
                 for (final LeafReaderContext leafReaderContext : searcher.getIndexReader().leaves()) {
                     getAllEngineFileContexts(Collections.emptySet(), leafReaderContext).forEach(engineFileContext -> {
-                        final String cacheKey =
-                            NativeMemoryCacheKeyHelper.constructCacheKey(engineFileContext.vectorFileName, engineFileContext.segmentInfo);
+                        final String cacheKey = NativeMemoryCacheKeyHelper.constructCacheKey(
+                            engineFileContext.vectorFileName,
+                            engineFileContext.segmentInfo
+                        );
                         nativeMemoryCacheManager.invalidate(cacheKey);
                     });
                 }
@@ -289,12 +308,15 @@ public class KNNIndexShard {
     }
 
     List<EngineFileContext> getEngineFileContexts(
-        final Set<String> loadedFieldNames, final LeafReaderContext leafReaderContext, KNNEngine knnEngine
+        final Set<String> loadedFieldNames,
+        final LeafReaderContext leafReaderContext,
+        KNNEngine knnEngine
     ) throws IOException {
         final List<EngineFileContext> engineFiles = new ArrayList<>();
         final SegmentReader reader = Lucene.segmentReader(leafReaderContext.reader());
-        final String fileExtension =
-            reader.getSegmentInfo().info.getUseCompoundFile() ? knnEngine.getCompoundExtension() : knnEngine.getExtension();
+        final String fileExtension = reader.getSegmentInfo().info.getUseCompoundFile()
+            ? knnEngine.getCompoundExtension()
+            : knnEngine.getExtension();
 
         for (final FieldInfo fieldInfo : reader.getFieldInfos()) {
             if (loadedFieldNames.contains(fieldInfo.getName())) {
@@ -307,20 +329,30 @@ public class KNNIndexShard {
                 final String spaceTypeName = fieldInfo.attributes().getOrDefault(SPACE_TYPE, SpaceType.L2.getValue());
                 final SpaceType spaceType = SpaceType.getSpace(spaceTypeName);
                 final String modelId = fieldInfo.attributes().getOrDefault(MODEL_ID, null);
-                final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo =
-                    SegmentLevelQuantizationInfo.build(reader, fieldInfo, fieldInfo.name, reader.getSegmentInfo().info.getVersion());
+                final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
+                    reader,
+                    fieldInfo,
+                    fieldInfo.name,
+                    reader.getSegmentInfo().info.getVersion()
+                );
                 // obtain correct VectorDataType for this field based on the quantization state and if ADC is enabled.
-                VectorDataType vectorDataType =
-                    determineVectorDataType(fieldInfo, segmentLevelQuantizationInfo, reader.getSegmentInfo().info.getVersion());
+                VectorDataType vectorDataType = determineVectorDataType(
+                    fieldInfo,
+                    segmentLevelQuantizationInfo,
+                    reader.getSegmentInfo().info.getVersion()
+                );
 
-                engineFiles.addAll(getEngineFileContexts(reader.getSegmentInfo(),
-                                                         segmentLevelQuantizationInfo,
-                                                         fieldInfo.name,
-                                                         fileExtension,
-                                                         spaceType,
-                                                         modelId,
-                                                         vectorDataType
-                ));
+                engineFiles.addAll(
+                    getEngineFileContexts(
+                        reader.getSegmentInfo(),
+                        segmentLevelQuantizationInfo,
+                        fieldInfo.name,
+                        fileExtension,
+                        spaceType,
+                        modelId,
+                        vectorDataType
+                    )
+                );
             }
         }
 
@@ -345,20 +377,25 @@ public class KNNIndexShard {
             .stream()
             .filter(fileName -> fileName.startsWith(prefix))
             .filter(fileName -> fileName.endsWith(suffix))
-            .map(vectorFileName -> new EngineFileContext(fieldName,
-                                                         spaceType,
-                                                         modelId,
-                                                         vectorFileName,
-                                                         vectorDataType,
-                                                         segmentCommitInfo.info,
-                                                         segmentLevelQuantizationInfo
-            ))
+            .map(
+                vectorFileName -> new EngineFileContext(
+                    fieldName,
+                    spaceType,
+                    modelId,
+                    vectorFileName,
+                    vectorDataType,
+                    segmentCommitInfo.info,
+                    segmentLevelQuantizationInfo
+                )
+            )
             .collect(Collectors.toList());
     }
 
     @VisibleForTesting
     VectorDataType determineVectorDataType(
-        FieldInfo fieldInfo, SegmentLevelQuantizationInfo segmentLevelQuantizationInfo, org.apache.lucene.util.Version segmentVersion
+        FieldInfo fieldInfo,
+        SegmentLevelQuantizationInfo segmentLevelQuantizationInfo,
+        org.apache.lucene.util.Version segmentVersion
     ) {
 
         // First check if quantization config is empty

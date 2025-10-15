@@ -6,6 +6,7 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
+import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.KnnVectorValues;
@@ -71,7 +72,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         this.flatVectorsScorer = FlatVectorsScorerProvider.getFlatVectorsScorer(knnVectorSimilarityFunction, isAdc, spaceType);
 
         this.hnsw = extractFaissHnsw(faissIndex);
-        this.nativeSimilarityFunctionType = determineNativeFunctionType();
+        this.nativeSimilarityFunctionType = determineNativeFunctionType(knnVectorSimilarityFunction);
     }
 
     private static FaissHNSW extractFaissHnsw(final FaissIndex faissIndex) {
@@ -107,11 +108,15 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         search(VectorEncoding.FLOAT32, scorerSupplier, knnCollector, acceptDocs);
     }
 
-    private SimdVectorComputeService.SimilarityFunctionType determineNativeFunctionType() {
-        if (vectorSimilarityFunction == VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT) {
+    private SimdVectorComputeService.SimilarityFunctionType determineNativeFunctionType(
+        final KNNVectorSimilarityFunction knnVectorSimilarityFunction
+    ) {
+        if (knnVectorSimilarityFunction == KNNVectorSimilarityFunction.MAXIMUM_INNER_PRODUCT) {
             return SimdVectorComputeService.SimilarityFunctionType.FP16_MAXIMUM_INNER_PRODUCT;
-        } else if (vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN) {
+        } else if (knnVectorSimilarityFunction == KNNVectorSimilarityFunction.EUCLIDEAN) {
             return SimdVectorComputeService.SimilarityFunctionType.FP16_L2;
+        } else if (knnVectorSimilarityFunction == KNNVectorSimilarityFunction.HAMMING) {
+            return SimdVectorComputeService.SimilarityFunctionType.HAMMING;
         }
 
         // At the moment, we only support FP16, it's fine to return null.
@@ -120,16 +125,28 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(byte[] target, KnnCollector knnCollector, AcceptDocs acceptDocs) throws IOException {
-        search(
-            VectorEncoding.BYTE,
-            () -> flatVectorsScorer.getRandomVectorScorer(
+        final ByteVectorValues byteVectorValues = faissIndex.getByteValues(getSlicedIndexInput());
+        final ByteVectorValues bottomKnnVectorValues = WrappedByteVectorValues.getBottomByteVectorValues(byteVectorValues);
+        final boolean useNativeScoring = bottomKnnVectorValues instanceof MMapVectorValues;
+        final IOSupplier<RandomVectorScorer> scorerSupplier;
+
+        if (useNativeScoring) {
+            // We can use native scoring.
+            scorerSupplier = () -> new NativeRandomVectorScorer(
+                target,
+                byteVectorValues,
+                (MMapVectorValues) bottomKnnVectorValues,
+                nativeSimilarityFunctionType
+            );
+        } else {
+            scorerSupplier = () -> flatVectorsScorer.getRandomVectorScorer(
                 vectorSimilarityFunction,
                 faissIndex.getByteValues(getSlicedIndexInput()),
                 target
-            ),
-            knnCollector,
-            acceptDocs
-        );
+            );
+        }
+
+        search(VectorEncoding.BYTE, scorerSupplier, knnCollector, acceptDocs);
     }
 
     @Override

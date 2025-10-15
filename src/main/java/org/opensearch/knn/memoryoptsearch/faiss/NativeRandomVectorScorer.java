@@ -59,6 +59,19 @@ public class NativeRandomVectorScorer implements RandomVectorScorer {
         SimdVectorComputeService.saveSearchContext(query, addressAndSize, nativeFunctionTypeOrd);
     }
 
+    public NativeRandomVectorScorer(
+        final byte[] query,
+        final KnnVectorValues knnVectorValues,
+        final MMapVectorValues mmapVectorValues,
+        final SimdVectorComputeService.SimilarityFunctionType similarityFunctionType
+    ) {
+        this.knnVectorValues = knnVectorValues;
+        this.addressAndSize = mmapVectorValues.getAddressAndSize();
+        this.maxOrd = knnVectorValues.size();
+        this.nativeFunctionTypeOrd = similarityFunctionType.ordinal();
+        SimdVectorComputeService.saveSearchContext(query, addressAndSize, nativeFunctionTypeOrd);
+    }
+
     /**
      * Computes similarity scores for multiple vectors in bulk using native SIMD code.
      *

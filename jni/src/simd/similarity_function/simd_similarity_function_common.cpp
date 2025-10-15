@@ -8,6 +8,8 @@
 #include "simd/similarity_function/similarity_function.h"
 #include "faiss/impl/ScalarQuantizer.h"
 #include "jni_util.h"
+#include "hamming_distance_calculator.h"
+#include "faiss/utils/hamming.h"
 
 using knn_jni::simd::similarity_function::SimdVectorSearchContext;
 using knn_jni::simd::similarity_function::SimilarityFunction;
@@ -164,6 +166,17 @@ thread_local SimdVectorSearchContext THREAD_LOCAL_SIMD_VEC_SRCH_CTX {};
 //
 // SimilarityFunction
 //
+
+
+struct BuildDistanceComputer {
+    using T = HammingDistanceCalculatorInterface*;
+
+    template <class HammingComputer>
+    HammingDistanceCalculatorInterface* f(int32_t codeSize, uint8_t* query) {
+        return new HammingDistanceCalculator<HammingComputer>(codeSize, query);
+    }
+};
+
 SimdVectorSearchContext* SimilarityFunction::saveSearchContext(
            uint8_t* queryPtr,
            int32_t queryByteSize,
@@ -232,6 +245,17 @@ SimdVectorSearchContext* SimilarityFunction::saveSearchContext(
         // Assign query to Faiss function
         THREAD_LOCAL_SIMD_VEC_SRCH_CTX.faissFunction->set_query(
             reinterpret_cast<float*>(THREAD_LOCAL_SIMD_VEC_SRCH_CTX.queryVectorSimdAligned));
+    } else if (nativeFunctionTypeOrd == static_cast<int32_t>(NativeSimilarityFunctionType::HAMMING)) {
+        // Set similarity function to offload similarity calculation
+        THREAD_LOCAL_SIMD_VEC_SRCH_CTX.similarityFunction = selectSimilarityFunction(
+            NativeSimilarityFunctionType::HAMMING);
+        THREAD_LOCAL_SIMD_VEC_SRCH_CTX.oneVectorByteSize = dimension / 8;
+        BuildDistanceComputer buildDistanceComputer {};
+        THREAD_LOCAL_SIMD_VEC_SRCH_CTX.faissFunction.reset(
+            faiss::dispatch_HammingComputer(THREAD_LOCAL_SIMD_VEC_SRCH_CTX.oneVectorByteSize,
+                                            buildDistanceComputer,
+                                            THREAD_LOCAL_SIMD_VEC_SRCH_CTX.oneVectorByteSize,
+                                            (uint8_t*) THREAD_LOCAL_SIMD_VEC_SRCH_CTX.queryVectorSimdAligned));
     } else {
         throw std::runtime_error(
             std::string("Invalid native similarity function type was given, nativeFunctionTypeOrd=")

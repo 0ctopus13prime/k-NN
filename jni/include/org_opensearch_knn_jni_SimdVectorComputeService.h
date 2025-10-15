@@ -31,6 +31,14 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_save
 JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scoreSimilarity
   (JNIEnv *, jclass, jint);
 
+/*
+ * Class:     org_opensearch_knn_jni_SimdVectorComputeService
+ * Method:    saveSearchContext
+ * Signature: ([B[JI)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSearchContext___3B_3JI
+  (JNIEnv *, jclass, jbyteArray, jlongArray, jint);
+
 #ifdef __cplusplus
 }
 #endif

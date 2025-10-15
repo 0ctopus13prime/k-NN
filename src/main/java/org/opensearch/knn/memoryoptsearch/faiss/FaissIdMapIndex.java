@@ -6,7 +6,6 @@
 package org.opensearch.knn.memoryoptsearch.faiss;
 
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
@@ -115,9 +114,10 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
     private ByteVectorValues sparseByteValues(IndexInput indexInput) throws IOException {
         final ByteVectorValues vectorValues = nestedIndex.getByteValues(indexInput);
 
-        @RequiredArgsConstructor
-        class SparseByteVectorValuesImpl extends ByteVectorValues {
-            private final ByteVectorValues vectorValues;
+        class SparseByteVectorValuesImpl extends WrappedByteVectorValues {
+            public SparseByteVectorValuesImpl(final ByteVectorValues vectorValues) {
+                super(vectorValues);
+            }
 
             @Override
             public byte[] vectorValue(int internalVectorId) throws IOException {

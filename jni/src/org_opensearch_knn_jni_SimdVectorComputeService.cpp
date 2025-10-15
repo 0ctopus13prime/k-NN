@@ -81,6 +81,32 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_save
     }
 }
 
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSearchContext___3B_3JI
+  (JNIEnv *env, jclass clazz, jbyteArray query, jlongArray addressAndSize, const jint nativeFunctionTypeOrd) {
+    try {
+      // Get raw pointer of query vector + size
+      const jsize queryVecSize = JNI_UTIL.GetJavaBytesArrayLength(env, query);
+      jbyte* queryVecPtr = static_cast<jbyte*>(JNI_UTIL.GetPrimitiveArrayCritical(env, query, nullptr));
+
+      // Get mmap address and size
+      const jsize mmapAddressAndSizeLength = JNI_UTIL.GetJavaLongArrayLength(env, addressAndSize);
+      jlong* mmapAddressAndSize = static_cast<jlong*>(JNI_UTIL.GetPrimitiveArrayCritical(env, addressAndSize, nullptr));
+
+      // Save search context
+      SimilarityFunction::saveSearchContext(
+          (uint8_t*) queryVecPtr, queryVecSize,
+          queryVecSize * 8,
+          (int64_t*) mmapAddressAndSize, mmapAddressAndSizeLength,
+          nativeFunctionTypeOrd);
+
+      // Release query vector
+      JNI_UTIL.ReleasePrimitiveArrayCritical(env, query, queryVecPtr, 0);
+      JNI_UTIL.ReleasePrimitiveArrayCritical(env, addressAndSize, mmapAddressAndSize, 0);
+    } catch (...) {
+      JNI_UTIL.CatchCppExceptionAndThrowJava(env);
+    }
+}
+
 JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scoreSimilarity
   (JNIEnv *env, jclass clazz, const jint internalVectorId) {
 

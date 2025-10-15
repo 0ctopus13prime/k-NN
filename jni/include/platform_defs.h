@@ -11,3 +11,14 @@
     #define LIKELY(x)   (x)
     #define UNLIKELY(x) (x)
 #endif
+
+#if defined(_MSC_VER)
+    // Microsoft Visual C++ compiler
+    #define RESTRICT __restrict
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC, Clang (Linux, macOS, etc.)
+    #define RESTRICT __restrict__
+#else
+    // Fallback: just ignore the qualifier
+    #define RESTRICT
+#endif

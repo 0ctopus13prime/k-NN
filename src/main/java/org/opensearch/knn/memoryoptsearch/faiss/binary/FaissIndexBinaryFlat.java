@@ -6,11 +6,14 @@
 package org.opensearch.knn.memoryoptsearch.faiss.binary;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.store.IndexInput;
+import org.opensearch.knn.memoryoptsearch.MemorySegmentAddressExtractorUtil;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissSection;
+import org.opensearch.knn.memoryoptsearch.faiss.MMapByteVectorValues;
 
 import java.io.IOException;
 
@@ -23,6 +26,7 @@ import java.io.IOException;
  * Note: Binary vectors stored within this format should be compared using Hamming distance only.
  * See <a href="https://github.com/facebookresearch/faiss/blob/main/faiss/IndexBinaryFlat.h">...</a> for more details.
  */
+@Log4j2
 public class FaissIndexBinaryFlat extends FaissBinaryIndex {
     public static final String IBXF = "IBxF";
 
@@ -84,6 +88,26 @@ public class FaissIndexBinaryFlat extends FaissBinaryIndex {
             public ByteVectorValues copy() {
                 return new ByteVectorValuesImpl(indexInput.clone());
             }
+        }
+
+        // Faiss SIMD bulk only supported for FP16 for now.
+        final long[] addressAndSize = MemorySegmentAddressExtractorUtil.tryExtractAddressAndSize(
+            indexInput,
+            binaryFlatVectorSection.getBaseOffset(),
+            binaryFlatVectorSection.getSectionSize()
+        );
+        if (addressAndSize != null) {
+            // Return MMapByteVectorValues having pointers pointing to mmap regions.
+            return new MMapByteVectorValues(
+                indexInput,
+                codeSize,
+                binaryFlatVectorSection.getBaseOffset(),
+                dimension,
+                totalNumberOfVectors,
+                addressAndSize
+            );
+        } else {
+            log.debug("Failed to extract mapped pointers from IndexInput, falling back to ByteVectorValuesImpl.");
         }
 
         return new ByteVectorValuesImpl(indexInput);
