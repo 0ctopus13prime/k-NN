@@ -3,6 +3,37 @@
 
 // This class is responsible to convert Faiss distance value to Lucene similarity score.
 struct FaissScoreToLuceneScoreTransform final {
+    static float hammingBitsTransform(const float hammingValue) noexcept {
+        return 1 / (1 + hammingValue);
+    }
+
+    static void hammingBitsTransformBulk(float* scores, const int32_t numScores) noexcept {
+        int32_t i = 0;
+        for (; (i + 8) <= numScores ; i += 8, scores += 8) {
+            scores[i] = 1 / (1 + scores[i]);
+            scores[i + 1] = 1 / (1 + scores[i + 1]);
+            scores[i + 2] = 1 / (1 + scores[i + 2]);
+            scores[i + 3] = 1 / (1 + scores[i + 3]);
+            scores[i + 4] = 1 / (1 + scores[i + 4]);
+            scores[i + 5] = 1 / (1 + scores[i + 5]);
+            scores[i + 6] = 1 / (1 + scores[i + 6]);
+            scores[i + 7] = 1 / (1 + scores[i + 7]);
+        }
+
+        for (; (i + 4) <= numScores ; i += 4, scores += 4) {
+            scores[i] = 1 / (1 + scores[i]);
+            scores[i + 1] = 1 / (1 + scores[i + 1]);
+            scores[i + 2] = 1 / (1 + scores[i + 2]);
+            scores[i + 3] = 1 / (1 + scores[i + 3]);
+        }
+
+        while (i < numScores) {
+            *scores = hammingBitsTransform(*scores);
+            ++i;
+            ++scores;
+        }
+    }
+
     // Convert Faiss inner product value to Max Inner Product scheme whose range is in [0, +Inf)
     static float ipToMaxIpTransform(const float innerProductValue) noexcept {
         return innerProductValue < 0 ? 1 / (1 - innerProductValue) : (1 + innerProductValue);

@@ -70,39 +70,28 @@ struct DefaultBinaryHammingSimilarityFunction final : SimilarityFunction {
                                    int32_t* internalVectorIds,
                                    float* scores,
                                    const int32_t numVectors) final {
-
         // Prepare similarity calculation
         auto func = dynamic_cast<HammingDistanceCalculatorInterface*>(srchContext->faissFunction.get());
         knn_jni::util::ParameterCheck::require_non_null(
             func, "Unexpected distance function acquired. Expected HammingDistanceCalculatorInterface, but it was something else");
 
         int32_t i = 0 ;
-        for ( ; i < numVectors ; i += 8) {
+        uint8_t* vectorPointers[8];
+        for ( ; (i + 8) < numVectors ; i += 8) {
             // Calculate distance
-            auto vector0 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i]));
-            auto vector1 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 1]));
-            auto vector2 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 2]));
-            auto vector3 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 3]));
-            auto vector4 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 4]));
-            auto vector5 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 5]));
-            auto vector6 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 6]));
-            auto vector7 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 7]));
-
+            srchContext->getVectorPointersInBulk(&vectorPointers[0], &internalVectorIds[i], 8);
             func->calculateBatch8(
                 &scores[i], &scores[i + 1], &scores[i + 2], &scores[i + 3], &scores[i + 4], &scores[i + 5], &scores[i + 6], &scores[i + 7],
-                vector0, vector1, vector2, vector3, vector4, vector5, vector6, vector7);
+                vectorPointers[0], vectorPointers[1], vectorPointers[2], vectorPointers[3],
+                vectorPointers[4], vectorPointers[5], vectorPointers[6], vectorPointers[7]);
         }
 
-        for ( ; i < numVectors ; i += 4) {
+        for ( ; (i + 4) < numVectors ; i += 4) {
             // Calculate distance
-            auto vector0 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i]));
-            auto vector1 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 1]));
-            auto vector2 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 2]));
-            auto vector3 = reinterpret_cast<uint8_t*>(srchContext->getVectorPointer(internalVectorIds[i + 3]));
-
+            srchContext->getVectorPointersInBulk(&vectorPointers[0], &internalVectorIds[i], 4);
             func->calculateBatch4(
                 &scores[i], &scores[i + 1], &scores[i + 2], &scores[i + 3],
-                vector0, vector1, vector2, vector3);
+                vectorPointers[0], vectorPointers[1], vectorPointers[2], vectorPointers[3]);
         }
 
         while (i < numVectors) {
@@ -110,6 +99,8 @@ struct DefaultBinaryHammingSimilarityFunction final : SimilarityFunction {
             scores[i] = func->calculate(vector);
             ++i;
         }
+
+        FaissScoreToLuceneScoreTransform::hammingBitsTransformBulk(scores, numVectors);
     }
 
     float calculateSimilarity(SimdVectorSearchContext* srchContext, const int32_t internalVectorId) final {
@@ -121,7 +112,7 @@ struct DefaultBinaryHammingSimilarityFunction final : SimilarityFunction {
 
         // Calculate distance
         const float score = func->calculate(vector);
-        return score;
+        return FaissScoreToLuceneScoreTransform::hammingBitsTransform(score);
     }
 };
 

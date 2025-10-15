@@ -6,14 +6,17 @@
 package org.opensearch.knn.memoryoptsearch;
 
 import lombok.SneakyThrows;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.MMapDirectory;
 import org.junit.Test;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
+import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.jni.SimdVectorComputeService;
 
+import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
@@ -24,6 +27,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class NativeRandomVectorScorerTests extends KNNTestCase {
@@ -163,6 +167,63 @@ public class NativeRandomVectorScorerTests extends KNNTestCase {
                         final float expectedScore = similarityFunction.compare(queryVec, vectors.get(vectorIds[j]));
                         assertEquals(expectedScore, scores[j], 1e-3);
                     }
+                }
+            }
+        }
+    }
+
+    @SneakyThrows
+    @Test
+    public void binaryVectorScoringTest() {
+        final int numVectors = 100;
+        final int dim = 128;
+        final Path tmpDir = createTempDir();
+        final String filePath = Path.of(tmpDir.toString(), "binary.vec").toString();
+
+        byte[] query = new byte[dim];
+        Random random = new Random();
+
+        try (FileOutputStream fos = new FileOutputStream(filePath)) {
+            byte[] buffer = new byte[numVectors * dim];
+            random.nextBytes(buffer);
+            fos.write(buffer);
+        }
+
+        byte[] buffer = new byte[dim];
+        try (Directory directory = new MMapDirectory(Path.of("/tmp/kdy"))) {
+            try (IndexInput input = directory.openInput(filePath, IOContext.DEFAULT)) {
+                // Extract mapped pointer
+                long[] addressAndSize = MemorySegmentAddressExtractorUtil.tryExtractAddressAndSize(input, 0, input.length());
+
+                // Set query
+                random.nextBytes(query);
+                SimdVectorComputeService.saveSearchContext(
+                    query,
+                    addressAndSize,
+                    SimdVectorComputeService.SimilarityFunctionType.HAMMING.ordinal()
+                );
+
+                int[] numbers = new int[10];
+                float[] scores = new float[10];
+                for (int i = 0; i < numVectors; i += 10) {
+                    for (int j = 0; j < 10; ++j) {
+                        numbers[j] = i + j;
+                    }
+                    SimdVectorComputeService.scoreSimilarityInBulk(numbers, scores, 10);
+
+                    for (int j = 0; j < 10; ++j) {
+                        input.readBytes(buffer, 0, buffer.length);
+                        final float expectedScore = SpaceType.HAMMING.getKnnVectorSimilarityFunction().compare(query, buffer);
+                        assertEquals(expectedScore, scores[j], 1e-6);
+                    }
+                }
+
+                input.seek(0);
+                for (int i = 0; i < numVectors; i++) {
+                    input.readBytes(buffer, 0, buffer.length);
+                    final float expectedScore = SpaceType.HAMMING.getKnnVectorSimilarityFunction().compare(query, buffer);
+                    final float scoreWeGot = SimdVectorComputeService.scoreSimilarity(i);
+                    assertEquals(expectedScore, scoreWeGot, 1e-6);
                 }
             }
         }
