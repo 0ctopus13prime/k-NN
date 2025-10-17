@@ -5,13 +5,13 @@
 
 package org.opensearch.knn.index.query;
 
-import com.google.common.base.Predicates;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.NonNull;
 import lombok.Value;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -22,18 +22,19 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.join.BitSetProducer;
+import org.apache.lucene.store.IndexInput;
 import org.opensearch.common.lucene.Lucene;
 import org.opensearch.knn.common.FieldInfoExtractor;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
-import org.opensearch.knn.index.query.iterators.BinaryVectorIdsKNNIterator;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.index.query.iterators.BinaryVectorIdsKNNIterator;
 import org.opensearch.knn.index.query.iterators.ByteVectorIdsKNNIterator;
-import org.opensearch.knn.index.query.iterators.NestedBinaryVectorIdsKNNIterator;
-import org.opensearch.knn.index.query.iterators.VectorIdsKNNIterator;
 import org.opensearch.knn.index.query.iterators.KNNIterator;
+import org.opensearch.knn.index.query.iterators.NestedBinaryVectorIdsKNNIterator;
 import org.opensearch.knn.index.query.iterators.NestedByteVectorIdsKNNIterator;
 import org.opensearch.knn.index.query.iterators.NestedVectorIdsKNNIterator;
+import org.opensearch.knn.index.query.iterators.VectorIdsKNNIterator;
 import org.opensearch.knn.index.vectorvalues.KNNBinaryVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNByteVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNFloatVectorValues;
@@ -42,6 +43,7 @@ import org.opensearch.knn.index.vectorvalues.KNNVectorValuesFactory;
 import org.opensearch.knn.indices.ModelDao;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -65,18 +67,95 @@ public class ExactSearcher {
      * @throws IOException exception during execution of exact search
      */
     public TopDocs searchLeaf(final LeafReaderContext leafReaderContext, final ExactSearcherContext context) throws IOException {
-        final KNNIterator iterator = getKNNIterator(leafReaderContext, context);
-        // because of any reason if we are not able to get KNNIterator, return empty top docss
-        if (iterator == null) {
-            return TopDocsCollector.EMPTY_TOPDOCS;
+        final FloatVectorValues floatVectorValues = leafReaderContext.reader().getFloatVectorValues(context.field);
+
+        IndexInput input = null;
+        try {
+            Field field = floatVectorValues.getClass().getDeclaredField("slice");
+            field.setAccessible(true);
+            input = (IndexInput) field.get(floatVectorValues);
+        } catch (NoSuchFieldException e) {
+            // maybe the field is in a superclass
+            Class<?> cls = floatVectorValues.getClass().getSuperclass();
+            while (cls != null) {
+                try {
+                    Field field = cls.getDeclaredField("slice");
+                    field.setAccessible(true);
+                    input = (IndexInput) field.get(floatVectorValues);
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                    cls = cls.getSuperclass();
+                } catch (IllegalAccessException ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
+
+            if (input == null) {
+                throw new RuntimeException("Field 'slice' not found in class hierarchy of " + floatVectorValues.getClass(), e);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to extract IndexInput from FloatVectorValues", e);
         }
-        if (context.getRadius() != null) {
-            return doRadialSearch(leafReaderContext, context, iterator);
+
+        // Creating min heap and init with MAX DocID and Score as -INF.
+        final HitQueue queue = new HitQueue(context.getK(), true);
+        ScoreDoc topDoc = queue.top();
+
+        final DocIdSetIterator iterator = context.matchedDocsIterator;
+        int docIds[] = new int[16];
+        final long oneVectorBytes = Float.BYTES * context.getFloatQueryVector().length;
+        iterator.nextDoc();
+        while (iterator.docID() != DocIdSetIterator.NO_MORE_DOCS) {
+            int i = 0;
+            for (; i < 16 & iterator.docID() != DocIdSetIterator.NO_MORE_DOCS; ++i) {
+                docIds[i] = iterator.docID();
+                input.prefetch(docIds[i] * oneVectorBytes, oneVectorBytes);
+                iterator.nextDoc();
+            }
+
+            if (i != 0) {
+                for (int k = 0; k < i; ++k) {
+                    final float[] vector = floatVectorValues.vectorValue(docIds[k]);
+                    final float currentScore = VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.compare(context.floatQueryVector, vector);
+
+                    if (currentScore > topDoc.score) {
+                        topDoc.score = VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.compare(context.floatQueryVector, vector);
+                        topDoc.doc = docIds[k];
+                        // As the HitQueue is min heap, updating top will bring the doc with -INF score or worst score we
+                        // have seen till now on top.
+                        topDoc = queue.updateTop();
+                    }
+                }
+            }
         }
-        if (context.getMatchedDocsIterator() != null && context.numberOfMatchedDocs <= context.getK()) {
-            return scoreAllDocs(iterator);
+
+        // If scores are negative we will remove them.
+        // This is done, because there can be negative values in the Heap as we init the heap with Score as -INF.
+        // If filterIds < k, some values in heap can have a negative score.
+        while (queue.size() > 0 && queue.top().score < 0) {
+            queue.pop();
         }
-        return searchTopCandidates(iterator, context.getK(), Predicates.alwaysTrue());
+
+        ScoreDoc[] topScoreDocs = new ScoreDoc[queue.size()];
+        for (int i = topScoreDocs.length - 1; i >= 0; i--) {
+            topScoreDocs[i] = queue.pop();
+        }
+
+        TotalHits totalHits = new TotalHits(topScoreDocs.length, TotalHits.Relation.EQUAL_TO);
+        return new TopDocs(totalHits, topScoreDocs);
+
+        // final KNNIterator iterator = getKNNIterator(leafReaderContext, context);
+        // // because of any reason if we are not able to get KNNIterator, return empty top docss
+        // if (iterator == null) {
+        // return TopDocsCollector.EMPTY_TOPDOCS;
+        // }
+        // if (context.getRadius() != null) {
+        // return doRadialSearch(leafReaderContext, context, iterator);
+        // }
+        // if (context.getMatchedDocsIterator() != null && context.numberOfMatchedDocs <= context.getK()) {
+        // return scoreAllDocs(iterator);
+        // }
+        // return searchTopCandidates(iterator, context.getK(), Predicates.alwaysTrue());
     }
 
     /**

@@ -11,9 +11,7 @@ import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.store.IndexInput;
-import org.opensearch.knn.memoryoptsearch.MemorySegmentAddressExtractorUtil;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissSection;
-import org.opensearch.knn.memoryoptsearch.faiss.MMapByteVectorValues;
 
 import java.io.IOException;
 
@@ -91,24 +89,24 @@ public class FaissIndexBinaryFlat extends FaissBinaryIndex {
         }
 
         // Faiss SIMD bulk only supported for FP16 for now.
-//        final long[] addressAndSize = MemorySegmentAddressExtractorUtil.tryExtractAddressAndSize(
-//            indexInput,
-//            binaryFlatVectorSection.getBaseOffset(),
-//            binaryFlatVectorSection.getSectionSize()
-//        );
-//        if (addressAndSize != null) {
-//            // Return MMapByteVectorValues having pointers pointing to mmap regions.
-//            return new MMapByteVectorValues(
-//                indexInput,
-//                codeSize,
-//                binaryFlatVectorSection.getBaseOffset(),
-//                dimension,
-//                totalNumberOfVectors,
-//                addressAndSize
-//            );
-//        } else {
-//            log.debug("Failed to extract mapped pointers from IndexInput, falling back to ByteVectorValuesImpl.");
-//        }
+        // final long[] addressAndSize = MemorySegmentAddressExtractorUtil.tryExtractAddressAndSize(
+        // indexInput,
+        // binaryFlatVectorSection.getBaseOffset(),
+        // binaryFlatVectorSection.getSectionSize()
+        // );
+        // if (addressAndSize != null) {
+        // // Return MMapByteVectorValues having pointers pointing to mmap regions.
+        // return new MMapByteVectorValues(
+        // indexInput,
+        // codeSize,
+        // binaryFlatVectorSection.getBaseOffset(),
+        // dimension,
+        // totalNumberOfVectors,
+        // addressAndSize
+        // );
+        // } else {
+        // log.debug("Failed to extract mapped pointers from IndexInput, falling back to ByteVectorValuesImpl.");
+        // }
 
         return new ByteVectorValuesImpl(indexInput);
     }
