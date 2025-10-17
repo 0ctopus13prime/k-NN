@@ -10,21 +10,21 @@ struct FaissScoreToLuceneScoreTransform final {
     static void hammingBitsTransformBulk(float* scores, const int32_t numScores) noexcept {
         int32_t i = 0;
         for (; (i + 8) <= numScores ; i += 8, scores += 8) {
-            scores[i] = 1 / (1 + scores[i]);
-            scores[i + 1] = 1 / (1 + scores[i + 1]);
-            scores[i + 2] = 1 / (1 + scores[i + 2]);
-            scores[i + 3] = 1 / (1 + scores[i + 3]);
-            scores[i + 4] = 1 / (1 + scores[i + 4]);
-            scores[i + 5] = 1 / (1 + scores[i + 5]);
-            scores[i + 6] = 1 / (1 + scores[i + 6]);
-            scores[i + 7] = 1 / (1 + scores[i + 7]);
+            scores[0] = 1 / (1 + scores[0]);
+            scores[1] = 1 / (1 + scores[1]);
+            scores[2] = 1 / (1 + scores[2]);
+            scores[3] = 1 / (1 + scores[3]);
+            scores[4] = 1 / (1 + scores[4]);
+            scores[5] = 1 / (1 + scores[5]);
+            scores[6] = 1 / (1 + scores[6]);
+            scores[7] = 1 / (1 + scores[7]);
         }
 
         for (; (i + 4) <= numScores ; i += 4, scores += 4) {
-            scores[i] = 1 / (1 + scores[i]);
-            scores[i + 1] = 1 / (1 + scores[i + 1]);
-            scores[i + 2] = 1 / (1 + scores[i + 2]);
-            scores[i + 3] = 1 / (1 + scores[i + 3]);
+            scores[0] = 1 / (1 + scores[0]);
+            scores[1] = 1 / (1 + scores[1]);
+            scores[2] = 1 / (1 + scores[2]);
+            scores[3] = 1 / (1 + scores[3]);
         }
 
         while (i < numScores) {

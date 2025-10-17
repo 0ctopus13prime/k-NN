@@ -77,7 +77,7 @@ struct DefaultBinaryHammingSimilarityFunction final : SimilarityFunction {
 
         int32_t i = 0 ;
         uint8_t* vectorPointers[8];
-        for ( ; (i + 8) < numVectors ; i += 8) {
+        for ( ; (i + 8) <= numVectors ; i += 8) {
             // Calculate distance
             srchContext->getVectorPointersInBulk(&vectorPointers[0], &internalVectorIds[i], 8);
             func->calculateBatch8(
@@ -86,7 +86,7 @@ struct DefaultBinaryHammingSimilarityFunction final : SimilarityFunction {
                 vectorPointers[4], vectorPointers[5], vectorPointers[6], vectorPointers[7]);
         }
 
-        for ( ; (i + 4) < numVectors ; i += 4) {
+        for ( ; (i + 4) <= numVectors ; i += 4) {
             // Calculate distance
             srchContext->getVectorPointersInBulk(&vectorPointers[0], &internalVectorIds[i], 4);
             func->calculateBatch4(

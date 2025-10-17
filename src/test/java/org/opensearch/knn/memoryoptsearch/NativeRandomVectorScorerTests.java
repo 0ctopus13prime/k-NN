@@ -175,7 +175,7 @@ public class NativeRandomVectorScorerTests extends KNNTestCase {
     @SneakyThrows
     @Test
     public void binaryVectorScoringTest() {
-        final int numVectors = 100;
+        final int numVectors = 1000;
         final int dim = 128;
         final Path tmpDir = createTempDir();
         final String filePath = Path.of(tmpDir.toString(), "binary.vec").toString();
@@ -203,26 +203,28 @@ public class NativeRandomVectorScorerTests extends KNNTestCase {
                     SimdVectorComputeService.SimilarityFunctionType.HAMMING.ordinal()
                 );
 
-                int[] numbers = new int[10];
+                int[] internalVectorIds = new int[10];
                 float[] scores = new float[10];
                 for (int i = 0; i < numVectors; i += 10) {
                     for (int j = 0; j < 10; ++j) {
-                        numbers[j] = i + j;
+                        internalVectorIds[j] = Math.abs(random.nextInt()) % numVectors;
                     }
-                    SimdVectorComputeService.scoreSimilarityInBulk(numbers, scores, 10);
+                    SimdVectorComputeService.scoreSimilarityInBulk(internalVectorIds, scores, 10);
 
                     for (int j = 0; j < 10; ++j) {
+                        input.seek(internalVectorIds[j] * dim);
                         input.readBytes(buffer, 0, buffer.length);
                         final float expectedScore = SpaceType.HAMMING.getKnnVectorSimilarityFunction().compare(query, buffer);
                         assertEquals(expectedScore, scores[j], 1e-6);
                     }
                 }
 
-                input.seek(0);
                 for (int i = 0; i < numVectors; i++) {
+                    final int vectorId = Math.abs(random.nextInt()) % numVectors;
+                    input.seek(vectorId * dim);
                     input.readBytes(buffer, 0, buffer.length);
                     final float expectedScore = SpaceType.HAMMING.getKnnVectorSimilarityFunction().compare(query, buffer);
-                    final float scoreWeGot = SimdVectorComputeService.scoreSimilarity(i);
+                    final float scoreWeGot = SimdVectorComputeService.scoreSimilarity(vectorId);
                     assertEquals(expectedScore, scoreWeGot, 1e-6);
                 }
             }
