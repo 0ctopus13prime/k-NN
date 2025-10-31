@@ -15,10 +15,10 @@ buildscript {
     ext {
         // build.version_qualifier parameter applies to knn plugin artifacts only. OpenSearch version must be set
         // explicitly as 'opensearch.version' property, for instance opensearch.version=2.0.0-rc1-SNAPSHOT
-        opensearch_version = System.getProperty("opensearch.version", "3.1.0-SNAPSHOT")
+        opensearch_version = System.getProperty("opensearch.version", "3.1.0")
         version_qualifier = System.getProperty("build.version_qualifier", "")
         opensearch_group = "org.opensearch"
-        isSnapshot = "true" == System.getProperty("build.snapshot", "true")
+        isSnapshot = "true" == System.getProperty("build.snapshot", "false")
         avx2_enabled = System.getProperty("avx2.enabled")
         nproc_count = System.getProperty("nproc.count", "1")
         avx512_enabled = System.getProperty("avx512.enabled")
@@ -532,7 +532,7 @@ def commonIntegTestClusters(OpenSearchCluster cluster, _numNodes){
     if (System.getProperty("cluster.debug") != null) {
         def debugPort = 5005
         cluster.nodes.forEach { node ->
-            node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=${debugPort}")
+            node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=${debugPort}")
             debugPort += 1
         }
     }
