@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.opensearch.knn.common.FieldInfoExtractor.extractKNNEngine;
@@ -48,27 +49,29 @@ public class MemoryOptimizedSearchWarmup {
             return new ArrayList<>();
         }
 
-        final SegmentReader segmentReader = Lucene.segmentReader(leafReader);
-        final Directory bottomDirectory = FilterDirectory.unwrap(directory);
+        return new ArrayList<>();
 
-        ArrayList<FieldInfo> memOptSearchFields = getFieldsForMemoryOptimizedSearch(leafReader, mapperService, indexName);
-        for (FieldInfo field : memOptSearchFields) {
-            loadFullPrecisionVectors(leafReader, field);
-        }
-
-        ArrayList<String> warmedUp = new ArrayList<>();
-
-        for (FieldInfo field : memOptSearchFields) {
-            try {
-                if (warmUpField(field, segmentReader, bottomDirectory)) {
-                    warmedUp.add(field.getName());
-                }
-            } catch (IOException e) {
-                log.error("Failed to warm up field: {}", field.getName(), e);
-            }
-        }
-
-        return warmedUp;
+//        final SegmentReader segmentReader = Lucene.segmentReader(leafReader);
+//        final Directory bottomDirectory = FilterDirectory.unwrap(directory);
+//
+//        ArrayList<FieldInfo> memOptSearchFields = getFieldsForMemoryOptimizedSearch(leafReader, mapperService, indexName);
+//        for (FieldInfo field : memOptSearchFields) {
+//            loadFullPrecisionVectors(leafReader, field);
+//        }
+//
+//        ArrayList<String> warmedUp = new ArrayList<>();
+//
+//        for (FieldInfo field : memOptSearchFields) {
+//            try {
+//                if (warmUpField(field, segmentReader, bottomDirectory)) {
+//                    warmedUp.add(field.getName());
+//                }
+//            } catch (IOException e) {
+//                log.error("Failed to warm up field: {}", field.getName(), e);
+//            }
+//        }
+//
+//        return warmedUp;
     }
 
     private boolean warmUpField(FieldInfo field, SegmentReader segmentReader, Directory directory) throws IOException {
