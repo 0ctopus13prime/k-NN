@@ -22,6 +22,7 @@ import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.knn.TopKnnCollectorManager;
 import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.IOSupplier;
 import org.opensearch.common.StopWatch;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.query.ExactSearcher;
@@ -85,36 +86,51 @@ public class NativeEngineKnnVectorQuery extends Query {
 
     @Override
     public Weight createWeight(IndexSearcher indexSearcher, ScoreMode scoreMode, float boost) throws IOException {
-        final IndexReader reader = indexSearcher.getIndexReader();
+        // Create Weight depending on whether 2-phase search is needed
+        final boolean isShardLevelRescoringDisabled = KNNSettings.isShardLevelRescoringDisabledForDiskBasedVector(knnQuery.getIndexName());
+        final Integer firstPassKFor2PhaseSearch = getFirstPassK(isShardLevelRescoringDisabled);
+        final IOSupplier<KNNWeight> weightSupplier;
+        if (firstPassKFor2PhaseSearch == null) {
+            weightSupplier = () -> (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1);
+        } else {
+            // Create weight with expanded `k`.
+            weightSupplier = () -> (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1, firstPassKFor2PhaseSearch);
+        }
+
+        // Create weight
         QueryProfiler profiler = KNNProfileUtil.getProfiler(indexSearcher);
         final KNNWeight knnWeight;
         if (profiler != null) {
             // add a new node to the profile tree
             profiler.getQueryBreakdown(knnQuery);
-            knnWeight = (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1);
+            knnWeight = weightSupplier.get();
             profiler.pollLastElement();
         } else {
-            knnWeight = (KNNWeight) knnQuery.createWeight(indexSearcher, scoreMode, 1);
+            knnWeight = weightSupplier.get();
         }
+
+        // Run search
+        final IndexReader reader = indexSearcher.getIndexReader();
         List<LeafReaderContext> leafReaderContexts = reader.leaves();
         List<PerLeafResult> perLeafResults;
-        RescoreContext rescoreContext = knnQuery.getRescoreContext();
         final int finalK = knnQuery.getK();
-        if (rescoreContext == null || !rescoreContext.isRescoreEnabled()) {
+        if (firstPassKFor2PhaseSearch == null) {
             perLeafResults = doSearch(indexSearcher, leafReaderContexts, knnWeight, finalK);
         } else {
-            boolean isShardLevelRescoringDisabled = KNNSettings.isShardLevelRescoringDisabledForDiskBasedVector(knnQuery.getIndexName());
-            int dimension = knnQuery.getQueryVector().length;
-            int firstPassK = rescoreContext.getFirstPassK(finalK, isShardLevelRescoringDisabled, dimension);
-            perLeafResults = doSearch(indexSearcher, leafReaderContexts, knnWeight, firstPassK);
+            perLeafResults = doSearch(indexSearcher, leafReaderContexts, knnWeight, firstPassKFor2PhaseSearch);
             if (isShardLevelRescoringDisabled == false) {
-                ResultUtil.reduceToTopK(perLeafResults, firstPassK);
+                ResultUtil.reduceToTopK(perLeafResults, firstPassKFor2PhaseSearch);
             }
 
             StopWatch stopWatch = new StopWatch().start();
             perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
             long rescoreTime = stopWatch.stop().totalTime().millis();
-            log.debug("Rescoring results took {} ms. oversampled k:{}, segments:{}", rescoreTime, firstPassK, leafReaderContexts.size());
+            log.debug(
+                "Rescoring results took {} ms. oversampled k:{}, segments:{}",
+                rescoreTime,
+                firstPassKFor2PhaseSearch,
+                leafReaderContexts.size()
+            );
         }
 
         // Since memory optimized search is using this class, we need to return the same totalHits value when it's disabled.
@@ -127,7 +143,14 @@ public class NativeEngineKnnVectorQuery extends Query {
 
         if (expandNestedDocs) {
             StopWatch stopWatch = new StopWatch().start();
-            perLeafResults = retrieveAll(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, rescoreContext == null);
+
+            perLeafResults = retrieveAll(
+                indexSearcher,
+                leafReaderContexts,
+                knnWeight,
+                perLeafResults,
+                Objects.isNull(knnQuery.getRescoreContext())
+            );
             long time_in_millis = stopWatch.stop().totalTime().millis();
             if (log.isDebugEnabled()) {
                 long totalNestedDocs = perLeafResults.stream().mapToLong(perLeafResult -> perLeafResult.getResult().scoreDocs.length).sum();
@@ -151,6 +174,18 @@ public class NativeEngineKnnVectorQuery extends Query {
         }
 
         return queryUtils.createDocAndScoreQuery(reader, topK, knnWeight).createWeight(indexSearcher, scoreMode, boost);
+    }
+
+    private Integer getFirstPassK(final boolean isShardLevelRescoringDisabled) {
+        final RescoreContext rescoreContext = knnQuery.getRescoreContext();
+        if (rescoreContext != null && rescoreContext.isRescoreEnabled()) {
+            // We need 2-phase search where using expanded `k` for the first stage search.
+            final int dimension = knnQuery.getQueryVector().length;
+            return rescoreContext.getFirstPassK(knnQuery.getK(), isShardLevelRescoringDisabled, dimension);
+        }
+
+        // We don't need 2-phase, hence there's no first pass k.
+        return null;
     }
 
     /**
@@ -331,7 +366,7 @@ public class NativeEngineKnnVectorQuery extends Query {
         }
 
         // Start 2nd deep dive, and get the minimum bar.
-        final float minTopKScore = OptimisticSearchStrategyUtils.findKthLargestScore(perLeafResults, knnQuery.getK(), totalResults);
+        final float minTopKScore = OptimisticSearchStrategyUtils.findKthLargestScore(perLeafResults, k, totalResults);
 
         // Select candidate segments for 2nd search. Pick whatever segment returned all vectors whose score values are greater than `kth`
         // value in the merged results.
@@ -355,7 +390,7 @@ public class NativeEngineKnnVectorQuery extends Query {
                             leafReaderContext,
                             perLeafResult.getFilterBits(),
                             perLeafResult.getFilterBitsCardinality(),
-                            knnQuery.getK()
+                            k
                         )
                     );
                     contextIndices.add(i);
