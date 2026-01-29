@@ -5,11 +5,17 @@
 
 package org.opensearch.knn.common.reorder;
 
+import lombok.Getter;
+
+import java.util.HashSet;
+import java.util.Set;
+
 public class UnitHeap {
     public int[] update;
     public ListElement[] linkedList;
     private HeadEnd[] header;
     private int top;
+    @Getter
     private int numLiveElements;
 
     public UnitHeap(int heapSize) {
@@ -70,108 +76,65 @@ public class UnitHeap {
         --numLiveElements;
     }
 
-    //    public void validateStatusForDebugging() {
-    //        // # deletion check
-    //        int deletedElements = 0;
-    //        for (final ListElement e : linkedList) {
-    //            if (e.next < 0 && e.prev < 0) {
-    //                ++deletedElements;
-    //            }
-    //        }
-    //
-    //        if (deletedElements != (linkedList.length - numLiveElements)) {
-    //            throw new RuntimeException(
-    //                "#Deleted elements=" + deletedElements + " vs #Invalid elements=" + (linkedList.length - numLiveElements));
-    //        }
-    //
-    //        // sort order check
-    //        if (numLiveElements > 0) {
-    //            final ListElement topElement = linkedList[top];
-    //            if (topElement.prev >= 0) {
-    //                throw new RuntimeException("Top element should not have prev element");
-    //            }
-    //            if (numLiveElements > 1) {
-    //                int prevKey = Integer.MAX_VALUE;
-    //                int numLives = 0;
-    //                ListElement x = topElement;
-    //                while (true) {
-    //                    if (x.key > prevKey) {
-    //                        throw new RuntimeException("Sort order violation");
-    //                    }
-    //                    ++numLives;
-    //                    prevKey = x.key;
-    //                    if (x.next >= 0) {
-    //                        x = linkedList[x.next];
-    //                    } else {
-    //                        break;
-    //                    }
-    //                }
-    //                if (numLives != this.numLiveElements) {
-    //                    throw new RuntimeException("#Lives=" + numLives + " vs #Valid elements=" + this.numLiveElements);
-    //                }
-    //            }
-    //        }
-    //
-    //        // basic header table check
-    //        for (final HeadEnd headEnd : header) {
-    //            if (headEnd.first == -1 && headEnd.second != -1) {
-    //                throw new RuntimeException("Header table corruption");
-    //            }
-    //            if (headEnd.second == -1 && headEnd.first != -1) {
-    //                throw new RuntimeException("Header table corruption");
-    //            }
-    //        }
-    //
-    //        for (int key = 0; key < header.length; ++key) {
-    //            final HeadEnd headEnd = header[key];
-    //            if (headEnd.first != -1) {
-    //                int regionSize = 0;
-    //                int idx = headEnd.first;
-    //                while (true) {
-    //                    ListElement x = linkedList[idx];
-    //                    if ((x.key + update[x.index]) != key) {
-    //                        throw new RuntimeException("Region corruption");
-    //                    }
-    //                    if (x.index == headEnd.second) {
-    //                        break;
-    //                    }
-    //                    ++regionSize;
-    //                    idx = x.next;
-    //                }
-    //            }
-    //        }
-    //
-    //        // header table check
-    //        {
-    //            final Set<Integer> keys = new HashSet<>();
-    //            int idx = top;
-    //            ListElement x = linkedList[top];
-    //            while (true) {
-    //                keys.add(x.key + update[idx]);
-    //                if (x.next >= 0) {
-    //                    x = linkedList[x.next];
-    //                } else {
-    //                    break;
-    //                }
-    //            }
-    //
-    //            for (HeadEnd headEnd : header) {
-    //                if (headEnd.first != -1) {
-    //                    final int key = linkedList[headEnd.first].key + update[headEnd.first];
-    //                    if (keys.contains(key) == false) {
-    //                        throw new RuntimeException("Header table corruption");
-    //                    }
-    //                }
-    //            }
-    //        }
-    //    }
+    public void validateStatusForDebugging() {
+        // # deletion check
+        int deletedElements = 0;
+        for (final ListElement e : linkedList) {
+            if (e.next < 0 && e.prev < 0) {
+                ++deletedElements;
+            }
+        }
+
+        if (deletedElements != (linkedList.length - numLiveElements)) {
+            throw new RuntimeException(
+                "#Deleted elements=" + deletedElements + " vs #Invalid elements=" + (linkedList.length - numLiveElements));
+        }
+
+        // sort order check
+        if (numLiveElements > 0) {
+            final ListElement topElement = linkedList[top];
+            if (topElement.prev >= 0) {
+                throw new RuntimeException("Top element should not have prev element");
+            }
+            if (numLiveElements > 1) {
+                int prevKey = Integer.MAX_VALUE;
+                int numLives = 0;
+                ListElement x = topElement;
+                while (true) {
+                    if (x.key > prevKey) {
+                        throw new RuntimeException("Sort order violation");
+                    }
+                    ++numLives;
+                    prevKey = x.key;
+                    if (x.next >= 0) {
+                        x = linkedList[x.next];
+                    } else {
+                        break;
+                    }
+                }
+                if (numLives != this.numLiveElements) {
+                    throw new RuntimeException("#Lives=" + numLives + " vs #Valid elements=" + this.numLiveElements);
+                }
+            }
+        }
+
+        // basic header table check
+        for (final HeadEnd headEnd : header) {
+            if (headEnd.first == -1 && headEnd.second != -1) {
+                throw new RuntimeException("Header table corruption");
+            }
+            if (headEnd.second == -1 && headEnd.first != -1) {
+                throw new RuntimeException("Header table corruption");
+            }
+        }
+    }
 
     public void increaseKey(int index) {
         if (linkedList[index].isDeleted()) {
             return;
         }
 
-        int key = linkedList[index].key + update[index];
+        int key = linkedList[index].key;
         final int prev = linkedList[index].prev;
         final int next = linkedList[index].next;
         final int firstVertexInCurrRegion = header[key].first;
@@ -261,6 +224,7 @@ public class UnitHeap {
         }
 
         int minKeyGENewKey = key;
+        // Note that update[oldTop] < 0
         final int newKey = key + update[oldTop] / 2;
 
         if (newKey < linkedList[next].key) {
@@ -312,7 +276,7 @@ public class UnitHeap {
             // We only added half of `update`
             update[oldTop] -= update[oldTop] / 2;
 
-            // Since we appended the node, we should make header table point it
+            // Since we prepend the node, we should make header table point it
             header[newKey].second = oldTop;
             if (header[newKey].first < 0) {
                 header[newKey].first = oldTop;
