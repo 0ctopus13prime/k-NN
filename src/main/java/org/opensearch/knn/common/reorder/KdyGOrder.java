@@ -84,114 +84,19 @@ public class KdyGOrder {
         newPermutation[orderIndex++] = veryFirstVertex;
         unitHeap.deleteElement(veryFirstVertex);
 
-        // For incoming vertexes to `veryFirstVertex`
-        // e.g.
-        // A -> V_e
-        //   -> X
-        // Then increase counter for A and X
-        for (int i = incomingVertexes.startOffset(veryFirstVertex), limit1 = incomingVertexes.endOffset(veryFirstVertex); i < limit1; ++i) {
-            final int u = incomingVertexes.incomingVertices[i];
-            if (unitHeap.update[u] == 0) {
-                unitHeap.increaseKey(u);
-            } else {
-                unitHeap.update[u] += 1;
-            }
+        final AtomicReference<Boolean> skipIterationForCommonNeighbor = new AtomicReference<>(false);
+        final int untilOrderIndex = (numVectors - isolatedVertexes.size());
+        while (true) {
+            final int ve = newPermutation[orderIndex - 1];
+            final int vb = (orderIndex > (window + 1)) ? newPermutation[orderIndex - window - 1] : -1;
 
-            // Increase sibling count
-            HnswGraphHelper.forAllOutgoingNodes(
-                faissHnswGraph, u, 1, (w) -> {
-                    if (unitHeap.update[w] == 0) {
-                        unitHeap.increaseKey(w);
-                    } else {
-                        unitHeap.update[w] += 1;
-                    }
-                }
-            );
-        }  // End for
-
-        // For the vertexes pointed by vertex of `veryFirstVertex`
-        HnswGraphHelper.forAllOutgoingNodes(
-            faissHnswGraph, veryFirstVertex, 0, (w) -> {
-                if (unitHeap.update[w] == 0) {
-                    unitHeap.increaseKey(w);
-                } else {
-                    unitHeap.update[w] += 1;
-                }
-            }
-        );
-
-        int count = 0;
-        final AtomicReference<Boolean> hasV = new AtomicReference<>(false);
-        while (count < numVectors - 1 - isolatedVertexes.size()) {
-            // Extract max
-            final int maxVertex = unitHeap.extractMax();
-            // How many elements we pulled from Q so far?
-            ++count;
-
-            // Append max vertex and invalidate `update`
-            newPermutation[orderIndex++] = maxVertex;
-
-            // Is there a vertex we should exclude from the window?
-            // -1 -> no, we don't
-            int popv;
-            if (count - window >= 0) {
-                popv = newPermutation[count - window];
-            } else {
-                popv = -1;
-            }
-
-            if (popv >= 0) {
-                // For vertexes pointed by `popv`
-                HnswGraphHelper.forAllOutgoingNodes(
-                    faissHnswGraph, popv, 0, (w) -> {
-                        unitHeap.update[w] -= 1;
-                    }
-                );
-
-                // For incoming vertexes to `popv`
-                for (int i = incomingVertexes.startOffset(popv), limit1 = incomingVertexes.endOffset(popv); i < limit1; ++i) {
-                    final int u = incomingVertexes.incomingVertices[i];
-                    unitHeap.update[u]--;
-                    if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
-                        hasV.set(false);
-                        HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, u, 0, (w) -> {
-                                if (w == maxVertex) {
-                                    hasV.set(true);
-                                    // Stop the loop
-                                    return false;
-                                }
-                                return true;
-                            }
-                        );
-
-                        if (hasV.get() == false) {
-                            // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                            HnswGraphHelper.forAllOutgoingNodes(
-                                faissHnswGraph, u, 0, (w) -> {
-                                    unitHeap.update[w] -= 1;
-                                }
-                            );
-                        } else {
-                            popvExist.set(u);
-                        }  // End if
-                    }  // End if
-                }  // End for
-            }  // End if
-
-            // For the outgoing vertexes of `v`
-            HnswGraphHelper.forAllOutgoingNodes(
-                faissHnswGraph, maxVertex, 0, (w) -> {
-                    if (unitHeap.update[w] == 0) {
-                        unitHeap.increaseKey(w);
-                    } else {
-                        unitHeap.update[w] += 1;
-                    }
-                }
-            );
-
-            // For the incoming vertexes to `v`
-            for (int i = incomingVertexes.startOffset(maxVertex), limit1 = incomingVertexes.endOffset(maxVertex); i < limit1; ++i) {
+            // For incoming vertexes to `ve`
+            // e.g.
+            // A -> V_e -> P
+            //   -> X
+            // Then increase counter for A, X and P.
+            for (int i = incomingVertexes.startOffset(ve), limit1 = incomingVertexes.endOffset(ve); i < limit1; ++i) {
+                // Increase incoming vertex count
                 final int u = incomingVertexes.incomingVertices[i];
                 if (unitHeap.update[u] == 0) {
                     unitHeap.increaseKey(u);
@@ -199,21 +104,85 @@ public class KdyGOrder {
                     unitHeap.update[u] += 1;
                 }
 
-                // If `popv` and `v` are not siblings, then increment the counter for all its siblings
-                if (popvExist.get(u) == false) {
-                    HnswGraphHelper.forAllOutgoingNodes(
-                        faissHnswGraph, u, 1, (w) -> {
-                            if (unitHeap.update[w] == 0) {
-                                unitHeap.increaseKey(w);
-                            } else {
+                // Increase sibling count
+                if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
+                    skipIterationForCommonNeighbor.set(false);
+                    if (vb != -1) {
+                        // We have a leaving node from the window
+                        HnswGraphHelper.forAllOutgoingNodes(
+                            faissHnswGraph, u, 0, (w) -> {
+                                if (w == vb) {
+                                    skipIterationForCommonNeighbor.set(true);
+                                    // Stop the loop
+                                    return false;
+                                }
+                                return true;
+                            }
+                        );
+                    }
+
+                    if (skipIterationForCommonNeighbor.get() == false) {
+                        // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
+                        HnswGraphHelper.forAllOutgoingNodes(
+                            faissHnswGraph, u, 0, (w) -> {
                                 unitHeap.update[w] += 1;
                             }
-                        }
-                    );
-                } else {
-                    popvExist.set(u, false);
+                        );
+                    } else {
+                        popvExist.set(u);
+                    }  // End if
                 }
             }  // End for
+
+            // For the vertexes pointed by vertex of `veryFirstVertex`
+            HnswGraphHelper.forAllOutgoingNodes(
+                faissHnswGraph, ve, 0, (w) -> {
+                    if (unitHeap.update[w] == 0) {
+                        unitHeap.increaseKey(w);
+                    } else {
+                        unitHeap.update[w] += 1;
+                    }
+                }
+            );
+
+            if (vb != -1) {
+                // For incoming vertexes to `vb`
+                // e.g.
+                // A -> V_b
+                //   -> X
+                // Then increase counter for A and X
+                for (int i = incomingVertexes.startOffset(vb), limit1 = incomingVertexes.endOffset(vb); i < limit1; ++i) {
+                    final int u = incomingVertexes.incomingVertices[i];
+                    unitHeap.update[u] -= 1;
+
+                    // Increase sibling count
+                    if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
+                        if (popvExist.get(u) == false) {
+                            HnswGraphHelper.forAllOutgoingNodes(
+                                faissHnswGraph, u, 1, (w) -> {
+                                    unitHeap.update[w] -= 1;
+                                }
+                            );
+                        } else {
+                            popvExist.set(u, false);
+                        }
+                    }
+                }  // End for
+
+                // For the vertexes pointed by vertex of `veryFirstVertex`
+                HnswGraphHelper.forAllOutgoingNodes(
+                    faissHnswGraph, vb, 0, (w) -> {
+                        unitHeap.update[w] -= 1;
+                    }
+                );
+            }  // End if
+
+            if (orderIndex < untilOrderIndex) {
+                final int vmax = unitHeap.extractMax();
+                newPermutation[orderIndex++] = vmax;
+            } else {
+                break;
+            }
         }  // End while
 
         // Insert isolated vertexes
