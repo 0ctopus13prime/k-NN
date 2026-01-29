@@ -65,18 +65,6 @@ public class KdyGOrder {
         int orderIndex = 0;
         int[] newPermutation = new int[numVectors];
 
-        // ???
-        for (int i = 0; i < numVectors; ++i) {
-            unitHeap.linkedList[i].key = incomingVertexes.getDegree(i);
-            unitHeap.update[i] = -unitHeap.linkedList[i].key;
-        }
-
-        // Reset the unit heap
-        //  - Array
-        //  - linked list
-        //  - head table
-        unitHeap.reconstruct();
-
         // Find the first vertex with the largest indegree
         int veryFirstVertex = -1;
         int maxInDegreeFound = -1;
@@ -94,7 +82,6 @@ public class KdyGOrder {
 
         // Push the first vertex and remove it from the queue
         newPermutation[orderIndex++] = veryFirstVertex;
-        unitHeap.update[veryFirstVertex] = Integer.MAX_VALUE / 2;
         unitHeap.deleteElement(veryFirstVertex);
 
         // For incoming vertexes to `veryFirstVertex`
@@ -143,7 +130,6 @@ public class KdyGOrder {
 
             // Append max vertex and invalidate `update`
             newPermutation[orderIndex++] = maxVertex;
-            unitHeap.update[maxVertex] = Integer.MAX_VALUE / 2;
 
             // Is there a vertex we should exclude from the window?
             // -1 -> no, we don't
@@ -169,7 +155,7 @@ public class KdyGOrder {
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         hasV.set(false);
                         HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, maxVertex, 0, (w) -> {
+                            faissHnswGraph, u, 0, (w) -> {
                                 if (w == maxVertex) {
                                     hasV.set(true);
                                     // Stop the loop
@@ -182,7 +168,7 @@ public class KdyGOrder {
                         if (hasV.get() == false) {
                             // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
                             HnswGraphHelper.forAllOutgoingNodes(
-                                faissHnswGraph, maxVertex, 0, (w) -> {
+                                faissHnswGraph, u, 0, (w) -> {
                                     unitHeap.update[w] -= 1;
                                 }
                             );

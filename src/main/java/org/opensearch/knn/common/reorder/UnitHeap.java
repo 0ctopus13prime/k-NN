@@ -5,24 +5,23 @@
 
 package org.opensearch.knn.common.reorder;
 
-import java.util.Arrays;
-
 public class UnitHeap {
     public int[] update;
     public ListElement[] linkedList;
     private HeadEnd[] header;
     private int top;
-    private int heapSize;
+    private int numLiveElements;
 
     public UnitHeap(int heapSize) {
-        this.heapSize = heapSize;
         this.header = new HeadEnd[Math.max(4, heapSize >> 4)];
         this.linkedList = new ListElement[heapSize];
         this.update = new int[heapSize];
+        this.numLiveElements = heapSize;
 
         // Create a linked list and connecting each other
         for (int i = 0; i < heapSize; ++i) {
             linkedList[i] = new ListElement();
+            linkedList[i].index = i;
             linkedList[i].prev = i - 1;
             linkedList[i].next = i + 1;
             linkedList[i].key = 0;
@@ -67,71 +66,112 @@ public class UnitHeap {
         }
 
         // Invalidate prev, next pointer of `index` node.
-        linkedList[index].prev = linkedList[index].next = -1;
+        linkedList[index].markDeleted();
+        --numLiveElements;
     }
 
-    public void reconstruct() {
-        // Index numbers
-        Integer[] tmp = new Integer[heapSize];
-        for (int i = 0; i < heapSize; i++) {
-            tmp[i] = i;
-        }
-
-        // Sort the index according to the key in descending order
-        Arrays.sort(tmp, (a, b) -> Integer.compare(linkedList[b].key, linkedList[a].key));
-
-        // The first element e.g. node with the max key
-        int key = linkedList[tmp[0]].key;
-        linkedList[tmp[0]].next = tmp[1];
-        linkedList[tmp[0]].prev = -1;
-
-        // The last element e.g. node with the min key
-        linkedList[tmp[tmp.length - 1]].next = -1;
-        linkedList[tmp[tmp.length - 1]].prev = tmp[tmp.length - 2];
-
-        // Making a header
-        header = new HeadEnd[Math.max(key + 1, header.length)];
-        for (int i = 0 ; i < header.length ; ++i) {
-            header[i] = new HeadEnd();
-        }
-        header[key].first = tmp[0];
-        for (int i = 1; i < tmp.length - 1; i++) {
-            // Make list element point to prev, next
-            // X <-> Y <-> Z
-            int prev = tmp[i - 1];
-            int v = tmp[i];
-            int next = tmp[i + 1];
-            linkedList[v].prev = prev;
-            linkedList[v].next = next;
-
-            // Adjust the header table
-            int tmpkey = linkedList[tmp[i]].key;
-            if (tmpkey != key) {
-                header[key].second = tmp[i - 1];
-                header[tmpkey].first = tmp[i];
-                key = tmpkey;
-            }
-        }
-
-        // Adjust the header table for the last element.
-        if (key == linkedList[tmp[tmp.length - 1]].key) header[key].second = tmp[tmp.length - 1];
-        else {
-            header[key].second = tmp[tmp.length - 2];
-            int lastone = tmp[tmp.length - 1];
-            int lastkey = linkedList[lastone].key;
-            header[lastkey].first = header[lastkey].second = lastone;
-        }
-
-        // Make top
-        top = tmp[0];
-    }
-
-    public void decreaseKey(int index) {
-        update[index] -= 1;
-    }
+    //    public void validateStatusForDebugging() {
+    //        // # deletion check
+    //        int deletedElements = 0;
+    //        for (final ListElement e : linkedList) {
+    //            if (e.next < 0 && e.prev < 0) {
+    //                ++deletedElements;
+    //            }
+    //        }
+    //
+    //        if (deletedElements != (linkedList.length - numLiveElements)) {
+    //            throw new RuntimeException(
+    //                "#Deleted elements=" + deletedElements + " vs #Invalid elements=" + (linkedList.length - numLiveElements));
+    //        }
+    //
+    //        // sort order check
+    //        if (numLiveElements > 0) {
+    //            final ListElement topElement = linkedList[top];
+    //            if (topElement.prev >= 0) {
+    //                throw new RuntimeException("Top element should not have prev element");
+    //            }
+    //            if (numLiveElements > 1) {
+    //                int prevKey = Integer.MAX_VALUE;
+    //                int numLives = 0;
+    //                ListElement x = topElement;
+    //                while (true) {
+    //                    if (x.key > prevKey) {
+    //                        throw new RuntimeException("Sort order violation");
+    //                    }
+    //                    ++numLives;
+    //                    prevKey = x.key;
+    //                    if (x.next >= 0) {
+    //                        x = linkedList[x.next];
+    //                    } else {
+    //                        break;
+    //                    }
+    //                }
+    //                if (numLives != this.numLiveElements) {
+    //                    throw new RuntimeException("#Lives=" + numLives + " vs #Valid elements=" + this.numLiveElements);
+    //                }
+    //            }
+    //        }
+    //
+    //        // basic header table check
+    //        for (final HeadEnd headEnd : header) {
+    //            if (headEnd.first == -1 && headEnd.second != -1) {
+    //                throw new RuntimeException("Header table corruption");
+    //            }
+    //            if (headEnd.second == -1 && headEnd.first != -1) {
+    //                throw new RuntimeException("Header table corruption");
+    //            }
+    //        }
+    //
+    //        for (int key = 0; key < header.length; ++key) {
+    //            final HeadEnd headEnd = header[key];
+    //            if (headEnd.first != -1) {
+    //                int regionSize = 0;
+    //                int idx = headEnd.first;
+    //                while (true) {
+    //                    ListElement x = linkedList[idx];
+    //                    if ((x.key + update[x.index]) != key) {
+    //                        throw new RuntimeException("Region corruption");
+    //                    }
+    //                    if (x.index == headEnd.second) {
+    //                        break;
+    //                    }
+    //                    ++regionSize;
+    //                    idx = x.next;
+    //                }
+    //            }
+    //        }
+    //
+    //        // header table check
+    //        {
+    //            final Set<Integer> keys = new HashSet<>();
+    //            int idx = top;
+    //            ListElement x = linkedList[top];
+    //            while (true) {
+    //                keys.add(x.key + update[idx]);
+    //                if (x.next >= 0) {
+    //                    x = linkedList[x.next];
+    //                } else {
+    //                    break;
+    //                }
+    //            }
+    //
+    //            for (HeadEnd headEnd : header) {
+    //                if (headEnd.first != -1) {
+    //                    final int key = linkedList[headEnd.first].key + update[headEnd.first];
+    //                    if (keys.contains(key) == false) {
+    //                        throw new RuntimeException("Header table corruption");
+    //                    }
+    //                }
+    //            }
+    //        }
+    //    }
 
     public void increaseKey(int index) {
-        int key = linkedList[index].key;
+        if (linkedList[index].isDeleted()) {
+            return;
+        }
+
+        int key = linkedList[index].key + update[index];
         final int prev = linkedList[index].prev;
         final int next = linkedList[index].next;
         final int firstVertexInCurrRegion = header[key].first;
@@ -143,7 +183,9 @@ public class UnitHeap {
         //                          --------^ we want to put the node in here
         if (firstVertexInCurrRegion != index) {
             // Make previous element point to the next one.
-            linkedList[prev].next = next;
+            if (prev >= 0) {
+                linkedList[prev].next = next;
+            }
             if (next >= 0) {
                 linkedList[next].prev = prev;
             }
@@ -187,7 +229,7 @@ public class UnitHeap {
         if ((key + 4) >= header.length) {
             final int oldLength = header.length;
             header = java.util.Arrays.copyOf(header, (int) (header.length * 1.5));
-            for (int i = oldLength ; i < header.length; i++) {
+            for (int i = oldLength; i < header.length; i++) {
                 header[i] = new HeadEnd();
             }
         }
@@ -210,8 +252,16 @@ public class UnitHeap {
         final int oldTop = top;
         final int key = linkedList[oldTop].key;
         final int next = linkedList[oldTop].next;
+        if (next == -1) {
+            // There's only one element to decrease. Just update key + header
+            header[key].first = header[key].second = oldTop;
+            linkedList[oldTop].key += update[oldTop];
+            update[oldTop] = 0;
+            return;
+        }
+
         int minKeyGENewKey = key;
-        final int newKey = key + update[oldTop] - (update[oldTop] / 2);
+        final int newKey = key + update[oldTop] / 2;
 
         if (newKey < linkedList[next].key) {
             // Find the region where the node belongs to after decreased key
@@ -224,7 +274,7 @@ public class UnitHeap {
                 firstVertexIdInRegion = linkedList[header[minKeyGENewKey].second].next;
             }
 
-            // Make a new top
+            // Make the next top node point null
             linkedList[next].prev = -1;
 
             // Insert the node into the corresponding region
@@ -260,7 +310,7 @@ public class UnitHeap {
             linkedList[oldTop].key = newKey;
 
             // We only added half of `update`
-            update[oldTop] /= 2;
+            update[oldTop] -= update[oldTop] / 2;
 
             // Since we appended the node, we should make header table point it
             header[newKey].second = oldTop;
@@ -276,8 +326,17 @@ public class UnitHeap {
     }
 
     public static class ListElement {
+        public int index;
         public int key;
         public int prev;
         public int next;
+
+        public void markDeleted() {
+            prev = next = Integer.MIN_VALUE;
+        }
+
+        public boolean isDeleted() {
+            return (prev == next) && (prev == Integer.MIN_VALUE);
+        }
     }
 }
