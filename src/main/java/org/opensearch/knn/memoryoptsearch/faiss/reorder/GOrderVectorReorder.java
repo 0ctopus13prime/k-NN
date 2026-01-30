@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.knn.common.reorder;
+package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissHNSW;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissHnswGraph;
@@ -22,21 +23,31 @@ import java.util.BitSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class KdyGOrder {
+public class GOrderVectorReorder {
     public static void main(String... args) throws IOException {
         final String faissGraphDir = "/Users/kdooyong/workspace/Gorder/kdy";
         final String faissGraphFileName = "_e_165_target_field.faiss";
         final int window = 16;
 
         try (final Directory directory = new MMapDirectory(Path.of(faissGraphDir));) {
-            try (final IndexInput indexInput = directory.openInput(faissGraphFileName, IOContext.DEFAULT);) {
+            try (final IndexInput indexInput = directory.openInput(faissGraphFileName, IOContext.DEFAULT)) {
                 final FaissIndex faissIndex = FaissIndex.load(indexInput);
                 final int numVectors = faissIndex.getTotalNumberOfVectors();
                 System.out.println("Total #vectors: " + numVectors);
                 if (faissIndex instanceof FaissIdMapIndex idMapIndex) {
+                    // Get the permutation
                     final FaissHNSW faissHNSW = idMapIndex.getFaissHnsw();
+                    // Permutation -> newOrd2Old
                     final int[] permutation = getPermutation(faissHNSW, indexInput, window);
+                    final ReorderOrdMap reorderOrdMap = new ReorderOrdMap(permutation);
                     System.out.println(Arrays.toString(permutation));
+
+                    // Transform the index
+                    if (true) {
+                        try (final IndexOutput indexOutput = directory.createOutput(faissGraphFileName + ".reorder", IOContext.DEFAULT)) {
+                            FaissIndexReorderTransformer.transform(faissIndex, indexInput, indexOutput, reorderOrdMap);
+                        }
+                    }
                 } else {
                     throw new IllegalStateException("faissIndex is not FaissIdMapIndex! Actual type: " + faissIndex.getClass());
                 }
@@ -93,7 +104,7 @@ public class KdyGOrder {
             // For incoming vertexes to `ve`
             // e.g.
             // A -> V_e -> P
-            //   -> X
+            // -> X
             // Then increase counter for A, X and P.
             for (int i = incomingVertexes.startOffset(ve), limit1 = incomingVertexes.endOffset(ve); i < limit1; ++i) {
                 // Increase incoming vertex count
@@ -109,25 +120,19 @@ public class KdyGOrder {
                     skipIterationForCommonNeighbor.set(false);
                     if (vb != -1) {
                         // We have a leaving node from the window
-                        HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, u, 0, (w) -> {
-                                if (w == vb) {
-                                    skipIterationForCommonNeighbor.set(true);
-                                    // Stop the loop
-                                    return false;
-                                }
-                                return true;
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {
+                            if (w == vb) {
+                                skipIterationForCommonNeighbor.set(true);
+                                // Stop the loop
+                                return false;
                             }
-                        );
+                            return true;
+                        });
                     }
 
                     if (skipIterationForCommonNeighbor.get() == false) {
                         // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                        HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, u, 0, (w) -> {
-                                unitHeap.update[w] += 1;
-                            }
-                        );
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> { unitHeap.update[w] += 1; });
                     } else {
                         popvExist.set(u);
                     }  // End if
@@ -135,21 +140,19 @@ public class KdyGOrder {
             }  // End for
 
             // For the vertexes pointed by vertex of `veryFirstVertex`
-            HnswGraphHelper.forAllOutgoingNodes(
-                faissHnswGraph, ve, 0, (w) -> {
-                    if (unitHeap.update[w] == 0) {
-                        unitHeap.increaseKey(w);
-                    } else {
-                        unitHeap.update[w] += 1;
-                    }
+            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, ve, 0, (w) -> {
+                if (unitHeap.update[w] == 0) {
+                    unitHeap.increaseKey(w);
+                } else {
+                    unitHeap.update[w] += 1;
                 }
-            );
+            });
 
             if (vb != -1) {
                 // For incoming vertexes to `vb`
                 // e.g.
                 // A -> V_b
-                //   -> X
+                // -> X
                 // Then increase counter for A and X
                 for (int i = incomingVertexes.startOffset(vb), limit1 = incomingVertexes.endOffset(vb); i < limit1; ++i) {
                     final int u = incomingVertexes.incomingVertices[i];
@@ -158,11 +161,7 @@ public class KdyGOrder {
                     // Increase sibling count
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         if (popvExist.get(u) == false) {
-                            HnswGraphHelper.forAllOutgoingNodes(
-                                faissHnswGraph, u, 1, (w) -> {
-                                    unitHeap.update[w] -= 1;
-                                }
-                            );
+                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> { unitHeap.update[w] -= 1; });
                         } else {
                             popvExist.set(u, false);
                         }
@@ -170,11 +169,7 @@ public class KdyGOrder {
                 }  // End for
 
                 // For the vertexes pointed by vertex of `veryFirstVertex`
-                HnswGraphHelper.forAllOutgoingNodes(
-                    faissHnswGraph, vb, 0, (w) -> {
-                        unitHeap.update[w] -= 1;
-                    }
-                );
+                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> { unitHeap.update[w] -= 1; });
             }  // End if
 
             if (orderIndex < untilOrderIndex) {
@@ -188,13 +183,6 @@ public class KdyGOrder {
         // Insert isolated vertexes
         for (final int isolatedIndex : isolatedVertexes) {
             newPermutation[orderIndex++] = isolatedIndex;
-        }
-
-        // Create a new permutation inplace : old vertex -> new vertex
-        for (int i = newPermutation[0], j = 0; j < numVectors; ++j) {
-            final int next = newPermutation[i];
-            newPermutation[i] = j;
-            i = next;
         }
 
         return newPermutation;

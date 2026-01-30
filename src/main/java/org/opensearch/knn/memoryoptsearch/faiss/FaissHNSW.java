@@ -32,6 +32,8 @@ public class FaissHNSW {
     // Ex: If 544th vector has three levels (e.g. 0-level, 1-level, 2-level), then levels[433] would be 3.
     // This indicates that 544th vector exists at all levels of (0-level, 1-level, 2-level).
     private FaissSection levels;
+    // This is not used during search, mainly for indexing.
+    private FaissSection assignProbas;
     // Entry point in HNSW graph
     protected int entryPoint;
     // Maximum level of HNSW graph
@@ -41,6 +43,8 @@ public class FaissHNSW {
     private int efSearch = 16;
     // Total number of vectors stored in graph.
     private long totalNumberOfVectors;
+    // EF construction parameter for index build
+    private int efConstruct;
 
     /**
      * Partially loads the FAISS HNSW graph from the provided index input stream.
@@ -59,11 +63,10 @@ public class FaissHNSW {
         this.totalNumberOfVectors = totalNumberOfVectors;
 
         // We don't use `double[] assignProbas` for search. It is for index construction.
-        long size = input.readLong();
-        input.skipBytes(Double.BYTES * size);
+        assignProbas = new FaissSection(input, Double.BYTES);
 
         // Accumulate number of neighbor per each level.
-        size = input.readLong();
+        long size = input.readLong();
         cumNumberNeighborPerLevel = new int[Math.toIntExact(size)];
         if (size > 0) {
             input.readInts(cumNumberNeighborPerLevel, 0, (int) size);
@@ -86,7 +89,7 @@ public class FaissHNSW {
         maxLevel = input.readInt();
 
         // Gets efConstruction. We don't use this field. It's for index building.
-        input.readInt();
+        efConstruct = input.readInt();
 
         efSearch = input.readInt();
 

@@ -27,6 +27,7 @@ public class FaissBinaryHnswIndex extends FaissBinaryIndex implements FaissHNSWP
 
     @Getter
     protected FaissHNSW faissHnsw;
+    @Getter
     protected FaissBinaryIndex storage;
 
     public FaissBinaryHnswIndex(final String indexType, final FaissHNSW faissHnsw) {

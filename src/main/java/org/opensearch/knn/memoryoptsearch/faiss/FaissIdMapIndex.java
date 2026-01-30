@@ -12,7 +12,6 @@ import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.packed.DirectMonotonicReader;
 import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryHnswIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryIndex;
 
@@ -35,7 +34,10 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
     @Getter
     private FaissIndex nestedIndex;
     private FaissHNSWProvider hnswGetter;
-    private DirectMonotonicReader idMappingReader;
+    // @Getter
+    // private DirectMonotonicReader idMappingReader;
+    @Getter
+    private int[] ordToDocs;
 
     public FaissIdMapIndex(final String indexType) {
         super(indexType);
@@ -72,7 +74,19 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
         // Lucene document id.
         // Another case is parent-child nested case. In which, this mapping table will map internal vector id to parent document id.
         // NOTE : If the mapping is an identity function that maps `i` to `i`, then the reader will be null.
-        idMappingReader = MonotonicIntegerSequenceEncoder.encode(numElements, input);
+        // idMappingReader = MonotonicIntegerSequenceEncoder.encode(numElements, input);
+
+        this.ordToDocs = new int[numElements];
+        boolean isIdenticalMapping = true;
+        for (int i = 0; i < numElements; i++) {
+            ordToDocs[i] = Math.toIntExact(input.readLong());
+            if (ordToDocs[i] != i) {
+                isIdenticalMapping = false;
+            }
+        }
+        if (isIdenticalMapping) {
+            ordToDocs = null;
+        }
     }
 
     @Override
@@ -82,7 +96,7 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
 
     @Override
     public FloatVectorValues getFloatValues(IndexInput indexInput) throws IOException {
-        if (idMappingReader == null) {
+        if (ordToDocs == null) {
             // Handle 'dense' case where all documents have at least one KNN field, which has exactly one vector.
             // No re-mapping is required.
             return nestedIndex.getFloatValues(indexInput);
@@ -94,7 +108,7 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
 
     @Override
     public ByteVectorValues getByteValues(IndexInput indexInput) throws IOException {
-        if (idMappingReader == null) {
+        if (ordToDocs == null) {
             // Handle 'dense' case where all documents have at least one KNN field, which has exactly one vector.
             // No re-mapping is required.
             return nestedIndex.getByteValues(indexInput);
@@ -132,7 +146,8 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
             @Override
             public int ordToDoc(int internalVectorId) {
                 // Convert an internal vector id to Lucene document id.
-                return (int) idMappingReader.get(internalVectorId);
+                // return (int) idMappingReader.get(internalVectorId);
+                return ordToDocs[internalVectorId];
             }
 
             @Override
@@ -144,7 +159,8 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
                         @Override
                         public boolean get(int internalVectorId) {
                             // Apply filtering with a converted Lucene document id.
-                            return internalBits.get((int) idMappingReader.get(internalVectorId));
+                            // return internalBits.get((int) idMappingReader.get(internalVectorId));
+                            return internalBits.get(ordToDocs[internalVectorId]);
                         }
 
                         @Override
@@ -199,7 +215,8 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
             @Override
             public int ordToDoc(int internalVectorId) {
                 // Convert an internal vector id to Lucene document id.
-                return (int) idMappingReader.get(internalVectorId);
+                // return (int) idMappingReader.get(internalVectorId);
+                return ordToDocs[internalVectorId];
             }
 
             @Override
@@ -211,7 +228,8 @@ public class FaissIdMapIndex extends FaissBinaryIndex implements FaissHNSWProvid
                         @Override
                         public boolean get(int internalVectorId) {
                             // Apply filtering with a converted Lucene document id.
-                            return internalBits.get((int) idMappingReader.get(internalVectorId));
+                            // return internalBits.get((int) idMappingReader.get(internalVectorId));
+                            return internalBits.get(ordToDocs[internalVectorId]);
                         }
 
                         @Override

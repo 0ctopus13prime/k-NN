@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.knn.common.reorder;
+package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
 import org.apache.lucene.util.hnsw.HnswGraph;
 

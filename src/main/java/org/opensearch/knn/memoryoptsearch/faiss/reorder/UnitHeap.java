@@ -3,12 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.knn.common.reorder;
+package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
 import lombok.Getter;
-
-import java.util.HashSet;
-import java.util.Set;
 
 public class UnitHeap {
     public int[] update;
@@ -87,7 +84,8 @@ public class UnitHeap {
 
         if (deletedElements != (linkedList.length - numLiveElements)) {
             throw new RuntimeException(
-                "#Deleted elements=" + deletedElements + " vs #Invalid elements=" + (linkedList.length - numLiveElements));
+                "#Deleted elements=" + deletedElements + " vs #Invalid elements=" + (linkedList.length - numLiveElements)
+            );
         }
 
         // sort order check
@@ -143,7 +141,7 @@ public class UnitHeap {
         // Therefore, we should take the node from the linked list,
         // and put it before the range to keep the linked list's sorting order.
         // Ex: | the region having `key` + 1 | | the current region |
-        //                          --------^ we want to put the node in here
+        // --------^ we want to put the node in here
         if (firstVertexInCurrRegion != index) {
             // Make previous element point to the next one.
             if (prev >= 0) {
@@ -231,7 +229,7 @@ public class UnitHeap {
             // Find the region where the node belongs to after decreased key
             // Iterating region in desc order
             // Ex: ... | region key >= newKey | | region key < newKey | ...
-            //      ----^ Goal is to find this region
+            // ----^ Goal is to find this region
             int firstVertexIdInRegion = linkedList[header[minKeyGENewKey].second].next;
             while (firstVertexIdInRegion >= 0 && linkedList[firstVertexIdInRegion].key >= newKey) {
                 minKeyGENewKey = linkedList[firstVertexIdInRegion].key;
@@ -250,7 +248,7 @@ public class UnitHeap {
 
             // Append the node into the region
             // | previous region (key >= newKey) | | the region that it belongs |
-            //                            ------^ appending the node in here
+            // ------^ appending the node in here
             linkedList[top].prev = lastVertexInRegion;
             linkedList[top].next = firstVertexInNextRegion;
             if (firstVertexInNextRegion >= 0) {
