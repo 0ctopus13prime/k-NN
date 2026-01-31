@@ -23,21 +23,11 @@ public class ReorderOrdMap {
     public ReorderOrdMap(final int[] newOrd2Old) {
         this.newOrd2Old = newOrd2Old;
         final int numVectors = newOrd2Old.length;
-        this.oldOrd2New = new int[newOrd2Old.length];
+        this.oldOrd2New = new int[numVectors];
 
-        // Create a new permutation inplace : old vertex -> new vertex
-        for (int i = 0; i < numVectors; i++) {
-            // Only process if not visited
-            for (int cur = i; oldOrd2New[cur] >= 0;) {
-                final int next = oldOrd2New[cur];
-                oldOrd2New[cur] = -oldOrd2New[cur] - 1; // Mark visited
-                cur = next;
-            }
-        }
-
-        // Recover negative values
-        for (int i = 0; i < numVectors; i++) {
-            oldOrd2New[i] = -oldOrd2New[i] - 1;
+        // Invert: if newOrd2Old[i] = j, then oldOrd2New[j] = i
+        for (int newOrd = 0; newOrd < numVectors; newOrd++) {
+            oldOrd2New[newOrd2Old[newOrd]] = newOrd;
         }
     }
 }

@@ -11,6 +11,7 @@ import org.opensearch.knn.memoryoptsearch.faiss.FaissIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryIndex;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 public abstract class FaissIndexReorderTransformer {
     public static void transform(
@@ -21,6 +22,11 @@ public abstract class FaissIndexReorderTransformer {
     ) throws IOException {
         final FaissIndexReorderTransformer transformer = IndexTypeToFaissIndexReordererMapping.get(index.getIndexType());
         transformer.doTransform(index, indexInput, indexOutput, reorderOrdMap);
+    }
+
+    protected void writeIndexType(final String indexType, final IndexOutput indexOuptut) throws IOException {
+        final byte[] indexTypeBytes = indexType.getBytes(StandardCharsets.UTF_8);
+        indexOuptut.writeBytes(indexTypeBytes, 0, indexTypeBytes.length);
     }
 
     protected void copyBinaryCommonHeader(final FaissBinaryIndex binaryIndex, IndexOutput indexOutput) throws IOException {

@@ -22,6 +22,9 @@ public class FaissIdMapIndexReorderer extends FaissIndexReorderTransformer {
         throws IOException {
         final FaissIdMapIndex actualIndex = (FaissIdMapIndex) index;
 
+        // Write index type
+        writeIndexType(indexType, indexOutput);
+
         // Copy header
         copyBinaryCommonHeader(actualIndex, indexOutput);
 
@@ -29,9 +32,15 @@ public class FaissIdMapIndexReorderer extends FaissIndexReorderTransformer {
         transform(actualIndex.getNestedIndex(), indexInput, indexOutput, reorderOrdMap);
 
         // Transform id map
+        indexOutput.writeLong(actualIndex.getTotalNumberOfVectors());
         final int[] ordToDocs = actualIndex.getOrdToDocs();
         for (final int oldOrd : reorderOrdMap.newOrd2Old) {
-            final int docId = ordToDocs[oldOrd];
+            final int docId;
+            if (ordToDocs == null) {
+                docId = oldOrd;
+            } else {
+                docId = ordToDocs[oldOrd];
+            }
             indexOutput.writeLong(docId);
         }
     }

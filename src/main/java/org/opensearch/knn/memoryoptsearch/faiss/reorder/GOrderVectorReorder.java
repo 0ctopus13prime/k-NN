@@ -5,23 +5,37 @@
 
 package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
+import org.apache.lucene.index.ByteVectorValues;
+import org.apache.lucene.search.AcceptDocs;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopKnnCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.util.hnsw.HnswGraph;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissHNSW;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissHnswGraph;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissIdMapIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.FaissIndex;
+import org.opensearch.knn.memoryoptsearch.faiss.FaissMemoryOptimizedSearcher;
+import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryHnswIndex;
+import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryIndex;
+import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissIndexBinaryFlat;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 public class GOrderVectorReorder {
     public static void main(String... args) throws IOException {
@@ -44,14 +58,225 @@ public class GOrderVectorReorder {
 
                     // Transform the index
                     if (true) {
+                        directory.deleteFile(faissGraphFileName + ".reorder");
                         try (final IndexOutput indexOutput = directory.createOutput(faissGraphFileName + ".reorder", IOContext.DEFAULT)) {
                             FaissIndexReorderTransformer.transform(faissIndex, indexInput, indexOutput, reorderOrdMap);
+                        }
+                        try (
+                            final IndexInput indexInputForNewGraph = directory.openInput(faissGraphFileName + ".reorder", IOContext.DEFAULT)
+                        ) {
+                            final FaissIndex newFaissIndex = FaissIndex.load(indexInputForNewGraph);
+                            validate(faissIndex, indexInput, newFaissIndex, indexInputForNewGraph, reorderOrdMap);
+
+                            searchTest(
+                                ((FaissBinaryHnswIndex) idMapIndex.getNestedIndex()).getStorage(),
+                                indexInput,
+                                indexInputForNewGraph
+                            );
                         }
                     }
                 } else {
                     throw new IllegalStateException("faissIndex is not FaissIdMapIndex! Actual type: " + faissIndex.getClass());
                 }
             }
+        }
+    }
+
+    private static void searchTest(final FaissBinaryIndex storage, final IndexInput indexInput, final IndexInput indexInputNew)
+        throws IOException {
+        // Prepare
+        int N = 10000;
+        int topK = 30;
+        for (int k = 0 ; k < N ; ++k) {
+            byte[] query = new byte[storage.getCodeSize()];
+            for (int i = 0; i < query.length; ++i) {
+                query[i] = (byte) ThreadLocalRandom.current().nextInt();
+            }
+            final AcceptDocs acceptDocs = AcceptDocs.fromLiveDocs(null, storage.getTotalNumberOfVectors());
+
+            // Search on the original index
+            indexInput.seek(0);
+            final FaissMemoryOptimizedSearcher searcher = new FaissMemoryOptimizedSearcher(indexInput, null);
+            final TopKnnCollector topKnnCollector = new TopKnnCollector(topK, Integer.MAX_VALUE);
+            final long s = System.nanoTime();
+            searcher.search(query, topKnnCollector, acceptDocs);
+            final long e = System.nanoTime();
+            final TopDocs topDocs = topKnnCollector.topDocs();
+
+            // Search on the new index
+            indexInputNew.seek(0);
+            final FaissMemoryOptimizedSearcher searcherNew = new FaissMemoryOptimizedSearcher(indexInputNew, null);
+            final TopKnnCollector topKnnCollectorNew = new TopKnnCollector(topK, Integer.MAX_VALUE);
+            final long sNew = System.nanoTime();
+            searcherNew.search(query, topKnnCollectorNew, acceptDocs);
+            final long eNew = System.nanoTime();
+            final TopDocs topDocsNew = topKnnCollectorNew.topDocs();
+            System.out.println("Original vs Reordered took: " + ((e - s) / 1000) + " vs " + ((eNew - sNew) / 1000));
+
+            assert topDocs.scoreDocs.length == topDocsNew.scoreDocs.length;
+
+//            for (int i = 0 ; i < topDocs.scoreDocs.length ; ++i) {
+//                if (topDocs.scoreDocs[i].doc != topDocsNew.scoreDocs[i].doc) {
+//                    System.out.println("Search test failed. Query=" + Arrays.toString(query));
+//                    for (int q = 0 ; q < topDocs.scoreDocs.length ; ++q) {
+//                        System.out.println("result-" + q
+//                                           + ", original="
+//                                           + topDocs.scoreDocs[q].doc
+//                                           + ", reordered="
+//                                           + topDocsNew.scoreDocs[q].doc
+//                                           + ", score original="
+//                                           + topDocs.scoreDocs[q].score
+//                                           + ", score reordered="
+//                                           + topDocsNew.scoreDocs[q].score);
+//                    }
+//                }
+//                assert topDocs.scoreDocs[i].doc == topDocsNew.scoreDocs[i].doc;
+//            }
+        }
+    }
+
+    private static void validate(
+        FaissIndex faissIndex,
+        IndexInput indexInput,
+        FaissIndex faissIndexNew,
+        IndexInput indexInputNew,
+        ReorderOrdMap reorderOrdMap
+    ) throws IOException {
+        final FaissIdMapIndex idMapIndex = (FaissIdMapIndex) faissIndex;
+        final FaissBinaryHnswIndex hnswIndex = (FaissBinaryHnswIndex) idMapIndex.getNestedIndex();
+        final FaissHNSW faissHNSW = hnswIndex.getFaissHnsw();
+        final FaissIndexBinaryFlat binaryFlat = (FaissIndexBinaryFlat) hnswIndex.getStorage();
+
+        final FaissIdMapIndex idMapIndexNew = (FaissIdMapIndex) faissIndexNew;
+        final FaissBinaryHnswIndex hnswIndexNew = (FaissBinaryHnswIndex) idMapIndexNew.getNestedIndex();
+        final FaissHNSW faissHNSWNew = hnswIndexNew.getFaissHnsw();
+        final FaissIndexBinaryFlat binaryFlatNew = (FaissIndexBinaryFlat) hnswIndexNew.getStorage();
+
+        // Storage level check
+        assert binaryFlat.getCodeSize() == binaryFlatNew.getCodeSize();
+        assert binaryFlat.getTotalNumberOfVectors() == binaryFlatNew.getTotalNumberOfVectors();
+        final ByteVectorValues byteVectorValues = binaryFlat.getByteValues(indexInput);
+        final ByteVectorValues byteVectorValuesNew = binaryFlatNew.getByteValues(indexInputNew);
+        for (int i = 0; i < binaryFlat.getTotalNumberOfVectors(); ++i) {
+            byte[] vec1 = byteVectorValuesNew.vectorValue(i);
+            final int oldOrd = reorderOrdMap.newOrd2Old[i];
+            byte[] vec = byteVectorValues.vectorValue(oldOrd);
+            assert Arrays.equals(vec, vec1);
+        }
+
+        // HNSW graph check
+        assert faissHNSW.getEntryPoint() == reorderOrdMap.newOrd2Old[faissHNSWNew.getEntryPoint()];
+        assert faissHNSW.getEfConstruct() == faissHNSWNew.getEfConstruct();
+        assert faissHNSW.getEfSearch() == faissHNSWNew.getEfSearch();
+        assert faissHNSW.getMaxLevel() == faissHNSWNew.getMaxLevel();
+        assert faissHNSW.getTotalNumberOfVectors() == faissHNSWNew.getTotalNumberOfVectors();
+
+        // assignProbas check
+        {
+            indexInput.seek(faissHNSW.getAssignProbas().getBaseOffset());
+            indexInputNew.seek(faissHNSWNew.getAssignProbas().getBaseOffset());
+            assert faissHNSW.getAssignProbas().getSectionSize() == faissHNSWNew.getAssignProbas().getSectionSize();
+            long size = faissHNSW.getAssignProbas().getSectionSize();
+            while (size > 0) {
+                assert indexInput.readByte() == indexInputNew.readByte();
+                --size;
+            }
+        }
+
+        // cumNumberNeighborPerLevel check
+        assert Arrays.equals(faissHNSW.getCumNumberNeighborPerLevel(), faissHNSWNew.getCumNumberNeighborPerLevel());
+
+        // levels checks
+        {
+            for (int oldOrd = 0; oldOrd < faissHNSW.getTotalNumberOfVectors(); ++oldOrd) {
+                indexInput.seek(faissHNSW.getLevels().getBaseOffset() + Integer.BYTES * oldOrd);
+                final int level = indexInput.readInt();
+
+                final int newOrd = reorderOrdMap.oldOrd2New[oldOrd];
+                indexInputNew.seek(faissHNSWNew.getLevels().getBaseOffset() + Integer.BYTES * newOrd);
+                final int newLevel = indexInputNew.readInt();
+                assert level == newLevel;
+            }
+        }
+
+        // Neighbor list check
+        {
+            FaissHnswGraph graph = new FaissHnswGraph(faissHNSW, indexInput);
+            FaissHnswGraph graphNew = new FaissHnswGraph(faissHNSWNew, indexInputNew);
+
+            for (int level = 0; level < faissHNSW.getMaxLevel(); ++level) {
+                // Num vector check
+                HnswGraph.NodesIterator nodesIterator = graph.getNodesOnLevel(level);
+                int numVectors = 0;
+                while (nodesIterator.hasNext()) {
+                    ++numVectors;
+                    nodesIterator.next();
+                }
+
+                HnswGraph.NodesIterator nodesIteratorNew = graphNew.getNodesOnLevel(level);
+                int numVectorsNew = 0;
+                while (nodesIteratorNew.hasNext()) {
+                    ++numVectorsNew;
+                    nodesIteratorNew.next();
+                }
+
+                assert numVectors == numVectorsNew;
+
+                // Neighbor list check
+                nodesIterator = graph.getNodesOnLevel(level);
+
+                List<Integer> neighbors = new ArrayList<>();
+                List<Integer> neighborsNew = new ArrayList<>();
+                while (nodesIterator.hasNext()) {
+                    final int oldOrd = nodesIterator.nextInt();
+                    graph.seek(level, oldOrd);
+                    neighbors.clear();
+                    while (true) {
+                        int neighbor = graph.nextNeighbor();
+                        if (neighbor != NO_MORE_DOCS) {
+                            neighbors.add(neighbor);
+                        } else {
+                            break;
+                        }
+                    }
+
+                    final int newOrd = reorderOrdMap.oldOrd2New[oldOrd];
+                    graphNew.seek(level, newOrd);
+                    neighborsNew.clear();
+                    while (true) {
+                        int neighbor = graphNew.nextNeighbor();
+                        if (neighbor != NO_MORE_DOCS) {
+                            neighborsNew.add(neighbor);
+                        } else {
+                            break;
+                        }
+                    }
+
+                    assert neighbors.size() == neighborsNew.size();
+
+                    final Set<Integer> neighborsNewSet = new HashSet<>(neighborsNew);
+                    for (int oldNeighbor : neighbors) {
+                        final int newNeighbor = reorderOrdMap.oldOrd2New[oldNeighbor];
+                        assert neighborsNewSet.contains(newNeighbor);
+                    }
+                }
+            }
+        }
+
+        // Id map check
+        assert idMapIndex.getTotalNumberOfVectors() == idMapIndexNew.getTotalNumberOfVectors();
+        int[] ordToDoc = idMapIndex.getOrdToDocs();
+        int[] ordToDocNew = idMapIndexNew.getOrdToDocs();
+        for (int oldOrd = 0; oldOrd < idMapIndex.getTotalNumberOfVectors(); ++oldOrd) {
+            final int newOrd = reorderOrdMap.oldOrd2New[oldOrd];
+            final int doc;
+            if (ordToDoc == null) {
+                doc = oldOrd;
+            } else {
+                doc = ordToDoc[oldOrd];
+            }
+            final int newDoc = ordToDocNew[newOrd];
+            assert doc == newDoc;
         }
     }
 
@@ -120,19 +345,21 @@ public class GOrderVectorReorder {
                     skipIterationForCommonNeighbor.set(false);
                     if (vb != -1) {
                         // We have a leaving node from the window
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {
-                            if (w == vb) {
-                                skipIterationForCommonNeighbor.set(true);
-                                // Stop the loop
-                                return false;
+                        HnswGraphHelper.forAllOutgoingNodes(
+                            faissHnswGraph, u, 0, (w) -> {
+                                if (w == vb) {
+                                    skipIterationForCommonNeighbor.set(true);
+                                    // Stop the loop
+                                    return false;
+                                }
+                                return true;
                             }
-                            return true;
-                        });
+                        );
                     }
 
                     if (skipIterationForCommonNeighbor.get() == false) {
                         // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> { unitHeap.update[w] += 1; });
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {unitHeap.update[w] += 1;});
                     } else {
                         popvExist.set(u);
                     }  // End if
@@ -140,13 +367,15 @@ public class GOrderVectorReorder {
             }  // End for
 
             // For the vertexes pointed by vertex of `veryFirstVertex`
-            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, ve, 0, (w) -> {
-                if (unitHeap.update[w] == 0) {
-                    unitHeap.increaseKey(w);
-                } else {
-                    unitHeap.update[w] += 1;
+            HnswGraphHelper.forAllOutgoingNodes(
+                faissHnswGraph, ve, 0, (w) -> {
+                    if (unitHeap.update[w] == 0) {
+                        unitHeap.increaseKey(w);
+                    } else {
+                        unitHeap.update[w] += 1;
+                    }
                 }
-            });
+            );
 
             if (vb != -1) {
                 // For incoming vertexes to `vb`
@@ -161,7 +390,7 @@ public class GOrderVectorReorder {
                     // Increase sibling count
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         if (popvExist.get(u) == false) {
-                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> { unitHeap.update[w] -= 1; });
+                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> {unitHeap.update[w] -= 1;});
                         } else {
                             popvExist.set(u, false);
                         }
@@ -169,7 +398,7 @@ public class GOrderVectorReorder {
                 }  // End for
 
                 // For the vertexes pointed by vertex of `veryFirstVertex`
-                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> { unitHeap.update[w] -= 1; });
+                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> {unitHeap.update[w] -= 1;});
             }  // End if
 
             if (orderIndex < untilOrderIndex) {
