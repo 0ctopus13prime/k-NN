@@ -59,7 +59,7 @@ public class FaissHnswReorderer {
             long offsetSoFar = 0;
             indexOutput.writeLong(totalNumberOfVectors + 1);
             final long startOffset = indexOutput.getFilePointer();
-            for (int newOrd = 0 ; newOrd < totalNumberOfVectors ; ++newOrd) {
+            for (int newOrd = 0; newOrd < totalNumberOfVectors; ++newOrd) {
                 final int oldOrd = reorderOrdMap.newOrd2Old[newOrd];
                 indexOutput.writeLong(offsetSoFar);
                 final int neighborsSize = Math.toIntExact(offsetReader.get(oldOrd + 1) - offsetReader.get(oldOrd));

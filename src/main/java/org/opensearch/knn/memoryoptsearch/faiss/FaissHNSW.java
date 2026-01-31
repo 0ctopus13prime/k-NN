@@ -10,9 +10,7 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
 
 import java.io.IOException;
-import java.util.HashSet;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * While it follows the same steps as the original FAISS deserialization, differences in how the JVM and C++ handle floating-point
