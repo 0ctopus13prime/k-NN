@@ -23,6 +23,9 @@ public class FaissIndexBinaryFlatReorderer extends FaissIndexReorderTransformer 
         throws IOException {
         final FaissIndexBinaryFlat actualIndex = (FaissIndexBinaryFlat) index;
 
+        // Write index type
+        writeIndexType(indexType, indexOutput);
+
         // Copy common header
         copyBinaryCommonHeader(actualIndex, indexOutput);
 
@@ -30,6 +33,7 @@ public class FaissIndexBinaryFlatReorderer extends FaissIndexReorderTransformer 
         final ByteVectorValues vectorValues = actualIndex.getByteValues(indexInput);
 
         // Reorder vectors
+        indexOutput.writeLong((long) actualIndex.getTotalNumberOfVectors() * actualIndex.getCodeSize());
         for (final int oldOrd : reorderOrdMap.newOrd2Old) {
             final byte[] vector = vectorValues.vectorValue(oldOrd);
             indexOutput.writeBytes(vector, 0, vector.length);

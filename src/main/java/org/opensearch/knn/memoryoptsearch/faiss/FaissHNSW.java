@@ -10,7 +10,9 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * While it follows the same steps as the original FAISS deserialization, differences in how the JVM and C++ handle floating-point
@@ -53,7 +55,7 @@ public class FaissHNSW {
      *
      * @param input An input stream for a FAISS HNSW graph file, allowing access to the neighbor list and vector locations.
      * @param totalNumberOfVectors The total number of vectors stored in the graph.
-     *
+     * <p>
      * FYI <a href="https://github.com/facebookresearch/faiss/blob/main/faiss/impl/index_read.cpp#L522">FAISS Deserialization</a>
      *
      * @throws IOException

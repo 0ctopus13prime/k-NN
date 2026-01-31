@@ -22,6 +22,9 @@ public class FaissBinaryHnswIndexReorderer extends FaissIndexReorderTransformer 
         throws IOException {
         final FaissBinaryHnswIndex actualIndex = (FaissBinaryHnswIndex) index;
 
+        // Write index type
+        writeIndexType(indexType, indexOutput);
+
         // Binary header
         copyBinaryCommonHeader(actualIndex, indexOutput);
 
