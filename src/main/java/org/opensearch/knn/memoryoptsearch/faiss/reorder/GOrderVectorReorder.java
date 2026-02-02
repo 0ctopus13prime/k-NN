@@ -25,6 +25,7 @@ import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissBinaryIndex;
 import org.opensearch.knn.memoryoptsearch.faiss.binary.FaissIndexBinaryFlat;
 
 import java.io.IOException;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,7 +41,7 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 public class GOrderVectorReorder {
     public static void main(String... args) throws IOException {
         final String faissGraphDir = "/Users/kdooyong/workspace/Gorder/kdy";
-        final String faissGraphFileName = "_e_165_target_field.faiss";
+        final String faissGraphFileName = "_11_165_target_field.faiss";
         final int window = 16;
 
         try (final Directory directory = new MMapDirectory(Path.of(faissGraphDir));) {
@@ -52,13 +53,19 @@ public class GOrderVectorReorder {
                     // Get the permutation
                     final FaissHNSW faissHNSW = idMapIndex.getFaissHnsw();
                     // Permutation -> newOrd2Old
+                    final long s = System.nanoTime();
                     final int[] permutation = getPermutation(faissHNSW, indexInput, window);
+                    final long e = System.nanoTime();
+                    System.out.println("Reordering took : " + (e - s) / 1e6 + "ms");
                     final ReorderOrdMap reorderOrdMap = new ReorderOrdMap(permutation);
                     System.out.println(Arrays.toString(permutation));
 
                     // Transform the index
                     if (true) {
-                        directory.deleteFile(faissGraphFileName + ".reorder");
+                        try {
+                            directory.deleteFile(faissGraphFileName + ".reorder");
+                        } catch (NoSuchFileException x) {
+                        }
                         try (final IndexOutput indexOutput = directory.createOutput(faissGraphFileName + ".reorder", IOContext.DEFAULT)) {
                             FaissIndexReorderTransformer.transform(faissIndex, indexInput, indexOutput, reorderOrdMap);
                         }
@@ -111,27 +118,14 @@ public class GOrderVectorReorder {
             searcherNew.search(query, topKnnCollectorNew, acceptDocs);
             final long eNew = System.nanoTime();
             final TopDocs topDocsNew = topKnnCollectorNew.topDocs();
-            System.out.println("Original vs Reordered took: " + ((e - s) / 1000) + " vs " + ((eNew - sNew) / 1000));
+            final float lastScore = topDocs.scoreDocs[topDocs.scoreDocs.length - 1].score;
+            final float lastScoreRescore = topDocsNew.scoreDocs[topDocsNew.scoreDocs.length - 1].score;
+            System.out.println("Original vs Reordered took: " + ((e - s) / 1000) + " vs " + ((eNew - sNew) / 1000)
+                               + ", Last recall vs Reordered last recall: " + lastScore + " vs " + lastScoreRescore + "[GE?" + (
+                                   lastScoreRescore >= lastScore) + "]");
 
             assert topDocs.scoreDocs.length == topDocsNew.scoreDocs.length;
-
-            // for (int i = 0 ; i < topDocs.scoreDocs.length ; ++i) {
-            // if (topDocs.scoreDocs[i].doc != topDocsNew.scoreDocs[i].doc) {
-            // System.out.println("Search test failed. Query=" + Arrays.toString(query));
-            // for (int q = 0 ; q < topDocs.scoreDocs.length ; ++q) {
-            // System.out.println("result-" + q
-            // + ", original="
-            // + topDocs.scoreDocs[q].doc
-            // + ", reordered="
-            // + topDocsNew.scoreDocs[q].doc
-            // + ", score original="
-            // + topDocs.scoreDocs[q].score
-            // + ", score reordered="
-            // + topDocsNew.scoreDocs[q].score);
-            // }
-            // }
-            // assert topDocs.scoreDocs[i].doc == topDocsNew.scoreDocs[i].doc;
-            // }
+            assert Math.abs(lastScoreRescore - lastScore) < 1e-3;
         }
     }
 
@@ -345,19 +339,21 @@ public class GOrderVectorReorder {
                     skipIterationForCommonNeighbor.set(false);
                     if (vb != -1) {
                         // We have a leaving node from the window
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {
-                            if (w == vb) {
-                                skipIterationForCommonNeighbor.set(true);
-                                // Stop the loop
-                                return false;
+                        HnswGraphHelper.forAllOutgoingNodes(
+                            faissHnswGraph, u, 0, (w) -> {
+                                if (w == vb) {
+                                    skipIterationForCommonNeighbor.set(true);
+                                    // Stop the loop
+                                    return false;
+                                }
+                                return true;
                             }
-                            return true;
-                        });
+                        );
                     }
 
                     if (skipIterationForCommonNeighbor.get() == false) {
                         // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> { unitHeap.update[w] += 1; });
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {unitHeap.update[w] += 1;});
                     } else {
                         popvExist.set(u);
                     }  // End if
@@ -365,13 +361,15 @@ public class GOrderVectorReorder {
             }  // End for
 
             // For the vertexes pointed by vertex of `veryFirstVertex`
-            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, ve, 0, (w) -> {
-                if (unitHeap.update[w] == 0) {
-                    unitHeap.increaseKey(w);
-                } else {
-                    unitHeap.update[w] += 1;
+            HnswGraphHelper.forAllOutgoingNodes(
+                faissHnswGraph, ve, 0, (w) -> {
+                    if (unitHeap.update[w] == 0) {
+                        unitHeap.increaseKey(w);
+                    } else {
+                        unitHeap.update[w] += 1;
+                    }
                 }
-            });
+            );
 
             if (vb != -1) {
                 // For incoming vertexes to `vb`
@@ -386,7 +384,7 @@ public class GOrderVectorReorder {
                     // Increase sibling count
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         if (popvExist.get(u) == false) {
-                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> { unitHeap.update[w] -= 1; });
+                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> {unitHeap.update[w] -= 1;});
                         } else {
                             popvExist.set(u, false);
                         }
@@ -394,7 +392,7 @@ public class GOrderVectorReorder {
                 }  // End for
 
                 // For the vertexes pointed by vertex of `veryFirstVertex`
-                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> { unitHeap.update[w] -= 1; });
+                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> {unitHeap.update[w] -= 1;});
             }  // End if
 
             if (orderIndex < untilOrderIndex) {
