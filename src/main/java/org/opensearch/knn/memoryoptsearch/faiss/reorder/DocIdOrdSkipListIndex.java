@@ -1,5 +1,6 @@
 package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
+import lombok.Getter;
 import org.apache.lucene.store.IndexInput;
 import org.opensearch.common.lucene.store.ByteArrayIndexInput;
 
@@ -7,112 +8,83 @@ import java.io.IOException;
 
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
-public class DocIdOrdSkipListIndexReader {
-    private final IndexInput metaInput;
-    private final boolean isDense;
-    private final int numLevel;
+public class DocIdOrdSkipListIndex {
     private final int numDocsForGrouping;
     private final int groupFactor;
-    private NonLeafSkipList[] nonLeafLevelSkipList;
     private long level0StartOffset;
-    private long skipListStartOffset;
+    @Getter
     private final int maxDoc;
     private int currDoc;
-    private Lucene101PForUtil pforUtil;
-    private int[] ords;
-    private Lucene101PostingDecodingUtil decodingUtil;
     private final byte[] skipListBytes;
+    private final byte[] compressedOrdBytes;
+    private final int[] skipListOffsetPerLevels;
+    private final int[] skipListSizes;
+    private final int maxLevel;
 
-    public DocIdOrdSkipListIndexReader(
+    public DocIdOrdSkipListIndex(
         final IndexInput metaInput,
         boolean isDense,
-        int numLevel,
+        int numLevel,  // Ex: if numLevel=4, then there's level-0 (which has ords), level-1, level-2 and level3.
         int numDocsForGrouping,
         int groupFactor,
         long[] offsets,
-        int maxDoc,
-        long skipListStartOffset
+        int maxDoc
     ) throws IOException {
-        this.metaInput = metaInput;
-        this.isDense = isDense;
-        this.numLevel = numLevel;
         this.numDocsForGrouping = numDocsForGrouping;
         this.groupFactor = groupFactor;
         this.maxDoc = maxDoc;
-        this.pforUtil = new Lucene101PForUtil(new Lucene101ForUtil());
-        this.ords = new int[numDocsForGrouping];
-        this.decodingUtil = new Lucene101PostingDecodingUtil(metaInput);
 
-        // Get the level-0 starting offset
+        // Load ord blocks
+        // TODO : Adding extra 10 bytes for bit unpacking now, but this needs more robus solution.
         level0StartOffset = metaInput.getFilePointer();
-        this.skipListStartOffset = skipListStartOffset;
-
-        // Skip to the skip list
-        metaInput.seek(skipListStartOffset);
+        final long skipListStartOffset = offsets[1];
+        compressedOrdBytes = new byte[Math.toIntExact(skipListStartOffset + 10)];
+        metaInput.readBytes(compressedOrdBytes, 0, compressedOrdBytes.length - 10);
 
         // Load non-leaf level
-        nonLeafLevelSkipList = new NonLeafSkipList[numLevel];
         int skipListBytesLen = 0;
+        int maxLevel = 1;
         for (int level = 1; level < numLevel; ++level) {
             final int skipListSize = Math.toIntExact(offsets[level + 1] - offsets[level]);
+            if (skipListSize >= 0) {
+                maxLevel = level;
+            } else {
+                break;
+            }
             skipListBytesLen += skipListSize;
         }
+        this.maxLevel = maxLevel;
+        // 1-based
+        skipListOffsetPerLevels = new int[maxLevel + 1];
+        skipListSizes = new int[maxLevel + 1];
         skipListBytes = new byte[skipListBytesLen];
 
-        for (int level = 1, offset = 0; level < numLevel; ++level) {
+        for (int level = 1, offset = 0; level <= maxLevel; ++level) {
             final int skipListSize = Math.toIntExact(offsets[level + 1] - offsets[level]);
+            skipListSizes[level] = skipListSize;
+            skipListOffsetPerLevels[level] = offset;
+
             metaInput.readBytes(skipListBytes, offset, skipListSize);
-            if (level != 1) {
-                nonLeafLevelSkipList[level] = new NonLeafSkipList(level, offset, skipListSize);
-            } else {
-                nonLeafLevelSkipList[level] = new Level1SkipList(offset, skipListSize);
-            }
             offset += skipListSize;
         }
     }
 
-    public int skipTo(int doc) {
-        // All exhausted
-        if (doc > maxDoc) {
-            return currDoc = NO_MORE_DOCS;
-        }
-        // Fast track : No need to advance
-        if (doc < nonLeafLevelSkipList[1].maxDocUpperBound) {
-            return currDoc = doc;
-        }
-
-        for (int level = numLevel - 1; level >= 1; --level) {
-            if (nonLeafLevelSkipList[level].skipTo(doc)) {
-                if (level > 1) {
-                    nonLeafLevelSkipList[level - 1].prepare(
-                        nonLeafLevelSkipList[level].lowerLevelStartOffset,
-                        nonLeafLevelSkipList[level].numSkippedDocs
-                    );
-                }
-            }
-        }
-
-        // It's a dense case, we always has `doc`.
-        return currDoc = doc;
+    public Reader createReader() {
+        return new Reader();
     }
 
-    public int getOrd() throws IOException {
-        final Level1SkipList level1Skipper = (Level1SkipList) nonLeafLevelSkipList[1];
-        return level1Skipper.findOrd();
-    }
-
-    private class NonLeafSkipList {
-        public IndexInput skipInput;
+    private class SkipListSkipper {
         public long lowerLevelStartOffset;
         public int numSkippedDocs;
         public int maxDocUpperBound;
+        protected ByteArrayIndexInput skipInput;
         protected final int level;
         protected final int numDocsToSkip;
         protected final int readUntil;
         protected boolean isLastBlock;
 
-        private NonLeafSkipList(final int level, final int skipListOffset, final int skipListSize) {
-            this.skipInput = new ByteArrayIndexInput("NonLeafSkipList", skipListBytes, skipListOffset, skipListSize);
+        private SkipListSkipper(final int level, final int skipListOffset, final int skipListSize) {
+            this.skipInput = new ByteArrayIndexInput("SkipInput", skipListBytes, skipListOffset, skipListSize);
             this.level = level;
             // D * G^(level) -> #docs to skip at this level
             // Ex: #docs_in_block=256, group_factor=4 then level-1 = 256 * 4 docs, level-2 = 256 * 4 * 4 docs
@@ -159,15 +131,16 @@ public class DocIdOrdSkipListIndexReader {
         }
     }
 
-    private class Level1SkipList extends NonLeafSkipList {
+    private class Level1Skipper extends SkipListSkipper {
+        private final ByteArrayIndexInput ordsInput;
         private final int maxJumpTableSize = groupFactor - 1;
         private boolean jumpTableLoaded = false;
         private int[] jumpTable;
         private int jumpTableSize;
-        private int leafBlockIndexLoaded;
 
-        private Level1SkipList(final int skipListOffset, final int skipListSize) {
+        private Level1Skipper(final int skipListOffset, final int skipListSize) {
             super(1, skipListOffset, skipListSize);
+            ordsInput = new ByteArrayIndexInput("DocId2OrdIndexInput", compressedOrdBytes, 0, compressedOrdBytes.length);
             jumpTable = new int[groupFactor];
             jumpTableSize = 0;
         }
@@ -193,7 +166,6 @@ public class DocIdOrdSkipListIndexReader {
 
                 // Jump table is not loaded ye
                 jumpTableLoaded = false;
-                leafBlockIndexLoaded = -1;
 
                 // Did we find the block?
                 if (doc < maxDocUpperBound) {
@@ -213,6 +185,11 @@ public class DocIdOrdSkipListIndexReader {
             return false;
         }
 
+        @Override
+        public void prepare(long lowerLevelStartOffset, int skippedDoc) {
+            // No ops
+        }
+
         public int findOrd() throws IOException {
             // Load jump table
             loadJumpTable();
@@ -220,44 +197,20 @@ public class DocIdOrdSkipListIndexReader {
             // Which leaf block?
             final int leafBlockIndex = getLeafBlockIndex();
 
-            // If we can find ord within the loaded ords, then we can save one re-load.
-            if (leafBlockIndex != leafBlockIndexLoaded) {
-                // Get the actual leaf block offset
-                final long leafBlockOffset;
-                if (leafBlockIndex == 0) {
-                    leafBlockOffset = level0StartOffset + lowerLevelStartOffset;
-                } else {
-                    leafBlockOffset = level0StartOffset + lowerLevelStartOffset + jumpTable[leafBlockIndex - 1];
-                }
-
-                // Seek to the leaf block
-                metaInput.seek(leafBlockOffset);
-                if (isLastBlock == false) {
-                    // SIMD 256 decoding ords
-                    pforUtil.decode(decodingUtil, ords);
-                } else {
-                    final int vIntEncodedDocs = ((maxDoc + 1) % numDocsForGrouping);
-
-                    if (leafBlockIndex != jumpTableSize) {
-                        // SIMD 256 decoding ords
-                        pforUtil.decode(decodingUtil, ords);
-                    } else {
-                        if (vIntEncodedDocs <= 0) {
-                            // SIMD 256 decoding ords
-                            pforUtil.decode(decodingUtil, ords);
-                        } else {
-                            // Remaining ords are vInt encoded.
-                            for (int i = 0; i < vIntEncodedDocs; ++i) {
-                                ords[i] = metaInput.readVInt();
-                            }
-                        }
-                    }
-                }
-
-                leafBlockIndexLoaded = leafBlockIndex;
+            // Get the actual leaf block offset
+            final long leafBlockOffset;
+            if (leafBlockIndex == 0) {
+                leafBlockOffset = lowerLevelStartOffset;
+            } else {
+                leafBlockOffset = lowerLevelStartOffset + jumpTable[leafBlockIndex - 1];
             }
 
-            return ords[currDoc - (numSkippedDocs + numDocsForGrouping * leafBlockIndex)];
+            // Seek to the leaf block
+            ordsInput.seek(leafBlockOffset);
+
+            // Find ord
+            final int ordIndex = currDoc - (numSkippedDocs + numDocsForGrouping * leafBlockIndex);
+            return IntValuesBitPackingUtil.getValue(ordsInput, ordIndex, compressedOrdBytes);
         }
 
         private void loadJumpTable() {
@@ -303,6 +256,45 @@ public class DocIdOrdSkipListIndexReader {
 
         private int getLeafBlockIndex() {
             return (currDoc - numSkippedDocs) / numDocsForGrouping;
+        }
+    }
+
+    public class Reader {
+        private final SkipListSkipper[] skippers;
+
+        public Reader() {
+            skippers = new SkipListSkipper[maxLevel + 1];
+            skippers[1] = new Level1Skipper(skipListOffsetPerLevels[1], skipListSizes[1]);
+            for (int i = 2; i <= maxLevel; ++i) {
+                skippers[i] = new SkipListSkipper(i, skipListOffsetPerLevels[i], skipListSizes[i]);
+            }
+        }
+
+        public int skipTo(int doc) {
+            // All exhausted
+            if (doc > maxDoc) {
+                return currDoc = NO_MORE_DOCS;
+            }
+            // Fast track : No need to advance
+            if (doc < skippers[1].maxDocUpperBound) {
+                return currDoc = doc;
+            }
+
+            for (int level = maxLevel; level >= 1; --level) {
+                if (skippers[level].skipTo(doc)) {
+                    if (level > 1) {
+                        skippers[level - 1].prepare(skippers[level].lowerLevelStartOffset, skippers[level].numSkippedDocs);
+                    }
+                }
+            }
+
+            // It's a dense case, we always has `doc`.
+            return currDoc = doc;
+        }
+
+        public int getOrd() throws IOException {
+            final Level1Skipper level1Skipper = (Level1Skipper) skippers[1];
+            return level1Skipper.findOrd();
         }
     }
 }

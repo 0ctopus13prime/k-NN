@@ -16,13 +16,16 @@ import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsWriter;
 import org.apache.lucene.codecs.hnsw.DefaultFlatVectorScorer;
+import org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil;
 import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
+import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
 import org.apache.lucene.codecs.lucene99.Lucene99FlatVectorsFormat;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategyFactory;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.memoryoptsearch.faiss.reorder.ReorderedLucene99FlatVectorsReader;
 
 import java.io.IOException;
 
@@ -87,7 +90,17 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
      */
     @Override
     public KnnVectorsReader fieldsReader(final SegmentReadState state) throws IOException {
-        return new NativeEngines990KnnVectorsReader(state, flatVectorsFormat.fieldsReader(state));
+        try {
+            // Try reordered
+            final FlatVectorsReader reorderedFlatVectorsReader = new ReorderedLucene99FlatVectorsReader(
+                state,
+                FlatVectorScorerUtil.getLucene99FlatVectorsScorer()
+            );
+            return new NativeEngines990KnnVectorsReader(state, reorderedFlatVectorsReader);
+        } catch (org.apache.lucene.index.CorruptIndexException e) {
+            e.printStackTrace();
+            return new NativeEngines990KnnVectorsReader(state, flatVectorsFormat.fieldsReader(state));
+        }
     }
 
     /**

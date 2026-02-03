@@ -13,7 +13,7 @@ public class DocIdOrdSkipListIndexReaderTest {
         final boolean isDense = true;
         final int numLevel = 4;
         final int numDocsForGrouping = 256;
-        final int groupFactor = 4;
+        final int groupFactor = 8;
         final String testDirPath = "/Users/kdooyong/workspace/opensearch-gorder/kdy";
         final String skipListIndex = "skipListIndex.bin";
         final String metaInfoFile = "metaInfo.txt";
@@ -42,20 +42,21 @@ public class DocIdOrdSkipListIndexReaderTest {
             }
 
             try (final IndexInput indexInput = directory.openInput(skipListIndex, IOContext.DEFAULT)) {
-                final DocIdOrdSkipListIndexReader skipReader = new DocIdOrdSkipListIndexReader(
+                final DocIdOrdSkipListIndex skipReader = new DocIdOrdSkipListIndex(
                     indexInput,
-                                                                                               isDense,
-                                                                                               numLevel,
-                                                                                               numDocsForGrouping,
-                                                                                               groupFactor,
-                                                                                               offsets,
-                                                                                               maxDoc,
-                                                                                               skipListStartOffset
+                    isDense,
+                    numLevel,
+                    numDocsForGrouping,
+                    groupFactor,
+                    offsets,
+                    maxDoc
                 );
 
+                final DocIdOrdSkipListIndex.Reader skipper = skipReader.createReader();
+
                 for (int i = 0; i <= maxDoc; ++i) {
-                    int doc = skipReader.skipTo(i);
-                    int ord = skipReader.getOrd();
+                    int doc = skipper.skipTo(i);
+                    int ord = skipper.getOrd();
                     if (ord != ords[doc]) {
                         System.out.println("Doc: " + doc);
                         System.out.println("Ord: " + ord + " vs " + ords[doc]);
@@ -68,21 +69,22 @@ public class DocIdOrdSkipListIndexReaderTest {
             try (final IndexInput indexInput = directory.openInput(skipListIndex, IOContext.DEFAULT)) {
                 for (int k = 0, loop = 1000; k < loop; ++k) {
                     indexInput.seek(0);
-                    final DocIdOrdSkipListIndexReader skipReader = new DocIdOrdSkipListIndexReader(
+                    final DocIdOrdSkipListIndex skipReader = new DocIdOrdSkipListIndex(
                         indexInput,
-                                                                                                   isDense,
-                                                                                                   numLevel,
-                                                                                                   numDocsForGrouping,
-                                                                                                   groupFactor,
-                                                                                                   offsets,
-                                                                                                   maxDoc,
-                                                                                                   skipListStartOffset
+                        isDense,
+                        numLevel,
+                        numDocsForGrouping,
+                        groupFactor,
+                        offsets,
+                        maxDoc
                     );
 
+                    final DocIdOrdSkipListIndex.Reader skipper = skipReader.createReader();
+
                     long s = System.nanoTime();
-                    for (int i = 0; i <= maxDoc; i += 2000) {
-                        int doc = skipReader.skipTo(i);
-                        int ord = skipReader.getOrd();
+                    for (int i = 0; i <= maxDoc; i += 1000) {
+                        int doc = skipper.skipTo(i);
+                        int ord = skipper.getOrd();
                         assert ord == ords[doc];
                     }
                     long e = System.nanoTime();

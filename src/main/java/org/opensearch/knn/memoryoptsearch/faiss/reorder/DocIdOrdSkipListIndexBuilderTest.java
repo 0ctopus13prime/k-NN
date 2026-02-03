@@ -24,7 +24,7 @@ public class DocIdOrdSkipListIndexBuilderTest {
         final boolean isDense = true;
         final int numLevel = 4;
         final int numDocsForGrouping = 256;
-        final int groupFactor = 4;
+        final int groupFactor = 8;
         final String testDirPath = "/Users/kdooyong/workspace/opensearch-gorder/kdy";
         final String skipListIndex = "skipListIndex.bin";
         final String metaInfoFile = "metaInfo.txt";
@@ -33,10 +33,15 @@ public class DocIdOrdSkipListIndexBuilderTest {
 
         try (final Directory directory = new MMapDirectory(Path.of(testDirPath))) {
             try (final IndexOutput indexOutput = directory.createOutput(skipListIndex, IOContext.DEFAULT)) {
-                final DocIdOrdSkipListIndexBuilder builder =
-                    new DocIdOrdSkipListIndexBuilder(isDense, numLevel, numDocsForGrouping, groupFactor, indexOutput);
+                final DocIdOrdSkipListIndexBuilder builder = new DocIdOrdSkipListIndexBuilder(
+                    isDense,
+                    numLevel,
+                    numDocsForGrouping,
+                    groupFactor,
+                    indexOutput
+                );
 
-                int N = 256 * 4000 + 77;
+                int N = 256 * 4000 * 5 + 77;
                 int[] ords = new int[N];
                 for (int i = 0; i < N; ++i) {
                     ords[i] = i;
@@ -86,22 +91,20 @@ public class DocIdOrdSkipListIndexBuilderTest {
             return;
         }
 
-        Files.walkFileTree(
-            root, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    Files.delete(file);
-                    return FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                    if (!dir.equals(root)) {
-                        Files.delete(dir);
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
             }
-        );
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                if (!dir.equals(root)) {
+                    Files.delete(dir);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 }

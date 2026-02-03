@@ -10,6 +10,7 @@ import org.apache.lucene.store.ByteBuffersDataOutput;
 import org.apache.lucene.store.IndexOutput;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 public class DocIdOrdSkipListIndexBuilder {
     // e.g. Dense -> doc[i] must have a vector, sparse -> doc[i] may not have a vector
@@ -27,7 +28,7 @@ public class DocIdOrdSkipListIndexBuilder {
     private final int[] ordBuffer;
     private int ordBufferUpto;
     // SIMD encoding util
-    private Lucene101PForUtil pforUtil;
+    // private Lucene101PForUtil pforUtil;
     // #Flushed blocks. Once the #Flushed block reaches `groupFactor`, it creates a parent block
     private int numFlushedBlocks;
     // Accumulated leaf block sizes for jump table which has the starting offset of each sub-block.
@@ -46,6 +47,7 @@ public class DocIdOrdSkipListIndexBuilder {
     private long[] startOffsetOfGroup;
     @Getter
     private long level0EndOffset;
+    private byte[] bitPackingBuffer;
 
     public DocIdOrdSkipListIndexBuilder(
         final boolean isDense,
@@ -56,7 +58,6 @@ public class DocIdOrdSkipListIndexBuilder {
     ) {
         this.isDense = isDense;
         this.numLevel = numLevel;
-        assert numDocsForGrouping == 256;
         this.numDocsForGrouping = numDocsForGrouping;
         this.groupFactor = groupFactor;
         if (isDense == false) {
@@ -69,7 +70,7 @@ public class DocIdOrdSkipListIndexBuilder {
         this.ordBuffer = new int[numDocsForGrouping];
         this.ordBufferUpto = 0;
 
-        this.pforUtil = new Lucene101PForUtil(new Lucene101ForUtil());
+        // this.pforUtil = new Lucene101PForUtil(new Lucene101ForUtil());
 
         this.leafBlockBufferOutPerLevel = new ByteBuffersDataOutput[numLevel];
         // We don't need memory buffer for level-0
@@ -88,6 +89,8 @@ public class DocIdOrdSkipListIndexBuilder {
         this.level0EndOffset = 0;
 
         this.startOffsetOfGroup = new long[numLevel];
+
+        this.bitPackingBuffer = IntValuesBitPackingUtil.allocateBuffer(numDocsForGrouping);
     }
 
     public void add(int doc, int ord) throws IOException {
@@ -108,18 +111,19 @@ public class DocIdOrdSkipListIndexBuilder {
         if (force == false) {
             // Pack doc ids + ords
             if (isDense == false) {
-                pforUtil.encode(docBuffer, indexOutput);
+                // pforUtil.encode(docBuffer, indexOutput);
+                IntValuesBitPackingUtil.writePackedInts(docBuffer, bitPackingBuffer, indexOutput);
             }
-            pforUtil.encode(ordBuffer, indexOutput);
+            // pforUtil.encode(ordBuffer, indexOutput);
+            IntValuesBitPackingUtil.writePackedInts(ordBuffer, bitPackingBuffer, indexOutput);
         } else {
+            assert ordBufferUpto > 0;
             if (isDense == false) {
-                for (int doc : docBuffer) {
-                    indexOutput.writeVInt(doc);
-                }
+                Arrays.fill(docBuffer, ordBufferUpto, docBuffer.length, 0);
+                IntValuesBitPackingUtil.writePackedInts(docBuffer, bitPackingBuffer, indexOutput);
             }
-            for (int i = 0 ; i < ordBufferUpto ; ++i) {
-                indexOutput.writeVInt(ordBuffer[i]);
-            }
+            Arrays.fill(ordBuffer, ordBufferUpto, ordBuffer.length, 0);
+            IntValuesBitPackingUtil.writePackedInts(ordBuffer, bitPackingBuffer, indexOutput);
         }
         level0EndOffset = indexOutput.getFilePointer();
 
@@ -159,9 +163,9 @@ public class DocIdOrdSkipListIndexBuilder {
 
         // Write lower level file offset.
         // Ex: `groupFactor` == 3
-        //             0
-        //     0 - 0 - 0
-        //    ^------ staring offset = 100
+        // 0
+        // 0 - 0 - 0
+        // ^------ staring offset = 100
         leafBlockBufferOutPerLevel[level].writeVLong(startOffsetOfGroup[level - 1]);
 
         if (level == 1) {
