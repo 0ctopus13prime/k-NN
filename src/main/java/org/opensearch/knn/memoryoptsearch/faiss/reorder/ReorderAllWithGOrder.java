@@ -49,7 +49,8 @@ public class ReorderAllWithGOrder {
     private static final String reorderSuffix = ".reorder";
 
     public record TargetFiles(String faissIndexFileName, String flatVectorDataFileName, String flatVectorMetaFileName,
-                              String engineLuceneDirectory) {}
+        String engineLuceneDirectory) {
+    }
 
     public static List<TargetFiles> findTargetFiles(Path rootDir) throws IOException {
         Objects.requireNonNull(rootDir, "rootDir must not be null");
@@ -76,13 +77,9 @@ public class ReorderAllWithGOrder {
             // Rule: If any file is found, ALL must be found in this directory
             if (faiss != null || vec != null || vemf != null) {
                 if (faiss == null || vec == null || vemf == null) {
-                    throw new IllegalStateException(String.format(
-                        "Incomplete file set in %s: faiss=%b, vec=%b, vemf=%b",
-                        dir,
-                        faiss != null,
-                        vec != null,
-                        vemf != null
-                    ));
+                    throw new IllegalStateException(
+                        String.format("Incomplete file set in %s: faiss=%b, vec=%b, vemf=%b", dir, faiss != null, vec != null, vemf != null)
+                    );
                 }
 
                 results.add(new TargetFiles(faiss, vec, vemf, dir.toAbsolutePath().toString()));
@@ -199,23 +196,29 @@ public class ReorderAllWithGOrder {
                     final FieldInfos fieldInfos = new FieldInfos(fieldInfoArr);
 
                     // Segment state
-                    final SegmentReadState readState =
-                        new SegmentReadState(directory, segmentInfo, fieldInfos, IOContext.DEFAULT, flatVectorsWriter.segmentSuffix);
+                    final SegmentReadState readState = new SegmentReadState(
+                        directory,
+                        segmentInfo,
+                        fieldInfos,
+                        IOContext.DEFAULT,
+                        flatVectorsWriter.segmentSuffix
+                    );
 
                     // Reorder .vec file
                     try (
                         flatVectorsWriter;
                         Lucene99FlatVectorsReader flatVectorsReader = new Lucene99FlatVectorsReader(
                             readState,
-                                                                                                    DefaultFlatVectorScorer.INSTANCE
+                            DefaultFlatVectorScorer.INSTANCE
                         )
                     ) {
                         // Now, start reordering .vec file
                         final FloatVectorValues vectorValues = flatVectorsReader.getFloatVectorValues(fieldName);
 
                         // Reorder vectors
-                        final ReorderedFlatVectorsWriter.ReorderedFlatFieldVectorsWriter writer =
-                            flatVectorsWriter.addField(fieldInfoArr[fieldNo]);
+                        final ReorderedFlatVectorsWriter.ReorderedFlatFieldVectorsWriter writer = flatVectorsWriter.addField(
+                            fieldInfoArr[fieldNo]
+                        );
                         for (int ord = 0; ord < reorderOrdMap.newOrd2Old.length; ++ord) {
                             final float[] vector = vectorValues.vectorValue(reorderOrdMap.newOrd2Old[ord]);
                             writer.addValue(reorderOrdMap.newOrd2Old[ord], vector);
@@ -227,12 +230,12 @@ public class ReorderAllWithGOrder {
                     try (
                         final ReorderedLucene99FlatVectorsReader reorderedReader = new ReorderedLucene99FlatVectorsReader(
                             readState,
-                                                                                                                          DefaultFlatVectorScorer.INSTANCE,
-                                                                                                                          true
+                            DefaultFlatVectorScorer.INSTANCE,
+                            true
                         );
                         final Lucene99FlatVectorsReader originalReader = new Lucene99FlatVectorsReader(
                             readState,
-                                                                                                       DefaultFlatVectorScorer.INSTANCE
+                            DefaultFlatVectorScorer.INSTANCE
                         )
                     ) {
                         final FloatVectorValues originalVectorValues = originalReader.getFloatVectorValues(fieldName);
@@ -343,21 +346,19 @@ public class ReorderAllWithGOrder {
                     skipIterationForCommonNeighbor.set(false);
                     if (vb != -1) {
                         // We have a leaving node from the window
-                        HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, u, 0, (w) -> {
-                                if (w == vb) {
-                                    skipIterationForCommonNeighbor.set(true);
-                                    // Stop the loop
-                                    return false;
-                                }
-                                return true;
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {
+                            if (w == vb) {
+                                skipIterationForCommonNeighbor.set(true);
+                                // Stop the loop
+                                return false;
                             }
-                        );
+                            return true;
+                        });
                     }
 
                     if (skipIterationForCommonNeighbor.get() == false) {
                         // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {unitHeap.update[w] += 1;});
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> { unitHeap.update[w] += 1; });
                     } else {
                         popvExist.set(u);
                     }  // End if
@@ -365,15 +366,13 @@ public class ReorderAllWithGOrder {
             }  // End for
 
             // For the vertexes pointed by vertex of `veryFirstVertex`
-            HnswGraphHelper.forAllOutgoingNodes(
-                faissHnswGraph, ve, 0, (w) -> {
-                    if (unitHeap.update[w] == 0) {
-                        unitHeap.increaseKey(w);
-                    } else {
-                        unitHeap.update[w] += 1;
-                    }
+            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, ve, 0, (w) -> {
+                if (unitHeap.update[w] == 0) {
+                    unitHeap.increaseKey(w);
+                } else {
+                    unitHeap.update[w] += 1;
                 }
-            );
+            });
 
             if (vb != -1) {
                 // For incoming vertexes to `vb`
@@ -388,7 +387,7 @@ public class ReorderAllWithGOrder {
                     // Increase sibling count
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         if (popvExist.get(u) == false) {
-                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> {unitHeap.update[w] -= 1;});
+                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> { unitHeap.update[w] -= 1; });
                         } else {
                             popvExist.set(u, false);
                         }
@@ -396,7 +395,7 @@ public class ReorderAllWithGOrder {
                 }  // End for
 
                 // For the vertexes pointed by vertex of `veryFirstVertex`
-                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> {unitHeap.update[w] -= 1;});
+                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> { unitHeap.update[w] -= 1; });
             }  // End if
 
             if (orderIndex < untilOrderIndex) {
@@ -415,9 +414,7 @@ public class ReorderAllWithGOrder {
         final ReorderOrdMap reorderOrdMap = new ReorderOrdMap(newPermutation);
 
         // Transform the faiss index
-        try (
-            final IndexOutput indexOutput = directory.createOutput(targetFiles.faissIndexFileName + reorderSuffix, IOContext.DEFAULT)
-        ) {
+        try (final IndexOutput indexOutput = directory.createOutput(targetFiles.faissIndexFileName + reorderSuffix, IOContext.DEFAULT)) {
             FaissIndexReorderTransformer.transform(idMapIndex, faissIndexInput, indexOutput, reorderOrdMap);
         }
 
@@ -513,21 +510,19 @@ public class ReorderAllWithGOrder {
                     skipIterationForCommonNeighbor.set(false);
                     if (vb != -1) {
                         // We have a leaving node from the window
-                        HnswGraphHelper.forAllOutgoingNodes(
-                            faissHnswGraph, u, 0, (w) -> {
-                                if (w == vb) {
-                                    skipIterationForCommonNeighbor.set(true);
-                                    // Stop the loop
-                                    return false;
-                                }
-                                return true;
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {
+                            if (w == vb) {
+                                skipIterationForCommonNeighbor.set(true);
+                                // Stop the loop
+                                return false;
                             }
-                        );
+                            return true;
+                        });
                     }
 
                     if (skipIterationForCommonNeighbor.get() == false) {
                         // If `popv` (e.g. v_b) and v (e.g. v_max) are NOT sibling, then do below:
-                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> {unitHeap.update[w] += 1;});
+                        HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 0, (w) -> { unitHeap.update[w] += 1; });
                     } else {
                         popvExist.set(u);
                     }  // End if
@@ -535,15 +530,13 @@ public class ReorderAllWithGOrder {
             }  // End for
 
             // For the vertexes pointed by vertex of `veryFirstVertex`
-            HnswGraphHelper.forAllOutgoingNodes(
-                faissHnswGraph, ve, 0, (w) -> {
-                    if (unitHeap.update[w] == 0) {
-                        unitHeap.increaseKey(w);
-                    } else {
-                        unitHeap.update[w] += 1;
-                    }
+            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, ve, 0, (w) -> {
+                if (unitHeap.update[w] == 0) {
+                    unitHeap.increaseKey(w);
+                } else {
+                    unitHeap.update[w] += 1;
                 }
-            );
+            });
 
             if (vb != -1) {
                 // For incoming vertexes to `vb`
@@ -558,7 +551,7 @@ public class ReorderAllWithGOrder {
                     // Increase sibling count
                     if (HnswGraphHelper.getOutDegree(faissHnswGraph, u) > 1) {
                         if (popvExist.get(u) == false) {
-                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> {unitHeap.update[w] -= 1;});
+                            HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, u, 1, (w) -> { unitHeap.update[w] -= 1; });
                         } else {
                             popvExist.set(u, false);
                         }
@@ -566,7 +559,7 @@ public class ReorderAllWithGOrder {
                 }  // End for
 
                 // For the vertexes pointed by vertex of `veryFirstVertex`
-                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> {unitHeap.update[w] -= 1;});
+                HnswGraphHelper.forAllOutgoingNodes(faissHnswGraph, vb, 0, (w) -> { unitHeap.update[w] -= 1; });
             }  // End if
 
             if (orderIndex < untilOrderIndex) {
