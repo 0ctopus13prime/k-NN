@@ -39,6 +39,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -50,6 +54,21 @@ public class ReorderAllWithGOrder {
 
     public record TargetFiles(String faissIndexFileName, String flatVectorDataFileName, String flatVectorMetaFileName,
         String engineLuceneDirectory) {
+    }
+
+    public static void main(String... args) throws IOException {
+        final String searchDirectory = "/Users/kdooyong/workspace/opensearch-gorder/kdy";
+
+        final List<TargetFiles> targetFilesList = findTargetFiles(Path.of(searchDirectory));
+        for (final TargetFiles targetFiles : targetFilesList) {
+            System.out.println();
+            System.out.println("Start reordering ...");
+            System.out.println("  Lucene dir: " + targetFiles.engineLuceneDirectory);
+            System.out.println("  Vec: " + targetFiles.flatVectorDataFileName);
+            System.out.println("  VecMeta: " + targetFiles.flatVectorMetaFileName);
+            System.out.println("  Faiss: " + targetFiles.faissIndexFileName);
+            reorder(targetFiles);
+        }
     }
 
     public static List<TargetFiles> findTargetFiles(Path rootDir) throws IOException {
@@ -101,15 +120,6 @@ public class ReorderAllWithGOrder {
         return matches.isEmpty() ? null : matches.get(0);
     }
 
-    public static void main(String... args) throws IOException {
-        final String searchDirectory = "/Users/kdooyong/workspace/opensearch-gorder/build/testclusters/integTest-0/data";
-
-        final List<TargetFiles> targetFilesList = findTargetFiles(Path.of(searchDirectory));
-        for (final TargetFiles targetFiles : targetFilesList) {
-            reorder(targetFiles);
-        }
-    }
-
     private static void reorder(TargetFiles targetFiles) throws IOException {
         final String segmentName = targetFiles.flatVectorDataFileName.substring(0, targetFiles.flatVectorDataFileName.indexOf('_', 1));
         final String fieldName = "target_field";
@@ -121,13 +131,13 @@ public class ReorderAllWithGOrder {
                 final FaissIndex faissIndex = FaissIndex.load(faissIndexInput);
                 if (faissIndex instanceof FaissIdMapIndex idMapIndex) {
                     final int numVectors = faissIndex.getTotalNumberOfVectors();
-                    System.out.println("Total #vectors: " + numVectors);
+                    System.out.println("Total #vectors: " + numVectors + " (extracted from faiss index)");
 
                     // Get the permutation
                     // Permutation -> newOrd2Old
-                    final long s = System.nanoTime();
+                    long s = System.nanoTime();
                     final ReorderOrdMap reorderOrdMap = getOrderMap(idMapIndex, faissIndexInput, targetFiles, directory);
-                    final long e = System.nanoTime();
+                    long e = System.nanoTime();
                     System.out.println("Reordering took : " + (e - s) / 1e6 + "ms");
 
                     // Remove existing reordered files
@@ -141,6 +151,8 @@ public class ReorderAllWithGOrder {
                     }
 
                     // Transform .vec file
+                    System.out.println("Transforming .vec file: " + targetFiles.flatVectorDataFileName + " ...");
+                    s = System.nanoTime();
                     final ReorderedFlatVectorsWriter flatVectorsWriter;
                     try (final IndexInput vecMetaInput = directory.openInput(targetFiles.flatVectorMetaFileName, IOContext.DEFAULT)) {
                         flatVectorsWriter = new ReorderedFlatVectorsWriter(
@@ -225,8 +237,11 @@ public class ReorderAllWithGOrder {
                         }
                         writer.finish();
                     }
+                    e = System.nanoTime();
+                    System.out.println("Transforming .vec took " + ((e - s) / 1e6 + "ms"));
 
                     // Test reordered .vec file
+                    System.out.println("Validating reordered .vec file ...");
                     try (
                         final ReorderedLucene99FlatVectorsReader reorderedReader = new ReorderedLucene99FlatVectorsReader(
                             readState,
@@ -238,25 +253,46 @@ public class ReorderAllWithGOrder {
                             DefaultFlatVectorScorer.INSTANCE
                         )
                     ) {
-                        final FloatVectorValues originalVectorValues = originalReader.getFloatVectorValues(fieldName);
-                        final FloatVectorValues vectorValues = reorderedReader.getFloatVectorValues(fieldName);
-                        final KnnVectorValues.DocIndexIterator iterator = vectorValues.iterator();
-                        int doc;
-                        while ((doc = iterator.nextDoc()) != NO_MORE_DOCS) {
-                            // from reordered one
-                            final int ord = iterator.index();
-                            final float[] vector = vectorValues.vectorValue(ord);
+                        final ExecutorService pool = Executors.newFixedThreadPool(4);
+                        final List<Future> futures = new ArrayList<>();
+                        for (int k = 0; k < 100; ++k) {
+                            Runnable r = () -> {
+                                try {
+                                    final FloatVectorValues originalVectorValues = originalReader.getFloatVectorValues(fieldName);
+                                    final FloatVectorValues vectorValues = reorderedReader.getFloatVectorValues(fieldName);
+                                    final KnnVectorValues.DocIndexIterator iterator = vectorValues.iterator();
+                                    int doc;
+                                    while ((doc = iterator.nextDoc()) != NO_MORE_DOCS) {
+                                        // from reordered one
+                                        final int ord = iterator.index();
+                                        final float[] vector = vectorValues.vectorValue(ord);
 
-                            // from original
-                            final float[] expected = originalVectorValues.vectorValue(reorderOrdMap.newOrd2Old[ord]);
+                                        // from original
+                                        final float[] expected = originalVectorValues.vectorValue(reorderOrdMap.newOrd2Old[ord]);
 
-                            if (false) {
-                                System.out.println("################");
-                                System.out.println("doc: " + doc);
-                                System.out.println("ord: " + ord);
-                                System.out.println("vector: " + Arrays.toString(vector));
-                                System.out.println("expected: " + Arrays.toString(expected));
-                                System.out.println();
+                                        if (false) {
+                                            System.out.println("################");
+                                            System.out.println("doc: " + doc);
+                                            System.out.println("ord: " + ord);
+                                            System.out.println("vector: " + Arrays.toString(vector));
+                                            System.out.println("expected: " + Arrays.toString(expected));
+                                            System.out.println();
+                                        }
+                                    }
+                                } catch (Exception ex) {
+                                    ex.printStackTrace();
+                                }
+                            };
+                            futures.add(pool.submit(r));
+                        }
+
+                        for (Future fut : futures) {
+                            try {
+                                fut.get();
+                            } catch (InterruptedException ex) {
+                                throw new RuntimeException(ex);
+                            } catch (ExecutionException ex) {
+                                throw new RuntimeException(ex);
                             }
                         }
                     }
@@ -266,6 +302,8 @@ public class ReorderAllWithGOrder {
             }
         }
 
+        System.out.println("Reorder is done!");
+        System.out.println("Overriding files ...");
         switchFiles(Path.of(targetFiles.engineLuceneDirectory), targetFiles.faissIndexFileName, reorderSuffix);
         switchFiles(Path.of(targetFiles.engineLuceneDirectory), targetFiles.flatVectorDataFileName, reorderSuffix);
         switchFiles(Path.of(targetFiles.engineLuceneDirectory), targetFiles.flatVectorMetaFileName, reorderSuffix);

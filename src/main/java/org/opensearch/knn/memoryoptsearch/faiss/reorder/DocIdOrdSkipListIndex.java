@@ -14,7 +14,6 @@ public class DocIdOrdSkipListIndex {
     private long level0StartOffset;
     @Getter
     private final int maxDoc;
-    private int currDoc;
     private final byte[] skipListBytes;
     private final byte[] compressedOrdBytes;
     private final int[] skipListOffsetPerLevels;
@@ -190,12 +189,12 @@ public class DocIdOrdSkipListIndex {
             // No ops
         }
 
-        public int findOrd() throws IOException {
+        public int findOrd(int doc) throws IOException {
             // Load jump table
             loadJumpTable();
 
             // Which leaf block?
-            final int leafBlockIndex = getLeafBlockIndex();
+            final int leafBlockIndex = getLeafBlockIndex(doc);
 
             // Get the actual leaf block offset
             final long leafBlockOffset;
@@ -209,7 +208,7 @@ public class DocIdOrdSkipListIndex {
             ordsInput.seek(leafBlockOffset);
 
             // Find ord
-            final int ordIndex = currDoc - (numSkippedDocs + numDocsForGrouping * leafBlockIndex);
+            final int ordIndex = doc - (numSkippedDocs + numDocsForGrouping * leafBlockIndex);
             return IntValuesBitPackingUtil.getValue(ordsInput, ordIndex, compressedOrdBytes);
         }
 
@@ -254,13 +253,14 @@ public class DocIdOrdSkipListIndex {
             }
         }
 
-        private int getLeafBlockIndex() {
-            return (currDoc - numSkippedDocs) / numDocsForGrouping;
+        private int getLeafBlockIndex(final int doc) {
+            return (doc - numSkippedDocs) / numDocsForGrouping;
         }
     }
 
     public class Reader {
         private final SkipListSkipper[] skippers;
+        private int currDoc = -1;
 
         public Reader() {
             skippers = new SkipListSkipper[maxLevel + 1];
@@ -270,7 +270,7 @@ public class DocIdOrdSkipListIndex {
             }
         }
 
-        public int skipTo(int doc) {
+        public int skipTo(final int doc) {
             // All exhausted
             if (doc > maxDoc) {
                 return currDoc = NO_MORE_DOCS;
@@ -294,7 +294,7 @@ public class DocIdOrdSkipListIndex {
 
         public int getOrd() throws IOException {
             final Level1Skipper level1Skipper = (Level1Skipper) skippers[1];
-            return level1Skipper.findOrd();
+            return level1Skipper.findOrd(currDoc);
         }
     }
 }
