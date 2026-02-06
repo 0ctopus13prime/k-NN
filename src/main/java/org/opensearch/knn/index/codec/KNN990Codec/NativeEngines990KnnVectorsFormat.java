@@ -25,7 +25,7 @@ import org.apache.lucene.index.SegmentWriteState;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.codec.nativeindex.NativeIndexBuildStrategyFactory;
 import org.opensearch.knn.index.engine.KNNEngine;
-import org.opensearch.knn.memoryoptsearch.faiss.reorder.ReorderedLucene99FlatVectorsReader;
+import org.opensearch.knn.memoryoptsearch.faiss.reorder.ReorderedLucene99FlatVectorsReader111;
 
 import java.io.IOException;
 
@@ -77,9 +77,9 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
     public KnnVectorsWriter fieldsWriter(final SegmentWriteState state) throws IOException {
         return new NativeEngines990KnnVectorsWriter(
             state,
-            flatVectorsFormat.fieldsWriter(state),
-            approximateThreshold,
-            nativeIndexBuildStrategyFactory
+                                                    flatVectorsFormat.fieldsWriter(state),
+                                                    approximateThreshold,
+                                                    nativeIndexBuildStrategyFactory
         );
     }
 
@@ -92,10 +92,8 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
     public KnnVectorsReader fieldsReader(final SegmentReadState state) throws IOException {
         try {
             // Try reordered
-            final FlatVectorsReader reorderedFlatVectorsReader = new ReorderedLucene99FlatVectorsReader(
-                state,
-                FlatVectorScorerUtil.getLucene99FlatVectorsScorer()
-            );
+            final FlatVectorsReader reorderedFlatVectorsReader =
+                new ReorderedLucene99FlatVectorsReader111(state, FlatVectorScorerUtil.getLucene99FlatVectorsScorer());
             return new NativeEngines990KnnVectorsReader(state, reorderedFlatVectorsReader);
         } catch (org.apache.lucene.index.CorruptIndexException e) {
             e.printStackTrace();
@@ -114,12 +112,7 @@ public class NativeEngines990KnnVectorsFormat extends KnnVectorsFormat {
 
     @Override
     public String toString() {
-        return "NativeEngines99KnnVectorsFormat(name="
-            + this.getClass().getSimpleName()
-            + ", flatVectorsFormat="
-            + flatVectorsFormat
-            + ", approximateThreshold="
-            + approximateThreshold
-            + ")";
+        return "NativeEngines99KnnVectorsFormat(name=" + this.getClass().getSimpleName() + ", flatVectorsFormat=" + flatVectorsFormat
+               + ", approximateThreshold=" + approximateThreshold + ")";
     }
 }

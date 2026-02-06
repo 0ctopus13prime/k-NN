@@ -227,7 +227,7 @@ public class ReorderAll {
 
                     // Test reordered .vec file
                     try (
-                        final ReorderedLucene99FlatVectorsReader reorderedReader = new ReorderedLucene99FlatVectorsReader(
+                        final ReorderedLucene99FlatVectorsReader111 reorderedReader = new ReorderedLucene99FlatVectorsReader111(
                             readState,
                             DefaultFlatVectorScorer.INSTANCE,
                             true

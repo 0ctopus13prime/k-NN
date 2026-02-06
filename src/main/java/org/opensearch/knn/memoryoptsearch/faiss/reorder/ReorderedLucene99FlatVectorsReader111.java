@@ -34,7 +34,7 @@ import java.nio.file.Path;
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readSimilarityFunction;
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readVectorEncoding;
 
-public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
+public class ReorderedLucene99FlatVectorsReader111 extends FlatVectorsReader {
 
     public static final String META_CODEC_NAME = "ReorderedLucene99FlatVectorsFormatMeta";
     public static final String VECTOR_DATA_CODEC_NAME = "ReorderedLucene99FlatVectorsFormatData";
@@ -43,18 +43,18 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
     public static final int VERSION_START = 0;
     public static final int VERSION_CURRENT = VERSION_START;
 
-    private final IntObjectHashMap<ReorderedLucene99FlatVectorsReader.FieldEntry> fields = new IntObjectHashMap<>();
+    private final IntObjectHashMap<ReorderedLucene99FlatVectorsReader111.FieldEntry> fields = new IntObjectHashMap<>();
     private final IndexInput vectorData;
     private final FieldInfos fieldInfos;
     private final IOContext dataContext;
     private final String customSuffix;
     private MMapDirectory afterReorderingMMapDirectory;
 
-    public ReorderedLucene99FlatVectorsReader(SegmentReadState state, FlatVectorsScorer scorer) throws IOException {
+    public ReorderedLucene99FlatVectorsReader111(SegmentReadState state, FlatVectorsScorer scorer) throws IOException {
         this(state, scorer, false);
     }
 
-    public ReorderedLucene99FlatVectorsReader(
+    public ReorderedLucene99FlatVectorsReader111(
         final SegmentReadState state,
         final FlatVectorsScorer scorer,
         final boolean useReorderedSuffix
@@ -68,6 +68,8 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
                 directory.toAbsolutePath().toString().replaceAll("before-reorderingla", "after-reordering");
             System.out.println("############### New directory -> " + afterReorderingDirectory);
             afterReorderingMMapDirectory = new MMapDirectory(Path.of(afterReorderingDirectory));
+        } else {
+            System.out.println("@@@@@@@@@@@@@@@@@@@@@ Using before-reordering .vec file.");
         }
 
         this.customSuffix = useReorderedSuffix ? ".reorder" : "";
@@ -125,7 +127,8 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
             if (info == null) {
                 throw new CorruptIndexException("Invalid field number: " + fieldNumber, meta);
             }
-            ReorderedLucene99FlatVectorsReader.FieldEntry fieldEntry = ReorderedLucene99FlatVectorsReader.FieldEntry.create(meta, info);
+            ReorderedLucene99FlatVectorsReader111.FieldEntry fieldEntry =
+                ReorderedLucene99FlatVectorsReader111.FieldEntry.create(meta, info);
             fields.put(info.number, fieldEntry);
         }
     }
@@ -159,15 +162,15 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
     public RandomVectorScorer getRandomVectorScorer(String field, float[] target) throws IOException {
         final FieldEntry fieldEntry = getFieldEntry(field, VectorEncoding.BYTE);
         return vectorScorer.getRandomVectorScorer(
-            fieldEntry.similarityFunction, ReorderedOffHeapFloatVectorValues.load(
+            fieldEntry.similarityFunction, ReorderedOffHeapFloatVectorValues111.load(
                 fieldEntry.similarityFunction,
                 vectorScorer,
-                fieldEntry.doc2OrdSkipList,
+                fieldEntry.doc2OrdIndex,
                 fieldEntry.dimension,
                 fieldEntry.vectorDataOffset,
                 fieldEntry.vectorDataLength,
                 vectorData,
-                fieldEntry.doc2OrdSkipList.getMaxDoc() + 1
+                fieldEntry.doc2OrdIndex.maxDoc + 1
             ), target
         );
     }
@@ -175,20 +178,20 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
     @Override
     public FloatVectorValues getFloatVectorValues(String field) throws IOException {
         final FieldEntry fieldEntry = getFieldEntry(field, VectorEncoding.FLOAT32);
-        return ReorderedOffHeapFloatVectorValues.load(
+        return ReorderedOffHeapFloatVectorValues111.load(
             fieldEntry.similarityFunction,
             vectorScorer,
-            fieldEntry.doc2OrdSkipList,
+            fieldEntry.doc2OrdIndex,
             fieldEntry.dimension,
             fieldEntry.vectorDataOffset,
             fieldEntry.vectorDataLength,
             vectorData,
-            fieldEntry.doc2OrdSkipList.getMaxDoc() + 1
+            fieldEntry.doc2OrdIndex.maxDoc + 1
         );
     }
 
-    private ReorderedLucene99FlatVectorsReader.FieldEntry getFieldEntry(String field, VectorEncoding expectedEncoding) {
-        final ReorderedLucene99FlatVectorsReader.FieldEntry fieldEntry = getFieldEntryOrThrow(field);
+    private ReorderedLucene99FlatVectorsReader111.FieldEntry getFieldEntry(String field, VectorEncoding expectedEncoding) {
+        final ReorderedLucene99FlatVectorsReader111.FieldEntry fieldEntry = getFieldEntryOrThrow(field);
         if (fieldEntry.vectorEncoding != expectedEncoding) {
             throw new IllegalArgumentException(
                 "field=\"" + field + "\" is encoded as: " + fieldEntry.vectorEncoding + " expected: " + expectedEncoding);
@@ -196,9 +199,9 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
         return fieldEntry;
     }
 
-    private ReorderedLucene99FlatVectorsReader.FieldEntry getFieldEntryOrThrow(String field) {
+    private ReorderedLucene99FlatVectorsReader111.FieldEntry getFieldEntryOrThrow(String field) {
         final FieldInfo info = fieldInfos.fieldInfo(field);
-        final ReorderedLucene99FlatVectorsReader.FieldEntry entry;
+        final ReorderedLucene99FlatVectorsReader111.FieldEntry entry;
         if (info == null || (entry = fields.get(info.number)) == null) {
             throw new IllegalArgumentException("field=\"" + field + "\" not found");
         }
@@ -229,7 +232,7 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
     }
 
     private record FieldEntry(VectorSimilarityFunction similarityFunction, VectorEncoding vectorEncoding, long vectorDataOffset,
-                              long vectorDataLength, int dimension, DocIdOrdSkipListIndex doc2OrdSkipList, FieldInfo info) {
+                              long vectorDataLength, int dimension, FixedBlockSkipListIndexReader doc2OrdIndex, FieldInfo info) {
 
         FieldEntry {
             if (similarityFunction != info.getVectorSimilarityFunction()) {
@@ -244,7 +247,7 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
             }
         }
 
-        static ReorderedLucene99FlatVectorsReader.FieldEntry create(IndexInput input, FieldInfo info) throws IOException {
+        static ReorderedLucene99FlatVectorsReader111.FieldEntry create(IndexInput input, FieldInfo info) throws IOException {
             // Read meta
             final VectorEncoding vectorEncoding = readVectorEncoding(input);
             final VectorSimilarityFunction similarityFunction = readSimilarityFunction(input);
@@ -272,18 +275,17 @@ public class ReorderedLucene99FlatVectorsReader extends FlatVectorsReader {
             }
 
             // Skip list index
-            final DocIdOrdSkipListIndex skipListIndex =
-                new DocIdOrdSkipListIndex(input, isDense, numLevel, numDocsForGrouping, groupFactor, skipListOffsets, maxDoc);
+            final FixedBlockSkipListIndexReader doc2OrdIndex = new FixedBlockSkipListIndexReader(input, maxDoc);
 
             // Read skip list
-            return new ReorderedLucene99FlatVectorsReader.FieldEntry(
+            return new ReorderedLucene99FlatVectorsReader111.FieldEntry(
                 similarityFunction,
-                                                                     vectorEncoding,
-                                                                     vectorDataOffset,
-                                                                     vectorDataLength,
-                                                                     dimension,
-                                                                     skipListIndex,
-                                                                     info
+                                                                        vectorEncoding,
+                                                                        vectorDataOffset,
+                                                                        vectorDataLength,
+                                                                        dimension,
+                                                                        doc2OrdIndex,
+                                                                        info
             );
         }
     }

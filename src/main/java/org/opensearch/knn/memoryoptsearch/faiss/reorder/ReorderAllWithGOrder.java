@@ -162,18 +162,6 @@ public class ReorderAllWithGOrder {
         return files.stream().filter(f -> f.endsWith(extension)).findFirst().orElse(null);
     }
 
-    //
-    // Helper to ensure only one file of a specific extension exists in a folder.
-    //
-    private static String findSingle(List<String> names, String extension, Path dir) {
-        List<String> matches = names.stream().filter(n -> n.endsWith(extension)).toList();
-
-        if (matches.size() > 1) {
-            throw new IllegalStateException("Multiple " + extension + " files found in: " + dir);
-        }
-        return matches.isEmpty() ? null : matches.get(0);
-    }
-
     private static void reorder(TargetFiles targetFiles) throws IOException {
         final String segmentName = targetFiles.flatVectorDataFileName.substring(0, targetFiles.flatVectorDataFileName.indexOf('_', 1));
         final String fieldName = "target_field";
@@ -297,7 +285,7 @@ public class ReorderAllWithGOrder {
                     // Test reordered .vec file
                     System.out.println("Validating reordered .vec file ...");
                     try (
-                        final ReorderedLucene99FlatVectorsReader reorderedReader = new ReorderedLucene99FlatVectorsReader(
+                        final ReorderedLucene99FlatVectorsReader111 reorderedReader = new ReorderedLucene99FlatVectorsReader111(
                             readState,
                             DefaultFlatVectorScorer.INSTANCE,
                             true
