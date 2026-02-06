@@ -26,9 +26,13 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.DataAccessHint;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.FileDataHint;
 import org.apache.lucene.store.FileTypeHint;
+import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOSupplier;
 import org.apache.lucene.util.IOUtils;
@@ -48,6 +52,8 @@ import org.opensearch.knn.quantization.models.quantizationState.QuantizationStat
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -72,8 +78,21 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
     // the lock object will not be needed
     private final Object vectorSearcherHolderLockObject;
     private final IOContext ioContext;
+    private final MMapDirectory afterReorderingMMapDirectory;
 
-    public NativeEngines990KnnVectorsReader(final SegmentReadState state, final FlatVectorsReader flatVectorsReader) {
+    public NativeEngines990KnnVectorsReader(final SegmentReadState state, final FlatVectorsReader flatVectorsReader) throws IOException {
+        if (Files.exists(Path.of("/tmp/dododo"))) {
+            final Path directory = (((FSDirectory) FilterDirectory.unwrap(state.directory))).getDirectory();
+            System.out.println("!!!!!!!!!!!!!!!! Original directory -> " + directory);
+            final String afterReorderingDirectory =
+                directory.toAbsolutePath().toString().replaceAll("before-reorderingla", "after-reordering");
+            System.out.println("!!!!!!!!!!!!!!!! New directory -> " + afterReorderingDirectory);
+            afterReorderingMMapDirectory = new MMapDirectory(Path.of(afterReorderingDirectory));
+        } else {
+            System.out.println("&&&&&&&&&&&&&&&&& Using before-reordering .vec file.");
+            afterReorderingMMapDirectory = null;
+        }
+
         this.flatVectorsReader = flatVectorsReader;
         this.segmentReadState = state;
         this.cacheKeys = getVectorCacheKeysFromSegmentReaderState(state);
@@ -151,14 +170,12 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
             String cacheKey = quantizationStateCacheKeyPerField.get(field);
             FieldInfo fieldInfo = segmentReadState.fieldInfos.fieldInfo(field);
             QuantizationState quantizationState = QuantizationStateCacheManager.getInstance()
-                .getQuantizationState(
-                    new QuantizationStateReadConfig(
-                        segmentReadState,
-                        QuantizationService.getInstance().getQuantizationParams(fieldInfo),
-                        field,
-                        cacheKey
-                    )
-                );
+                .getQuantizationState(new QuantizationStateReadConfig(
+                    segmentReadState,
+                    QuantizationService.getInstance().getQuantizationParams(fieldInfo),
+                    field,
+                    cacheKey
+                ));
             ((QuantizationConfigKNNCollector) knnCollector).setQuantizationState(quantizationState);
             return;
         }
@@ -232,6 +249,8 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
             // We don't need to check if VectorSearcher is null or not because during close IoUtils checks it
             closeables.add(vectorSearcherHolder.getVectorSearcher());
         }
+
+        closeables.add(afterReorderingMMapDirectory);
 
         IOUtils.close(closeables);
 
@@ -342,7 +361,8 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         // Start creating searcher
         final String fileName = KNNCodecUtil.getNativeEngineFileFromFieldInfo(fieldInfo, segmentReadState.segmentInfo);
         if (fileName != null) {
-            return () -> searcherFactory.createVectorSearcher(segmentReadState.directory, fileName, fieldInfo, ioContext);
+            final Directory directory = afterReorderingMMapDirectory != null ? afterReorderingMMapDirectory : null;
+            return () -> searcherFactory.createVectorSearcher(directory, fileName, fieldInfo, ioContext);
         }
 
         // Not supported
@@ -366,7 +386,10 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
          *
          * @param vectorSearcher the {@link VectorSearcher} instance to assign.
          */
-        public void setVectorSearcher(@NonNull final VectorSearcher vectorSearcher) {
+        public void setVectorSearcher(
+            @NonNull
+            final VectorSearcher vectorSearcher
+        ) {
             assert (this.vectorSearcher == null);
             this.vectorSearcher = vectorSearcher;
         }
