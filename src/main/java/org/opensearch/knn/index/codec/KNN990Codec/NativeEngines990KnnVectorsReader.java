@@ -361,7 +361,7 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         // Start creating searcher
         final String fileName = KNNCodecUtil.getNativeEngineFileFromFieldInfo(fieldInfo, segmentReadState.segmentInfo);
         if (fileName != null) {
-            final Directory directory = afterReorderingMMapDirectory != null ? afterReorderingMMapDirectory : null;
+            final Directory directory = afterReorderingMMapDirectory != null ? afterReorderingMMapDirectory : segmentReadState.directory;
             return () -> searcherFactory.createVectorSearcher(directory, fileName, fieldInfo, ioContext);
         }
 
