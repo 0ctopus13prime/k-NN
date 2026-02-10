@@ -65,7 +65,7 @@ public class ReorderedLucene99FlatVectorsReader111 extends FlatVectorsReader {
             final Path directory = (((FSDirectory) FilterDirectory.unwrap(state.directory))).getDirectory();
             System.out.println("############### Original directory -> " + directory);
             final String afterReorderingDirectory =
-                directory.toAbsolutePath().toString().replaceAll("before-reorderingla", "after-reordering");
+                directory.toAbsolutePath().toString().replaceAll("before-reordering", "before-reordering/data/after-reordering");
             System.out.println("############### New directory -> " + afterReorderingDirectory);
             afterReorderingMMapDirectory = new MMapDirectory(Path.of(afterReorderingDirectory));
         } else {
