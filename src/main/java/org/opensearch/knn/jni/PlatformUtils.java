@@ -15,7 +15,6 @@ import com.sun.jna.Platform;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
 import oshi.util.platform.mac.SysctlUtil;
 
 import java.nio.file.Files;
@@ -33,11 +32,13 @@ public class PlatformUtils {
     private static volatile Boolean isAVX2Supported;
     private static volatile Boolean isAVX512Supported;
     private static volatile Boolean isAVX512SPRSupported;
+    private static volatile Boolean isArmNeonSupported;
 
-    static void reset() {
+    static synchronized void reset() {
         isAVX2Supported = null;
         isAVX512Supported = null;
         isAVX512SPRSupported = null;
+        isArmNeonSupported = null;
     }
 
     /**
@@ -84,11 +85,10 @@ public class PlatformUtils {
             // https://ark.intel.com/content/www/us/en/ark/products/199285/intel-pentium-gold-g6600-processor-4m-cache-4-20-ghz.html
             String fileName = "/proc/cpuinfo";
             try {
-                isAVX2Supported = AccessController.doPrivileged(
-                    (PrivilegedExceptionAction<Boolean>) () -> (Boolean) Files.lines(Paths.get(fileName))
+                isAVX2Supported =
+                    AccessController.doPrivileged((PrivilegedExceptionAction<Boolean>) () -> (Boolean) Files.lines(Paths.get(fileName))
                         .filter(s -> s.startsWith("flags"))
-                        .anyMatch(s -> StringUtils.containsIgnoreCase(s, "avx2"))
-                );
+                        .anyMatch(s -> StringUtils.containsIgnoreCase(s, "avx2")));
 
             } catch (Exception e) {
                 isAVX2Supported = false;
@@ -100,21 +100,33 @@ public class PlatformUtils {
         return isAVX2Supported != null ? isAVX2Supported : false;
     }
 
+    public synchronized static boolean isArmNeonSupportedBySystem() {
+        if (isArmNeonSupported != null) {
+            return isArmNeonSupported;
+        }
+
+        if (Platform.isARM() == false || Platform.isLinux() == false) {
+            return isArmNeonSupported = false;
+        }
+
+        return isArmNeonSupported = areCpuFlagsAvailableInLinux(new String[] { "asimd", "fp16", "asimdhp", "fphp" });
+    }
+
     public static synchronized boolean isAVX512SupportedBySystem() {
         if (isAVX512Supported == null) {
-            isAVX512Supported = areAVX512FlagsAvailable(new String[] { "avx512f", "avx512cd", "avx512vl", "avx512dq", "avx512bw" });
+            isAVX512Supported = areCpuFlagsAvailableInLinux(new String[] { "avx512f", "avx512cd", "avx512vl", "avx512dq", "avx512bw" });
         }
         return isAVX512Supported;
     }
 
     public static synchronized boolean isAVX512SPRSupportedBySystem() {
         if (isAVX512SPRSupported == null) {
-            isAVX512SPRSupported = areAVX512FlagsAvailable(new String[] { "avx512_fp16", "avx512_bf16", "avx512_vpopcntdq" });
+            isAVX512SPRSupported = areCpuFlagsAvailableInLinux(new String[] { "avx512_fp16", "avx512_bf16", "avx512_vpopcntdq" });
         }
         return isAVX512SPRSupported;
     }
 
-    private static boolean areAVX512FlagsAvailable(String[] avx512) {
+    private static boolean areCpuFlagsAvailableInLinux(String[] avx512) {
         // AVX512 has multiple flags, which control various features. k-nn requires the same set of flags as faiss to compile
         // using avx512. Please update these if faiss updates their compilation instructions in the future.
         // https://github.com/facebookresearch/faiss/blob/main/faiss/CMakeLists.txt

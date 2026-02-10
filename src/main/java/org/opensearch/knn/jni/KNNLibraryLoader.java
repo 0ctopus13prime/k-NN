@@ -13,12 +13,14 @@ import java.security.PrivilegedAction;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.opensearch.knn.index.KNNSettings.isArmNeonDisabled;
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX2Disabled;
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX512Disabled;
 import static org.opensearch.knn.index.KNNSettings.isFaissAVX512SPRDisabled;
 import static org.opensearch.knn.jni.PlatformUtils.isAVX2SupportedBySystem;
 import static org.opensearch.knn.jni.PlatformUtils.isAVX512SupportedBySystem;
 import static org.opensearch.knn.jni.PlatformUtils.isAVX512SPRSupportedBySystem;
+import static org.opensearch.knn.jni.PlatformUtils.isArmNeonSupportedBySystem;
 
 /**
  * Thread-safe loader for KNN native libraries.
@@ -113,6 +115,8 @@ public class KNNLibraryLoader {
             loadLibrary(KNNConstants.SIMD_COMPUTING_AVX512_JNI_LIBRARY_NAME);
         } else if (!isFaissAVX2Disabled() && isAVX2SupportedBySystem()) {
             loadLibrary(KNNConstants.SIMD_COMPUTING_AVX2_JNI_LIBRARY_NAME);
+        } else if (!isArmNeonDisabled() && isArmNeonSupportedBySystem()) {
+            loadLibrary(KNNConstants.SIMD_COMPUTING_ARM_NEON_JNI_LIBRARY_NAME);
         } else {
             loadLibrary(KNNConstants.DEFAULT_SIMD_COMPUTING_JNI_LIBRARY_NAME);
         }

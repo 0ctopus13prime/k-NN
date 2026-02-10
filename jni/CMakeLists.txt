@@ -115,6 +115,7 @@ if (${CONFIG_FAISS} STREQUAL ON OR ${CONFIG_ALL} STREQUAL ON OR ${CONFIG_TEST} S
         ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_index_service.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/faiss_methods.cpp
     )
+    message("################### ${TARGET_LINK_FAISS_LIB} / ${TARGET_LIB_FAISS}")
     target_link_libraries(${TARGET_LIB_FAISS} ${TARGET_LINK_FAISS_LIB} ${TARGET_LIB_UTIL} OpenMP::OpenMP_CXX)
     target_include_directories(${TARGET_LIB_FAISS} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -145,7 +146,7 @@ add_library(${TARGET_LIB_SIMD} SHARED ${SIMD_COMPUTING_SRCS})
 target_compile_options(${TARGET_LIB_SIMD} PRIVATE ${FP16_SIMD_FLAGS} ${SIMD_FLAGS})
 
 # Link util library
-target_link_libraries(${TARGET_LIB_SIMD} ${TARGET_LINK_FAISS_LIB} ${TARGET_LIB_UTIL})
+target_link_libraries(${TARGET_LIB_SIMD} ${TARGET_LINK_SIMD_LIB} ${TARGET_LINK_FAISS_LIB} ${TARGET_LIB_UTIL})
 
 # Add include headers
 target_include_directories(${TARGET_LIB_SIMD} PRIVATE

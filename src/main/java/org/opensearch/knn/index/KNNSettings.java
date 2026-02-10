@@ -102,6 +102,7 @@ public class KNNSettings {
     public static final String QUANTIZATION_STATE_CACHE_EXPIRY_TIME_MINUTES = "knn.quantization.cache.expiry.minutes";
     public static final String KNN_FAISS_AVX512_DISABLED = "knn.faiss.avx512.disabled";
     public static final String KNN_FAISS_AVX512_SPR_DISABLED = "knn.faiss.avx512_spr.disabled";
+    public static final String KNN_SIMD_ARM_NEON_DISABLED = "knn.simd.arm_neon.disabled";
     public static final String KNN_DISK_VECTOR_SHARD_LEVEL_RESCORING_DISABLED = "index.knn.disk.vector.shard_level_rescoring_disabled";
     public static final String KNN_DERIVED_SOURCE_ENABLED = "index.knn.derived_source.enabled";
     // Remote index build index settings
@@ -132,6 +133,7 @@ public class KNNSettings {
     public static final boolean KNN_DEFAULT_FAISS_AVX2_DISABLED_VALUE = false;
     public static final boolean KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE = false;
     public static final boolean KNN_DEFAULT_FAISS_AVX512_SPR_DISABLED_VALUE = false;
+    public static final boolean KNN_DEFAULT_SIMD_ARM_NEON_DISABLED_VALUE = false;
     public static final String INDEX_KNN_DEFAULT_SPACE_TYPE = "l2";
     public static final Integer INDEX_KNN_ADVANCED_APPROXIMATE_THRESHOLD_DEFAULT_VALUE = 0;
     public static final Integer INDEX_KNN_BUILD_VECTOR_DATA_STRUCTURE_THRESHOLD_MIN = -1;
@@ -954,6 +956,15 @@ public class KNNSettings {
             Objects.requireNonNullElse(
                 KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_SPR_DISABLED),
                 KNN_DEFAULT_FAISS_AVX512_SPR_DISABLED_VALUE
+            ).toString()
+        );
+    }
+
+    public static boolean isArmNeonDisabled() {
+        return parseBoolean(
+            Objects.requireNonNullElse(
+                KNNSettings.state().getSettingValue(KNNSettings.KNN_SIMD_ARM_NEON_DISABLED),
+                KNN_DEFAULT_SIMD_ARM_NEON_DISABLED_VALUE
             ).toString()
         );
     }
