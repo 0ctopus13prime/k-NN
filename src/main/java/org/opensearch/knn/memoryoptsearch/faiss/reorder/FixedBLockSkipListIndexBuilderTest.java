@@ -7,6 +7,7 @@ package org.opensearch.knn.memoryoptsearch.faiss.reorder;
 
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 
@@ -17,17 +18,19 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class FixedBLockSkipListIndexBuilderTest {
     public static void main(String... args) throws IOException {
         final String testDirPath = "/Users/kdooyong/workspace/opensearch-gorder/kdy";
         final String skipListIndex = "skipListIndex.bin";
-        final String metaInfoFile = "metaInfo.txt";
 
         cleanDirectory(testDirPath);
 
-        final int maxDoc = 1000000;
+        final int maxDoc = 10000000;
+        final Map<Integer, Integer> answer = new HashMap<>();
 
         try (final Directory directory = new MMapDirectory(Path.of(testDirPath))) {
             try (final IndexOutput indexOutput = directory.createOutput(skipListIndex, IOContext.DEFAULT)) {
@@ -47,20 +50,23 @@ public class FixedBLockSkipListIndexBuilderTest {
                 }
 
                 for (int doc = 0; doc <= maxDoc; ++doc) {
-                    builder.add(doc, ords[doc]);
+                    int ord = ords[doc];
+                    answer.put(doc, ord);
+                    builder.add(doc, ord);
                 }
 
                 builder.finish();
+            }
 
-                // Write meta
-                try (final IndexOutput metaOut = directory.createOutput(metaInfoFile, IOContext.DEFAULT)) {
-                    // max doc
-                    metaOut.writeInt(maxDoc);
-
-                    // Ords
-                    metaOut.writeInt(ords.length);
-                    for (int ord : ords) {
-                        metaOut.writeInt(ord);
+            // Test
+            try (final IndexInput indexInput = directory.openInput(skipListIndex, IOContext.DEFAULT)) {
+                final FixedBlockSkipListIndexReader skipListIndexReader = new FixedBlockSkipListIndexReader(indexInput, maxDoc);
+                for (int i = 0 ; i <= maxDoc ; ++i) {
+                    skipListIndexReader.skipTo(i);
+                    final int expect = answer.get(i);
+                    final int ord = skipListIndexReader.getOrd();
+                    if (ord != expect) {
+                        throw new IllegalStateException("Mismatch at [" + i + "]: expected=" + expect + ", actual=" + ord);
                     }
                 }
             }

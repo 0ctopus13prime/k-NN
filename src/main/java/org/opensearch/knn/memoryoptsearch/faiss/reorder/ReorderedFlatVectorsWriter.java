@@ -150,7 +150,8 @@ public class ReorderedFlatVectorsWriter implements Closeable {
             // Is dense = true
             meta.writeByte((byte) 1);
             // Max doc id
-            meta.writeInt((int) (docAndOrds[docAndOrds.length - 1] >>> 32));
+            final int maxDoc = (int) (docAndOrds[docAndOrds.length - 1] >>> 32);
+            meta.writeInt(maxDoc);
             // #level
             meta.writeInt(numLevel);
             // #docs for a group
@@ -165,29 +166,32 @@ public class ReorderedFlatVectorsWriter implements Closeable {
                 "DocId2OrdSkipList",
                 "DocId2OrdSkipListWriter"
             );
-            final DocIdOrdSkipListIndexBuilder skipListIndexBuilder = new DocIdOrdSkipListIndexBuilder(
-                true,
-                numLevel,
-                numDocsForGrouping,
-                groupFactor,
-                bufferedIndexOutput
-            );
+//            final DocIdOrdSkipListIndexBuilder skipListIndexBuilder = new DocIdOrdSkipListIndexBuilder(
+//                true,
+//                numLevel,
+//                numDocsForGrouping,
+//                groupFactor,
+//                bufferedIndexOutput
+//            );
+
+            final FixedBlockSkipListIndexBuilder skipListIndexBuilder = new FixedBlockSkipListIndexBuilder(meta, maxDoc);
 
             // Flush a skip list
             for (final long docAndOrd : docAndOrds) {
                 skipListIndexBuilder.add((int) (docAndOrd >>> 32), (int) docAndOrd);
             }
-            long[] offsets = skipListIndexBuilder.finish();
+            skipListIndexBuilder.finish();
+//            long[] offsets = skipListIndexBuilder.finish();
 
             // e.g. offsets[0] -> starting offset of ords block, offset[1] -> starting offset of level-1 skip-list
             // Write skip list offsets
-            meta.writeVInt(offsets.length);
-            for (long offset : offsets) {
-                meta.writeLong(offset);
-            }
+//            meta.writeVInt(offsets.length);
+//            for (long offset : offsets) {
+//                meta.writeLong(offset);
+//            }
 
             // Then flush skip list bytes
-            bufferedDataOutput.copyTo(meta);
+//            bufferedDataOutput.copyTo(meta);
         }
     }
 

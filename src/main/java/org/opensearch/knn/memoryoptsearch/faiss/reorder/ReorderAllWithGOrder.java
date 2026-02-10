@@ -326,12 +326,16 @@ public class ReorderAllWithGOrder {
                             }
                         } catch (Exception ex) {
                             ex.printStackTrace();
+                            throw ex;
                         }
                     }
                 } else {
                     throw new IllegalStateException("faissIndex is not FaissIdMapIndex! Actual type: " + faissIndex.getClass());
                 }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw e;
         }
 
         System.out.println("Reorder is done!");

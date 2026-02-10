@@ -14,6 +14,7 @@ public class FixedBlockSkipListIndexReader {
     public final int maxDoc;
     private final int numBytesPerValue;
     private int doc;
+    private int mask;
 
     public FixedBlockSkipListIndexReader(final IndexInput metaInput, int maxDoc) throws IOException {
         final long numBytes = Integer.BYTES - (Integer.numberOfLeadingZeros(maxDoc) / Byte.SIZE);
@@ -24,6 +25,7 @@ public class FixedBlockSkipListIndexReader {
         long blockSizes = (tmp / Long.BYTES) + ((tmp % Long.BYTES) > 0 ? 1 : 0);
         this.blocks = new long[Math.toIntExact(blockSizes)];
         metaInput.readLongs(blocks, 0, blocks.length);
+        mask = (1 << (8 * numBytesPerValue)) - 1;
     }
 
     public int skipTo(int doc) {
@@ -31,17 +33,16 @@ public class FixedBlockSkipListIndexReader {
     }
 
     public int getOrd() {
-        long bitPos = doc * 24L;          // 3 bytes * 8 bits
-        int word = (int) (bitPos >>> 6);  // / 64
-        long shift = bitPos & 63;         // % 64
-
-        long v = blocks[word] >>> shift;
-
-        // straddles two longs
-        if (shift > 40) {
-            v |= blocks[word + 1] << (64 - shift);
+        final long bitPos = doc * 8L * numBytesPerValue;
+        final int word = (int) (bitPos >>> 6);
+        final int relaBitPos = (int) (bitPos % 64);
+        final int endBitPos = relaBitPos + 8 * numBytesPerValue;
+        if (endBitPos <= 64) {
+            return (int) ((blocks[word] >>> relaBitPos)) & mask;
+        } else {
+            final long upper = blocks[word] >>> relaBitPos;
+            final long lower = (blocks[word + 1] << (64 - relaBitPos)) & mask;
+            return (int) (upper | lower);
         }
-
-        return (int) (v & 0xFFFFFF);
     }
 }

@@ -138,22 +138,15 @@ public class ReorderedLucene99FlatVectorsReader111 extends FlatVectorsReader {
         String metaFileName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, META_EXTENSION + customSuffix);
         int versionMeta = -1;
         try (ChecksumIndexInput meta = directory.openChecksumInput(metaFileName)) {
-            Throwable priorE = null;
-            try {
-                versionMeta = CodecUtil.checkIndexHeader(
-                    meta,
-                    META_CODEC_NAME,
-                    VERSION_START,
-                    VERSION_CURRENT,
-                    state.segmentInfo.getId(),
-                    state.segmentSuffix
-                );
-                readFields(meta, state.fieldInfos);
-            } catch (Throwable exception) {
-                priorE = exception;
-            } finally {
-                CodecUtil.checkFooter(meta, priorE);
-            }
+            versionMeta = CodecUtil.checkIndexHeader(
+                meta,
+                META_CODEC_NAME,
+                VERSION_START,
+                VERSION_CURRENT,
+                state.segmentInfo.getId(),
+                state.segmentSuffix
+            );
+            readFields(meta, state.fieldInfos);
         }
         return versionMeta;
     }
@@ -268,11 +261,11 @@ public class ReorderedLucene99FlatVectorsReader111 extends FlatVectorsReader {
             final int groupFactor = input.readInt();
 
             // offsets
-            final int offsetLen = input.readVInt();
-            final long[] skipListOffsets = new long[offsetLen];
-            for (int i = 0; i < offsetLen; ++i) {
-                skipListOffsets[i] = input.readLong();
-            }
+//            final int offsetLen = input.readVInt();
+//            final long[] skipListOffsets = new long[offsetLen];
+//            for (int i = 0; i < offsetLen; ++i) {
+//                skipListOffsets[i] = input.readLong();
+//            }
 
             // Skip list index
             final FixedBlockSkipListIndexReader doc2OrdIndex = new FixedBlockSkipListIndexReader(input, maxDoc);
