@@ -506,6 +506,7 @@ public class ReorderAllWithGOrder {
             throw new IllegalStateException("File not found: " + suffixed);
         }
 
+        System.out.println("Moving [" + suffixed + "] to [" + original + "]");
         Files.move(suffixed, original, StandardCopyOption.REPLACE_EXISTING);
     }
 }
