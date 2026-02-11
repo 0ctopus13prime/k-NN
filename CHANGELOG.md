@@ -38,4 +38,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 * Bulk SIMD for FP16 distance computation [#3071](https://github.com/opensearch-project/k-NN/pull/3071)
 * Include AdditionalCodecs argument to allow additional Codec registration [#3085](https://github.com/opensearch-project/k-NN/pull/3085)
 * Make Merge in nativeEngine can Abort [#2529](https://github.com/opensearch-project/k-NN/pull/2529)
+* Use pre-quantized vectors from native engines for exact search [#3095](https://github.com/opensearch-project/k-NN/pull/3095)
 
