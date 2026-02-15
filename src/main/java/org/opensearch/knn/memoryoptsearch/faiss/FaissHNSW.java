@@ -41,6 +41,8 @@ public class FaissHNSW {
     private int efSearch = 16;
     // Total number of vectors stored in graph.
     private long totalNumberOfVectors;
+    private long startOffset;
+    private long hnswSectionSize;
 
     /**
      * Partially loads the FAISS HNSW graph from the provided index input stream.
@@ -55,6 +57,8 @@ public class FaissHNSW {
      * @throws IOException
      */
     public void load(IndexInput input, long totalNumberOfVectors) throws IOException {
+        startOffset = input.getFilePointer();
+
         // Total number of vectors
         this.totalNumberOfVectors = totalNumberOfVectors;
 
@@ -92,6 +96,8 @@ public class FaissHNSW {
 
         // dummy read a deprecated field.
         input.readInt();
+
+        hnswSectionSize = input.getFilePointer() - startOffset;
     }
 
     public int getMaxNumNeighbors() {

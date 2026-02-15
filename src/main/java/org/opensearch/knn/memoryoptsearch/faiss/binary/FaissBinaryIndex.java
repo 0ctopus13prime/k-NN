@@ -21,6 +21,8 @@ import java.io.IOException;
 public abstract class FaissBinaryIndex extends FaissIndex {
     // Number of bytes per vector (e.g. dimension / 8)
     protected int codeSize;
+    protected byte isTrainedDeprecatedField;
+    protected int originalMetricType;
 
     public FaissBinaryIndex(final String indexType) {
         super(indexType);
@@ -39,11 +41,11 @@ public abstract class FaissBinaryIndex extends FaissIndex {
         totalNumberOfVectors = Math.toIntExact(inputStream.readLong());
 
         // Consume `is_trained`, which is always true.
-        inputStream.readByte();
+        isTrainedDeprecatedField = inputStream.readByte();
 
         // Consume `metric type`. We don't rely on this metric type as internally,
         // as all distance calculation will be done with hamming distance calculator.
-        inputStream.readInt();
+        originalMetricType = inputStream.readInt();
 
         // Binary index always uses hamming space type.
         spaceType = SpaceType.HAMMING;
