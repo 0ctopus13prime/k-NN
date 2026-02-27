@@ -154,7 +154,7 @@ void IndexService::writeIndex(
             openSearchIOWriter->flush();
         }
     } catch(std::exception &e) {
-        throw std::runtime_error("Failed to write index to disk");
+        throw std::runtime_error(std::string("Failed to write index to disk, ") + e.what());
     }
 }
 
@@ -229,7 +229,9 @@ jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
     // Create index using Faiss factory method
     FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim);
     // TODO : Fix hard coded hnsw m 16
-    std::unique_ptr<faiss::IndexHNSW> index (new faiss::IndexHNSW(bbqFlat, 16));
+    std::unique_ptr<faiss::IndexHNSWFlat> index (new faiss::IndexHNSWFlat(dim, 16));
+    delete index->storage;
+    index->storage = bbqFlat;
 
     // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
     if (threadCount != 0) {

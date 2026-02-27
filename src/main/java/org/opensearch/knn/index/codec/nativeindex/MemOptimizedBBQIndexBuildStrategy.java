@@ -80,7 +80,12 @@ public class MemOptimizedBBQIndexBuildStrategy implements NativeIndexBuildStrate
 
         // Write index without flat vectors
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-            FaissService.writeBBQIndex(indexInfo.getIndexOutputWithBuffer(), indexMemoryAddress, indexParameters);
+            try {
+                FaissService.writeBBQIndex(indexInfo.getIndexOutputWithBuffer(), indexMemoryAddress, indexParameters);
+            } catch (Exception e) {
+                e.printStackTrace();
+                System.out.println("_________________ !!!!!!!!!! " + e.getMessage());
+            }
             return null;
         });
     }

@@ -267,6 +267,7 @@ void knn_jni::faiss_wrapper::WriteIndex(knn_jni::JNIUtilInterface * jniUtil, JNI
     knn_jni::stream::FaissOpenSearchIOWriter writer {&mediator};
 
     // Create index.
+    std::cout << "_______________ faiss_wrapper::WriteIndex, skipFlat=" << skipFlat << std::endl;
     indexService->writeIndex(&writer, index_ptr, skipFlat);
 }
 

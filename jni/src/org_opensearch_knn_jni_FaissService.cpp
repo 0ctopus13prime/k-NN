@@ -113,11 +113,11 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQInde
     auto* vecPtr =
         (float*) faissBBQFlat->quantizedVectorsAndCorrectionFactors.data() + (numAdded * faissBBQFlat->oneElementSize);
     idMap->add_with_ids(numDocs, vecPtr, &docIds[0]);
+    std::cout << "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR" << std::endl;
 }
 
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_writeBBQIndex
   (JNIEnv *env, jclass cls, jobject indexOutputWithBuffer, jlong indexMemoryAddrJ, jobject indexParametersJ) {
-    std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (indexMemoryAddrJ));
     try {
         std::unique_ptr<knn_jni::faiss_wrapper::FaissMethods> faissMethods(new knn_jni::faiss_wrapper::FaissMethods());
         knn_jni::faiss_wrapper::IndexService indexService(std::move(faissMethods));

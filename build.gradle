@@ -509,6 +509,7 @@ task windowsPatches(type:Exec) {
 tasks.register('cmakeJniLib', Exec) {
     def args = []
     args.add("cmake")
+    args.add("-DCMAKE_BUILD_TYPE=DEBUG")
     args.add("-S jni") // CMakelists.txt directory
     args.add("-B jni/build") // Build directory
     args.add("-DKNN_PLUGIN_VERSION=${opensearch_version}")
