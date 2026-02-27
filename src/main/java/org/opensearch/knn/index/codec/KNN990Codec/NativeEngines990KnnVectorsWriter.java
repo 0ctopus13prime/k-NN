@@ -106,7 +106,8 @@ public class NativeEngines990KnnVectorsWriter extends KnnVectorsWriter {
                 field.getFlatFieldVectorsWriter().getDocsWithFieldSet(),
                 field.getVectors()
             );
-            final QuantizationState quantizationState = train(field.getFieldInfo(), knnVectorValuesSupplier, totalLiveDocs);
+            // final QuantizationState quantizationState = train(field.getFieldInfo(), knnVectorValuesSupplier, totalLiveDocs);
+            final QuantizationState quantizationState = null;
             // should skip graph building only for non quantization use case and if threshold is met
             if (quantizationState == null && shouldSkipBuildingVectorDataStructure(totalLiveDocs)) {
                 log.debug(
@@ -123,7 +124,6 @@ public class NativeEngines990KnnVectorsWriter extends KnnVectorsWriter {
                 quantizationState,
                 nativeIndexBuildStrategyFactory
             );
-
             StopWatch stopWatch = new StopWatch().start();
             writer.flushIndex(knnVectorValuesSupplier, totalLiveDocs);
             long time_in_millis = stopWatch.stop().totalTime().millis();

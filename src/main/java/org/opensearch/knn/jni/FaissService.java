@@ -11,6 +11,7 @@
 
 package org.opensearch.knn.jni;
 
+import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.index.MergeAbortChecker;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.query.KNNQueryResult;
@@ -18,18 +19,17 @@ import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
 
 import java.util.Map;
-import lombok.extern.log4j.Log4j2;
 
 /**
  * Service to interact with faiss jni layer. Class dependencies should be minimal
  * <p>
  * In order to compile C++ header file, run:
  * javac -h jni/include src/main/java/org/opensearch/knn/jni/FaissService.java
- *      src/main/java/org/opensearch/knn/index/query/KNNQueryResult.java
- *      src/main/java/org/opensearch/knn/common/KNNConstants.java
+ * src/main/java/org/opensearch/knn/index/query/KNNQueryResult.java
+ * src/main/java/org/opensearch/knn/common/KNNConstants.java
  */
 @Log4j2
-class FaissService {
+public class FaissService {
 
     static {
         KNNLibraryLoader.loadFaissLibrary();
@@ -49,8 +49,8 @@ class FaissService {
      * Initialize an index for the native library. Takes in numDocs to
      * allocate the correct amount of memory.
      *
-     * @param numDocs number of documents to be added
-     * @param dim dimension of the vector to be indexed
+     * @param numDocs    number of documents to be added
+     * @param dim        dimension of the vector to be indexed
      * @param parameters parameters to build index
      */
     public static native long initIndex(long numDocs, int dim, Map<String, Object> parameters);
@@ -59,8 +59,8 @@ class FaissService {
      * Initialize an index for the native library. Takes in numDocs to
      * allocate the correct amount of memory.
      *
-     * @param numDocs number of documents to be added
-     * @param dim dimension of the vector to be indexed
+     * @param numDocs    number of documents to be added
+     * @param dim        dimension of the vector to be indexed
      * @param parameters parameters to build index
      */
     public static native long initBinaryIndex(long numDocs, int dim, Map<String, Object> parameters);
@@ -69,8 +69,8 @@ class FaissService {
      * Initialize a byte index for the native library. Takes in numDocs to
      * allocate the correct amount of memory.
      *
-     * @param numDocs number of documents to be added
-     * @param dim dimension of the vector to be indexed
+     * @param numDocs    number of documents to be added
+     * @param dim        dimension of the vector to be indexed
      * @param parameters parameters to build index
      */
     public static native long initByteIndex(long numDocs, int dim, Map<String, Object> parameters);
@@ -80,11 +80,11 @@ class FaissService {
      * function call. So Java layer doesn't need to free up the memory. This is not an ideal behavior because Java layer
      * created the memory address and that should only free up the memory.
      *
-     * @param ids ids of documents
+     * @param ids            ids of documents
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param indexAddress address of native memory where index is stored
-     * @param threadCount number of threads to use for insertion
+     * @param dim            dimension of the vector to be indexed
+     * @param indexAddress   address of native memory where index is stored
+     * @param threadCount    number of threads to use for insertion
      */
     public static native void insertToIndex(int[] ids, long vectorsAddress, int dim, long indexAddress, int threadCount);
 
@@ -93,11 +93,11 @@ class FaissService {
      * function call. So Java layer doesn't need to free up the memory. This is not an ideal behavior because Java layer
      * created the memory address and that should only free up the memory.
      *
-     * @param ids ids of documents
+     * @param ids            ids of documents
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param indexAddress address of native memory where index is stored
-     * @param threadCount number of threads to use for insertion
+     * @param dim            dimension of the vector to be indexed
+     * @param indexAddress   address of native memory where index is stored
+     * @param threadCount    number of threads to use for insertion
      */
     public static native void insertToBinaryIndex(int[] ids, long vectorsAddress, int dim, long indexAddress, int threadCount);
 
@@ -106,11 +106,11 @@ class FaissService {
      * function call. So Java layer doesn't need to free up the memory. This is not an ideal behavior because Java layer
      * created the memory address and that should only free up the memory.
      *
-     * @param ids ids of documents
+     * @param ids            ids of documents
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param indexAddress address of native memory where index is stored
-     * @param threadCount number of threads to use for insertion
+     * @param dim            dimension of the vector to be indexed
+     * @param indexAddress   address of native memory where index is stored
+     * @param threadCount    number of threads to use for insertion
      */
     public static native void insertToByteIndex(int[] ids, long vectorsAddress, int dim, long indexAddress, int threadCount);
 
@@ -120,7 +120,7 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param output       Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
      */
     public static native void writeIndex(long indexAddress, IndexOutputWithBuffer output);
 
@@ -130,7 +130,7 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param output       Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
      */
     public static native void writeBinaryIndex(long indexAddress, IndexOutputWithBuffer output);
 
@@ -140,19 +140,19 @@ class FaissService {
      * NOTE: This will always free the index. Do not call free after this.
      *
      * @param indexAddress address of native memory where index is stored
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param output       Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
      */
     public static native void writeByteIndex(long indexAddress, IndexOutputWithBuffer output);
 
     /**
      * Create an index for the native library with a provided template index
      *
-     * @param ids array of ids mapping to the data passed in
+     * @param ids            array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
-     * @param templateIndex empty template index
-     * @param parameters additional build time parameters
+     * @param dim            dimension of the vector to be indexed
+     * @param output         Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param templateIndex  empty template index
+     * @param parameters     additional build time parameters
      */
     public static native void createIndexFromTemplate(
         int[] ids,
@@ -166,12 +166,12 @@ class FaissService {
     /**
      * Create a binary index for the native library with a provided template index
      *
-     * @param ids array of ids mapping to the data passed in
+     * @param ids            array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
-     * @param templateIndex empty template index
-     * @param parameters additional build time parameters
+     * @param dim            dimension of the vector to be indexed
+     * @param output         Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param templateIndex  empty template index
+     * @param parameters     additional build time parameters
      */
     public static native void createBinaryIndexFromTemplate(
         int[] ids,
@@ -185,12 +185,12 @@ class FaissService {
     /**
      * Create a byte index for the native library with a provided template index
      *
-     * @param ids array of ids mapping to the data passed in
+     * @param ids            array of ids mapping to the data passed in
      * @param vectorsAddress address of native memory where vectors are stored
-     * @param dim dimension of the vector to be indexed
-     * @param output Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
-     * @param templateIndex empty template index
-     * @param parameters additional build time parameters
+     * @param dim            dimension of the vector to be indexed
+     * @param output         Index output wrapper having Lucene's IndexOutput to be used to flush bytes in native engines.
+     * @param templateIndex  empty template index
+     * @param parameters     additional build time parameters
      */
     public static native void createByteIndexFromTemplate(
         int[] ids,
@@ -219,16 +219,16 @@ class FaissService {
     public static native long loadIndexWithStream(IndexInputWithBuffer readStream);
 
     /**
-      * Load an index into memory via a wrapping having Lucene's IndexInput with ADC
-      *
-      * @param readStream IndexInput wrapper having a Lucene's IndexInput reference.
-      * @param parameters Map<String, Object> containing the following:
-      *                 SpaceType: l2 or innerproduct
-      *          quantizationlevel: Based on the ScalarQuantizationParams type identifier passed in.
+     * Load an index into memory via a wrapping having Lucene's IndexInput with ADC
+     *
+     * @param readStream IndexInput wrapper having a Lucene's IndexInput reference.
+     * @param parameters Map<String, Object> containing the following:
+     *                   SpaceType: l2 or innerproduct
+     *                   quantizationlevel: Based on the ScalarQuantizationParams type identifier passed in.
      *                   Currently only ScalarQuantizationParams_1 is supported for one-bit ADC
-     *                    (@see ScalarQuantizationParams#generateTypeIdentifier)
-      * @return pointer to location in memory the index resides in
-      */
+     *                   (@see ScalarQuantizationParams#generateTypeIdentifier)
+     * @return pointer to location in memory the index resides in
+     */
     public static native long loadIndexWithStreamADCParams(IndexInputWithBuffer readStream, Map<String, Object> parameters);
 
     /**
@@ -267,7 +267,7 @@ class FaissService {
     /**
      * Set the index state for an index
      *
-     * @param indexAddr address of index to set state for
+     * @param indexAddr           address of index to set state for
      * @param shareIndexStateAddr address of shared state to be set
      */
     public static native void setSharedIndexState(long indexAddr, long shareIndexStateAddr);
@@ -281,11 +281,11 @@ class FaissService {
      * followed by the parent ID, in consecutive order without any gaps. Because of this ID pattern,
      * we can determine the parent ID of a specific nested field ID using only an array of parent IDs.
      *
-     * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param k neighbors to be returned
+     * @param indexPointer     pointer to index in memory
+     * @param queryVector      vector to be used for query
+     * @param k                neighbors to be returned
      * @param methodParameters method parameter
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param parentIds        list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndex(
@@ -299,12 +299,12 @@ class FaissService {
     /**
      * Query an index with filter
      *
-     * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param k neighbors to be returned
+     * @param indexPointer     pointer to index in memory
+     * @param queryVector      vector to be used for query
+     * @param k                neighbors to be returned
      * @param methodParameters method parameter
-     * @param filterIds list of doc ids to include in the query result
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param filterIds        list of doc ids to include in the query result
+     * @param parentIds        list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryIndexWithFilter(
@@ -320,12 +320,12 @@ class FaissService {
     /**
      * Query a binary index with filter
      *
-     * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param k neighbors to be returned
+     * @param indexPointer     pointer to index in memory
+     * @param queryVector      vector to be used for query
+     * @param k                neighbors to be returned
      * @param methodParameters method parameter
-     * @param filterIds list of doc ids to include in the query result
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param filterIds        list of doc ids to include in the query result
+     * @param parentIds        list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
@@ -342,10 +342,10 @@ class FaissService {
      * Query a binary index with filter
      *
      * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param k neighbors to be returned
-     * @param filterIds list of doc ids to include in the query result
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param queryVector  vector to be used for query
+     * @param k            neighbors to be returned
+     * @param filterIds    list of doc ids to include in the query result
+     * @param parentIds    list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of k neighbors
      */
     public static native KNNQueryResult[] queryBinaryIndexWithFilter(
@@ -378,8 +378,8 @@ class FaissService {
     /**
      * Train an empty index
      *
-     * @param indexParameters parameters used to build index
-     * @param dimension dimension for the index
+     * @param indexParameters     parameters used to build index
+     * @param dimension           dimension for the index
      * @param trainVectorsPointer pointer to where training vectors are stored in native memory
      * @return bytes array of trained template index
      */
@@ -388,8 +388,8 @@ class FaissService {
     /**
      * Train an empty binary index
      *
-     * @param indexParameters parameters used to build index
-     * @param dimension dimension for the index
+     * @param indexParameters     parameters used to build index
+     * @param dimension           dimension for the index
      * @param trainVectorsPointer pointer to where training vectors are stored in native memory
      * @return bytes array of trained template index
      */
@@ -398,8 +398,8 @@ class FaissService {
     /**
      * Train an empty byte index
      *
-     * @param indexParameters parameters used to build index
-     * @param dimension dimension for the index
+     * @param indexParameters     parameters used to build index
+     * @param dimension           dimension for the index
      * @param trainVectorsPointer pointer to where training vectors are stored in native memory
      * @return bytes array of trained template index
      */
@@ -408,14 +408,14 @@ class FaissService {
     /**
      * Range search index with filter
      *
-     * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param radius search within radius threshold
-     * @param methodParameters parameters to be used for the query
+     * @param indexPointer         pointer to index in memory
+     * @param queryVector          vector to be used for query
+     * @param radius               search within radius threshold
+     * @param methodParameters     parameters to be used for the query
      * @param indexMaxResultWindow maximum number of results to return
-     * @param filteredIds list of doc ids to include in the query result
-     * @param filterIdsType type of filter ids
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param filteredIds          list of doc ids to include in the query result
+     * @param filterIdsType        type of filter ids
+     * @param parentIds            list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of neighbors within radius
      */
     public static native KNNQueryResult[] rangeSearchIndexWithFilter(
@@ -432,12 +432,12 @@ class FaissService {
     /**
      * Range search index
      *
-     * @param indexPointer pointer to index in memory
-     * @param queryVector vector to be used for query
-     * @param radius search within radius threshold
-     * @param methodParameters parameters to be used for the query
+     * @param indexPointer         pointer to index in memory
+     * @param queryVector          vector to be used for query
+     * @param radius               search within radius threshold
+     * @param methodParameters     parameters to be used for the query
      * @param indexMaxResultWindow maximum number of results to return
-     * @param parentIds list of parent doc ids when the knn field is a nested field
+     * @param parentIds            list of parent doc ids when the knn field is a nested field
      * @return KNNQueryResult array of neighbors within radius
      */
     public static native KNNQueryResult[] rangeSearchIndex(
@@ -464,4 +464,19 @@ class FaissService {
      * @see org.apache.lucene.index.MergeAbortChecker#isMergeAborted()
      */
     public static native void setMergeInterruptCallback();
+
+    //
+    // BBQ
+    //
+    public static native long initBBQIndex(long numDocs, int dim, Map<String, Object> parameters, float centroidDp, int quantizedVecBytes);
+
+    public static native void passBBQVectors(long indexMemoryAddress, byte[] buffer, int loopSize);
+
+    public static native void addDocsToBBQIndex(long indexMemoryAddress, int[] docIds, int numDocs, int numAdded);
+
+    public static native void writeBBQIndex(
+        IndexOutputWithBuffer indexOutputWithBuffer,
+        long indexMemoryAddress,
+        Map<String, Object> indexParameters
+    );
 }

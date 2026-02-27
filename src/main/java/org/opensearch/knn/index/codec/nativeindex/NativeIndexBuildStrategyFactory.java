@@ -61,9 +61,10 @@ public final class NativeIndexBuildStrategyFactory {
         boolean isTemplate = fieldInfo.attributes().containsKey(MODEL_ID);
         boolean iterative = !isTemplate && KNNEngine.FAISS == knnEngine;
 
-        NativeIndexBuildStrategy strategy = iterative
-            ? MemOptimizedNativeIndexBuildStrategy.getInstance()
-            : DefaultIndexBuildStrategy.getInstance();
+        // NativeIndexBuildStrategy strategy = iterative
+        //     ? MemOptimizedNativeIndexBuildStrategy.getInstance()
+        //     : DefaultIndexBuildStrategy.getInstance();
+        final NativeIndexBuildStrategy strategy = new MemOptimizedBBQIndexBuildStrategy();
 
         initializeVectorValues(knnVectorValues);
         long vectorBlobLength = ((long) knnVectorValues.bytesPerVector()) * totalLiveDocs;

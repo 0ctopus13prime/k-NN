@@ -8,6 +8,7 @@ package org.opensearch.knn.index.codec.nativeindex.model;
 import lombok.Builder;
 import lombok.ToString;
 import lombok.Value;
+import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.SegmentWriteState;
 import org.opensearch.common.Nullable;
 import org.opensearch.knn.index.VectorDataType;
@@ -37,4 +38,5 @@ public class BuildIndexParams {
     int totalLiveDocs;
     SegmentWriteState segmentWriteState;
     boolean isFlush;
+    FieldInfo fieldInfo;
 }

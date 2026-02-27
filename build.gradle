@@ -705,7 +705,7 @@ def commonIntegTestClusters(OpenSearchCluster cluster, _numNodes){
     if (System.getProperty("cluster.debug") != null) {
         def debugPort = 5005
         cluster.nodes.forEach { node ->
-            node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=${debugPort}")
+            node.jvmArgs("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=${debugPort}")
             debugPort += 1
         }
     }

@@ -16,11 +16,13 @@
 #include "faiss/IndexIVFFlat.h"
 #include "faiss/IndexBinaryIVF.h"
 #include "faiss/IndexIDMap.h"
+#include "faiss_bbq_flat.h"
 
 #include <string>
 #include <vector>
 #include <memory>
 #include <type_traits>
+#include <iostream>
 
 namespace knn_jni {
 namespace faiss_wrapper {
@@ -140,13 +142,14 @@ void IndexService::insertToIndex(
 
 void IndexService::writeIndex(
     faiss::IOWriter* writer,
-    jlong idMapAddress
+    jlong idMapAddress,
+    bool skipFlat
 ) {
     std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (idMapAddress));
 
     try {
         // Write the index to disk
-        faissMethods->writeIndex(idMap.get(), writer);
+        faissMethods->writeIndex(idMap.get(), writer, skipFlat);
         if (auto openSearchIOWriter = dynamic_cast<knn_jni::stream::FaissOpenSearchIOWriter*>(writer)) {
             openSearchIOWriter->flush();
         }
@@ -154,6 +157,10 @@ void IndexService::writeIndex(
         throw std::runtime_error("Failed to write index to disk");
     }
 }
+
+//
+// BinaryIndexService
+//
 
 BinaryIndexService::BinaryIndexService(std::unique_ptr<FaissMethods> _faissMethods)
   : IndexService(std::move(_faissMethods)) {
@@ -203,6 +210,50 @@ jlong BinaryIndexService::initIndex(
     return reinterpret_cast<jlong>(idMap.release());
 }
 
+jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
+                                 JNIEnv *env,
+                                 faiss::MetricType metric,
+                                 std::string indexDescription,
+                                 int dim,
+                                 int numVectors,
+                                 int threadCount,
+                                 std::unordered_map<std::string, jobject> parameters,
+                                 float centroidDp,
+                                 int quantizedVectorBytes) {
+    std::cout << "___________________ BinaryIndexService::initBBQIndex, centroidDp="
+              << centroidDp << ", quantizedVectorBytes=" << quantizedVectorBytes
+              << ", dim=" << dim
+              << ", description=" << indexDescription.c_str()
+              << std::endl;
+
+    // Create index using Faiss factory method
+    FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim);
+    // TODO : Fix hard coded hnsw m 16
+    std::unique_ptr<faiss::IndexHNSW> index (new faiss::IndexHNSW(bbqFlat, 16));
+
+    // Set thread count if it is passed in as a parameter. Setting this variable will only impact the current thread
+    if (threadCount != 0) {
+        omp_set_num_threads(threadCount);
+    }
+
+    // Add extra parameters that cant be configured with the index factory
+    SetExtraParameters<faiss::Index, faiss::IndexIVF, faiss::IndexHNSW>(jniUtil, env, parameters, index.get());
+
+    // Check that the index does not need to be trained
+    if (!index->is_trained) {
+        throw std::runtime_error("Index is not trained");
+    }
+
+    std::unique_ptr<faiss::IndexIDMap> idMap (faissMethods->indexIdMap(index.get()));
+    //Makes sure the index is deleted when the destructor is called, this cannot be passed in the constructor
+    idMap->own_fields = true;
+
+    //Release the ownership so as to make sure not delete the underlying index that is created. The index is needed later
+    //in insert and write operations
+    index.release();
+    return reinterpret_cast<jlong>(idMap.release());
+}
+
 void BinaryIndexService::insertToIndex(
         int dim,
         int numIds,
@@ -237,7 +288,8 @@ void BinaryIndexService::insertToIndex(
 
 void BinaryIndexService::writeIndex(
     faiss::IOWriter* writer,
-    jlong idMapAddress
+    jlong idMapAddress,
+    bool skipFlat
 ) {
     std::unique_ptr<faiss::IndexBinaryIDMap> idMap (reinterpret_cast<faiss::IndexBinaryIDMap *> (idMapAddress));
 
@@ -354,13 +406,14 @@ void ByteIndexService::insertToIndex(
 
 void ByteIndexService::writeIndex(
     faiss::IOWriter* writer,
-    jlong idMapAddress
+    jlong idMapAddress,
+    bool skipFlat
 ) {
     std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (idMapAddress));
 
     try {
         // Write the index to disk
-        faissMethods->writeIndex(idMap.get(), writer);
+        faissMethods->writeIndex(idMap.get(), writer, skipFlat);
         if (auto openSearchIOWriter = dynamic_cast<knn_jni::stream::FaissOpenSearchIOWriter*>(writer)) {
             openSearchIOWriter->flush();
         }

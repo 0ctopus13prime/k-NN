@@ -8,10 +8,14 @@ package org.opensearch.knn.index.codec.nativeindex;
 import lombok.AllArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.codecs.CodecUtil;
+import org.apache.lucene.codecs.hnsw.FlatFieldVectorsWriter;
+import org.apache.lucene.codecs.lucene102.Lucene102BinaryFlatVectorsScorer;
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.InfoStream;
 import org.opensearch.common.Nullable;
 import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.core.common.bytes.BytesArray;
@@ -23,6 +27,7 @@ import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
+import org.opensearch.knn.index.codec.nativeindex.bbq.BBQWriter;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
@@ -82,10 +87,10 @@ public class NativeIndexWriter {
      *
      * If quantization is required, the QuantizationModel is passed to the writer to facilitate the quantization process.
      *
-     * @param fieldInfo          The FieldInfo object containing metadata about the field for which the writer is needed.
-     * @param state              The SegmentWriteState representing the current segment's writing context.
-     * @param quantizationState  The QuantizationState that contains  quantization state required for quantization
-     * @return                   A NativeIndexWriter instance appropriate for the specified field, configured with or without quantization.
+     * @param fieldInfo         The FieldInfo object containing metadata about the field for which the writer is needed.
+     * @param state             The SegmentWriteState representing the current segment's writing context.
+     * @param quantizationState The QuantizationState that contains  quantization state required for quantization
+     * @return A NativeIndexWriter instance appropriate for the specified field, configured with or without quantization.
      */
     public static NativeIndexWriter getWriter(
         final FieldInfo fieldInfo,
@@ -109,6 +114,7 @@ public class NativeIndexWriter {
 
     /**
      * Merges kNN index
+     *
      * @param knnVectorValuesSupplier
      * @throws IOException
      */
@@ -143,31 +149,46 @@ public class NativeIndexWriter {
         }
 
         final KNNEngine knnEngine = extractKNNEngine(fieldInfo);
-        final String engineFileName = buildEngineFileName(
-            state.segmentInfo.name,
-            knnEngine.getVersion(),
-            fieldInfo.name,
-            knnEngine.getExtension()
-        );
+        final String engineFileName =
+            buildEngineFileName(state.segmentInfo.name, knnEngine.getVersion(), fieldInfo.name, knnEngine.getExtension());
+
+        writeBBQ(knnVectorValuesSupplier);
+
         try (IndexOutput output = state.directory.createOutput(engineFileName, state.context)) {
             final IndexOutputWithBuffer indexOutputWithBuffer = new IndexOutputWithBuffer(output);
-            final BuildIndexParams nativeIndexParams = indexParams(
-                fieldInfo,
-                indexOutputWithBuffer,
-                knnEngine,
-                knnVectorValuesSupplier,
-                totalLiveDocs,
-                isFlush
-            );
-            NativeIndexBuildStrategy indexBuilder = indexBuilderFactory.getBuildStrategy(
-                fieldInfo,
-                totalLiveDocs,
-                knnVectorValuesSupplier.get(),
-                nativeIndexParams
-            );
+            final BuildIndexParams nativeIndexParams =
+                indexParams(fieldInfo, indexOutputWithBuffer, knnEngine, knnVectorValuesSupplier, totalLiveDocs, isFlush);
+            NativeIndexBuildStrategy indexBuilder =
+                indexBuilderFactory.getBuildStrategy(fieldInfo, totalLiveDocs, knnVectorValuesSupplier.get(), nativeIndexParams);
             indexBuilder.buildAndWriteIndex(nativeIndexParams);
             CodecUtil.writeFooter(output);
         }
+    }
+
+    private void writeBBQ(Supplier<KNNVectorValues<?>> knnVectorValuesSupplier) throws IOException {
+        final SegmentWriteState newState = new SegmentWriteState(
+            InfoStream.NO_OUTPUT,
+            state.directory,
+            state.segmentInfo,
+            new FieldInfos(new FieldInfo[] { fieldInfo }),
+            null,
+            state.context,
+            fieldInfo.name
+        );
+        final BBQWriter bbqWriter = new BBQWriter(new Lucene102BinaryFlatVectorsScorer(null), newState);
+        final FlatFieldVectorsWriter flatFieldVectorsWriter = bbqWriter.addField(fieldInfo);
+        final KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
+        initializeVectorValues(knnVectorValues);
+
+        int maxDoc = 0;
+        while (knnVectorValues.docId() != NO_MORE_DOCS) {
+            flatFieldVectorsWriter.addValue(maxDoc = knnVectorValues.docId(), knnVectorValues.getVector());
+            knnVectorValues.nextDoc();
+        }
+
+        bbqWriter.flush(maxDoc, null);
+        bbqWriter.finish();
+        bbqWriter.close();
     }
 
     // The logic for building parameters need to be cleaned up. There are various cases handled here
@@ -197,6 +218,7 @@ public class NativeIndexWriter {
 
         return BuildIndexParams.builder()
             .fieldName(fieldInfo.name)
+            .fieldInfo(fieldInfo)
             .parameters(parameters)
             .vectorDataType(vectorDataType)
             .knnEngine(knnEngine)
@@ -230,14 +252,12 @@ public class NativeIndexWriter {
             }
             parameters.put(PARAMETERS, algoParams);
         } else {
-            parameters.putAll(
-                XContentHelper.createParser(
-                    NamedXContentRegistry.EMPTY,
-                    DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
-                    new BytesArray(parametersString),
-                    MediaTypeRegistry.getDefaultMediaType()
-                ).map()
-            );
+            parameters.putAll(XContentHelper.createParser(
+                NamedXContentRegistry.EMPTY,
+                DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                new BytesArray(parametersString),
+                MediaTypeRegistry.getDefaultMediaType()
+            ).map());
         }
 
         parameters.put(KNNConstants.VECTOR_DATA_TYPE_FIELD, vectorDataType.getValue());
@@ -323,16 +343,17 @@ public class NativeIndexWriter {
     /**
      * Helper method to create the appropriate NativeIndexWriter based on the field info and quantization state.
      *
-     * @param fieldInfo          The FieldInfo object containing metadata about the field for which the writer is needed.
-     * @param state              The SegmentWriteState representing the current segment's writing context.
-     * @param quantizationState  The QuantizationState that contains quantization state required for quantization, can be null.
+     * @param fieldInfo                       The FieldInfo object containing metadata about the field for which the writer is needed.
+     * @param state                           The SegmentWriteState representing the current segment's writing context.
+     * @param quantizationState               The QuantizationState that contains quantization state required for quantization, can be null.
      * @param nativeIndexBuildStrategyFactory The factory which will return the correct {@link NativeIndexBuildStrategy} implementation
-     * @return                   A NativeIndexWriter instance appropriate for the specified field, configured with or without quantization.
+     * @return A NativeIndexWriter instance appropriate for the specified field, configured with or without quantization.
      */
     private static NativeIndexWriter createWriter(
         final FieldInfo fieldInfo,
         final SegmentWriteState state,
-        @Nullable final QuantizationState quantizationState,
+        @Nullable
+        final QuantizationState quantizationState,
         NativeIndexBuildStrategyFactory nativeIndexBuildStrategyFactory
     ) {
         return new NativeIndexWriter(state, fieldInfo, nativeIndexBuildStrategyFactory, quantizationState);

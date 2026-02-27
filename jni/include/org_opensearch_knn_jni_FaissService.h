@@ -37,6 +37,14 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBinaryIndex
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    initBBQIndex
+ * Signature: (JILjava/util/Map;F)J
+ */
+JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
+  (JNIEnv *, jclass, jlong, jint, jobject, jfloat, jint);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
  * Method:    initByteIndex
  * Signature: ([IJILjava/lang/String;Ljava/util/Map;)V
  */
@@ -282,6 +290,30 @@ JNIEXPORT jobjectArray JNICALL Java_org_opensearch_knn_jni_FaissService_rangeSea
  * Signature: ()V
  */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_setMergeInterruptCallback(JNIEnv * env, jclass cls);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    passBBQVectors
+ * Signature: (J[BII)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_passBBQVectors
+  (JNIEnv *, jclass, jlong, jbyteArray, jint);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    addDocsToBBQIndex
+ * Signature: ([II)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQIndex
+  (JNIEnv *, jclass, jlong, jintArray, jint, jint);
+
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    writeBBQIndex
+ * Signature: (Lorg/opensearch/knn/index/store/IndexOutputWithBuffer;JLjava/util/Map;)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_writeBBQIndex
+  (JNIEnv *, jclass, jobject, jlong, jobject);
 
 #ifdef __cplusplus
 }

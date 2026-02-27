@@ -12,14 +12,22 @@
 #include "org_opensearch_knn_jni_FaissService.h"
 
 #include <jni.h>
+#include <cstring>
 
 #include <vector>
+#include <iostream>
 
 #include "faiss_wrapper.h"
 #include "jni_util.h"
 #include "faiss_stream_support.h"
 #include "faiss/impl/FaissException.h"
 #include "faiss_index_service.h"
+
+#include "faiss/IndexHNSW.h"
+#include "faiss/IndexIDMap.h"
+#include "faiss_bbq_flat.h"
+#include "faiss_methods.h"
+#include "faiss/index_factory.h"
 
 static knn_jni::JNIUtil jniUtil;
 static const jint KNN_FAISS_JNI_VERSION = JNI_VERSION_1_1;
@@ -42,6 +50,87 @@ void JNI_OnUnload(JavaVM *vm, void *reserved) {
     faiss::InterruptCallback::instance.get()->clear_instance();
     jniUtil.Uninitialize(env);
 }
+
+//
+// BBQ
+//
+
+JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
+  (JNIEnv *env, jclass cls, jlong numDocs, jint dimJ, jobject parametersJ, jfloat centroidDp, jint quantizedVecBytes) {
+    std::cout << "_____________________ Initializing BBQ Index / Java_org_opensearch_knn_jni_FaissService_initBBQIndex" << std::endl;
+
+    try {
+        std::unique_ptr<knn_jni::faiss_wrapper::FaissMethods> faissMethods(new knn_jni::faiss_wrapper::FaissMethods());
+        knn_jni::faiss_wrapper::BinaryIndexService binaryIndexService(std::move(faissMethods));
+        return knn_jni::faiss_wrapper::InitBBQIndex(&jniUtil, env, numDocs, dimJ, parametersJ, &binaryIndexService, centroidDp, quantizedVecBytes);
+    } catch (...) {
+        jniUtil.CatchCppExceptionAndThrowJava(env);
+    }
+    return (jlong)0;
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_passBBQVectors
+  (JNIEnv *env, jclass cls, jlong indexMemoryAddrJ, jbyteArray buffer, jint numVectorsAndCorrectionFactors) {
+    std::cout << "___________________ pass BBQ vectors, numVectorsAndCorrectionFactors=" << numVectorsAndCorrectionFactors << std::endl;
+
+    auto idMap = (faiss::IndexIDMap*) indexMemoryAddrJ;
+    auto indexHNSW = (faiss::IndexHNSW*) idMap->index;
+    auto faissBBQFlat = (FaissBBQFlat*) indexHNSW->storage;
+    const int32_t copyBytes = numVectorsAndCorrectionFactors * (faissBBQFlat->oneElementSize);
+
+    // Start copying
+    jbyte* jb = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(buffer, nullptr));
+
+    faissBBQFlat->quantizedVectorsAndCorrectionFactors.insert(
+        faissBBQFlat->quantizedVectorsAndCorrectionFactors.end(),
+        reinterpret_cast<uint8_t*>(jb),
+        reinterpret_cast<uint8_t*>(jb) + copyBytes
+    );
+
+    env->ReleasePrimitiveArrayCritical(buffer, jb, 0);
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQIndex
+  (JNIEnv *env, jclass cls, jlong indexMemoryAddrJ, jintArray docIdsJ, jint numDocs, jint numAdded) {
+    std::cout << "____________________ addDocsToBBQIndex"
+              << ", numDocs=" << numDocs
+              << ", numAdded=" << numAdded
+              << std::endl;
+
+    auto idMap = (faiss::IndexIDMap*) indexMemoryAddrJ;
+    auto indexHNSW = (faiss::IndexHNSW*) idMap->index;
+    auto faissBBQFlat = (FaissBBQFlat*) indexHNSW->storage;
+    int64_t docIds[numDocs];
+
+    // Copy docs
+    jint* ptr = static_cast<jint*>(env->GetPrimitiveArrayCritical(docIdsJ, nullptr));
+    for (int i = 0 ; i < numDocs; ++i) {
+        docIds[i] = ptr[i];
+    }
+    env->ReleasePrimitiveArrayCritical(docIdsJ, ptr, 0);
+
+    // Pass docs and vectors
+    auto* vecPtr =
+        (float*) faissBBQFlat->quantizedVectorsAndCorrectionFactors.data() + (numAdded * faissBBQFlat->oneElementSize);
+    idMap->add_with_ids(numDocs, vecPtr, &docIds[0]);
+}
+
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_writeBBQIndex
+  (JNIEnv *env, jclass cls, jobject indexOutputWithBuffer, jlong indexMemoryAddrJ, jobject indexParametersJ) {
+    std::unique_ptr<faiss::IndexIDMap> idMap (reinterpret_cast<faiss::IndexIDMap *> (indexMemoryAddrJ));
+    try {
+        std::unique_ptr<knn_jni::faiss_wrapper::FaissMethods> faissMethods(new knn_jni::faiss_wrapper::FaissMethods());
+        knn_jni::faiss_wrapper::IndexService indexService(std::move(faissMethods));
+        knn_jni::faiss_wrapper::WriteIndex(&jniUtil, env, indexOutputWithBuffer, indexMemoryAddrJ, &indexService, true);
+    } catch (...) {
+        jniUtil.CatchCppExceptionAndThrowJava(env);
+    }
+}
+
+//
+// BBQ
+//
+
 
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initIndex(JNIEnv * env, jclass cls,
                                                                            jlong numDocs, jint dimJ,
