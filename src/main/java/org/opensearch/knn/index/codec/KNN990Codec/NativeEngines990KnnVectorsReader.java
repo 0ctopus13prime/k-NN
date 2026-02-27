@@ -340,9 +340,9 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
         }
 
         // Start creating searcher
-        final String fileName = KNNCodecUtil.getNativeEngineFileFromFieldInfo(fieldInfo, segmentReadState.segmentInfo);
-        if (fileName != null) {
-            return () -> searcherFactory.createVectorSearcher(segmentReadState.directory, fileName, fieldInfo, ioContext);
+        final String faissFileName = KNNCodecUtil.getNativeEngineFileFromFieldInfo(fieldInfo, segmentReadState.segmentInfo);
+        if (faissFileName != null) {
+            return () -> searcherFactory.createVectorSearcher(segmentReadState, faissFileName, fieldInfo);
         }
 
         // Not supported

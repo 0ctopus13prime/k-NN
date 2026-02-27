@@ -244,50 +244,6 @@ public class BBQWriter extends FlatVectorsWriter {
         throw new UnsupportedOperationException();
     }
 
-    static DocsWithFieldSet writeBinarizedVectorAndQueryData(
-        IndexOutput binarizedVectorData,
-        IndexOutput binarizedQueryData,
-        FloatVectorValues floatVectorValues,
-        float[] centroid,
-        OptimizedScalarQuantizer binaryQuantizer
-    ) throws IOException {
-        int discretizedDimension = discretize(floatVectorValues.dimension(), 64);
-        DocsWithFieldSet docsWithField = new DocsWithFieldSet();
-        byte[][] quantizationScratch = new byte[2][floatVectorValues.dimension()];
-        byte[] toIndex = new byte[discretizedDimension / 8];
-        byte[] toQuery = new byte[(discretizedDimension / 8) * QUERY_BITS];
-        KnnVectorValues.DocIndexIterator iterator = floatVectorValues.iterator();
-        for (int docV = iterator.nextDoc(); docV != NO_MORE_DOCS; docV = iterator.nextDoc()) {
-            // write index vector
-            OptimizedScalarQuantizer.QuantizationResult[] r =
-                binaryQuantizer.multiScalarQuantize(
-                    floatVectorValues.vectorValue(iterator.index()),
-                    quantizationScratch,
-                    new byte[] { INDEX_BITS, QUERY_BITS },
-                    centroid
-                );
-            // pack and store document bit vector
-            packAsBinary(quantizationScratch[0], toIndex);
-            binarizedVectorData.writeBytes(toIndex, toIndex.length);
-            binarizedVectorData.writeInt(Float.floatToIntBits(r[0].lowerInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(r[0].upperInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(r[0].additionalCorrection()));
-            assert r[0].quantizedComponentSum() >= 0 && r[0].quantizedComponentSum() <= 0xffff;
-            binarizedVectorData.writeShort((short) r[0].quantizedComponentSum());
-            docsWithField.add(docV);
-
-            // pack and store the 4bit query vector
-            transposeHalfByte(quantizationScratch[1], toQuery);
-            binarizedQueryData.writeBytes(toQuery, toQuery.length);
-            binarizedQueryData.writeInt(Float.floatToIntBits(r[1].lowerInterval()));
-            binarizedQueryData.writeInt(Float.floatToIntBits(r[1].upperInterval()));
-            binarizedQueryData.writeInt(Float.floatToIntBits(r[1].additionalCorrection()));
-            assert r[1].quantizedComponentSum() >= 0 && r[1].quantizedComponentSum() <= 0xffff;
-            binarizedQueryData.writeShort((short) r[1].quantizedComponentSum());
-        }
-        return docsWithField;
-    }
-
     @Override
     public CloseableRandomVectorScorerSupplier mergeOneFieldToIndex(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
         throw new UnsupportedOperationException();

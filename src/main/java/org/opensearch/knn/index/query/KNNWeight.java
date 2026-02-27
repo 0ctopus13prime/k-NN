@@ -488,11 +488,13 @@ public abstract class KNNWeight extends Weight {
             );
         }
 
-        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
-            reader,
-            fieldInfo,
-            knnQuery.getField()
-        );
+        // final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = SegmentLevelQuantizationInfo.build(
+        //     reader,
+        //     fieldInfo,
+        //     knnQuery.getField()
+        // );
+        // TMP : For BBQ
+        final SegmentLevelQuantizationInfo segmentLevelQuantizationInfo = null;
 
         List<String> engineFiles = KNNCodecUtil.getEngineFiles(knnEngine.getExtension(), knnQuery.getField(), reader.getSegmentInfo().info);
         if (engineFiles.isEmpty()) {
@@ -503,6 +505,7 @@ public abstract class KNNWeight extends Weight {
         // TODO: Change type of vector once more quantization methods are supported
         byte[] quantizedVector = maybeQuantizeVector(segmentLevelQuantizationInfo);
         float[] transformedVector = maybeTransformVector(segmentLevelQuantizationInfo, spaceType);
+
         /*
          * If filters match all docs in this segment, then null should be passed as filterBitSet
          * so that it will not do a bitset look up in bottom search layer.

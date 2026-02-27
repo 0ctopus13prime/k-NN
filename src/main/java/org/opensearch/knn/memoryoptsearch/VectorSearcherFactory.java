@@ -6,8 +6,8 @@
 package org.opensearch.knn.memoryoptsearch;
 
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.IOContext;
 
 import java.io.IOException;
 
@@ -20,11 +20,12 @@ public interface VectorSearcherFactory {
      * Create a non-null {@link VectorSearcher} with given Lucene's {@link Directory}.
      *
      * @param directory Lucene's Directory.
-     * @param fileName Logical file name to load.
+     * @param fileName  Logical file name to load.
      * @param fieldInfo Field info containing metadata for ADC extraction
      * @param ioContext IOContext to use when opening the file
      * @return Null instance if it is not supported, otherwise return {@link VectorSearcher}
      * @throws IOException
      */
-    VectorSearcher createVectorSearcher(Directory directory, String fileName, FieldInfo fieldInfo, IOContext ioContext) throws IOException;
+    VectorSearcher createVectorSearcher(final SegmentReadState readState, final String faissFileName, final FieldInfo fieldInfo)
+        throws IOException;
 }

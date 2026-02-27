@@ -7,8 +7,10 @@ package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.KnnVectorValues;
+import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.AcceptDocs;
@@ -27,6 +29,7 @@ import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
 import org.opensearch.knn.jni.SimdVectorComputeService;
+import org.opensearch.knn.memoryoptsearch.FaissBBQFLat;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.faiss.cagra.FaissCagraHNSW;
 
@@ -57,12 +60,29 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private final long fileSize;
     private boolean isAdc;
     private SimdVectorComputeService.SimilarityFunctionType nativeSimilarityFunctionType;
+    private final FaissBBQFLat bbqFlat;
 
-    public FaissMemoryOptimizedSearcher(final IndexInput indexInput, final FieldInfo fieldInfo) throws IOException {
+    public FaissMemoryOptimizedSearcher(final IndexInput indexInput, final FieldInfo fieldInfo, final SegmentReadState readState)
+        throws IOException {
         this.indexInput = indexInput;
         this.fileSize = indexInput.length();
         this.faissIndex = FaissIndex.load(indexInput);
         final KNNVectorSimilarityFunction knnVectorSimilarityFunction = faissIndex.getVectorSimilarityFunction();
+
+        // TMP : BBQ
+        final SegmentReadState bbqReadState = new SegmentReadState(
+            readState.directory,
+            readState.segmentInfo,
+            new FieldInfos(new FieldInfo[] { fieldInfo }),
+            readState.context,
+            fieldInfo.getName()
+        );
+        bbqFlat = ((FaissBBQFLat) ((FaissHNSWIndex) ((FaissIdMapIndex) faissIndex).getNestedIndex()).getFlatVectors());
+        bbqFlat.tempDoLoadManually(
+            bbqReadState,
+            fieldInfo.getName()
+        );
+        // TMP
 
         if (knnVectorSimilarityFunction != KNNVectorSimilarityFunction.HAMMING) {
             vectorSimilarityFunction = knnVectorSimilarityFunction.getVectorSimilarityFunction();
@@ -95,9 +115,8 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
     @Override
     public void search(float[] target, KnnCollector knnCollector, AcceptDocs acceptDocs) throws IOException {
-        final KnnVectorValues knnVectorValues = isAdc
-            ? faissIndex.getByteValues(getSlicedIndexInput())
-            : faissIndex.getFloatValues(getSlicedIndexInput());
+        final KnnVectorValues knnVectorValues =
+            isAdc ? faissIndex.getByteValues(getSlicedIndexInput()) : faissIndex.getFloatValues(getSlicedIndexInput());
         final FloatVectorValues bottomKnnVectorValues = WrappedFloatVectorValues.getBottomFloatVectorValues(knnVectorValues);
         final boolean useNativeScoring = bottomKnnVectorValues instanceof MMapVectorValues;
         final IOSupplier<RandomVectorScorer> scorerSupplier;
@@ -106,13 +125,16 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             // We can use native scoring.
             scorerSupplier = () -> new NativeRandomVectorScorer(
                 target,
-                knnVectorValues,
-                (MMapVectorValues) bottomKnnVectorValues,
-                nativeSimilarityFunctionType
+                                                                knnVectorValues,
+                                                                (MMapVectorValues) bottomKnnVectorValues,
+                                                                nativeSimilarityFunctionType
             );
         } else {
             // Falling back to default scoring using pure Java.
-            scorerSupplier = () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, knnVectorValues, target);
+            // scorerSupplier = () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, knnVectorValues, target);
+
+            // TMP : For bbq
+            scorerSupplier = () -> bbqFlat.getBbqFlatReader().getRandomVectorScorer(bbqFlat.getFieldName(), target);
         }
 
         search(VectorEncoding.FLOAT32, scorerSupplier, knnCollector, acceptDocs);
@@ -160,13 +182,8 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
 
         if (!this.isAdc && faissIndex.getVectorEncoding() != vectorEncoding) {
             throw new IllegalArgumentException(
-                "Search for vector encoding ["
-                    + vectorEncoding
-                    + "] is not supported in "
-                    + "an index vector whose encoding is ["
-                    + faissIndex.getVectorEncoding()
-                    + "]"
-            );
+                "Search for vector encoding [" + vectorEncoding + "] is not supported in " + "an index vector whose encoding is ["
+                + faissIndex.getVectorEncoding() + "]");
         }
 
         // Set up required components for vector search
@@ -206,8 +223,8 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
                 public KnnSearchStrategy getSearchStrategy() {
                     return new RandomEntryPointsKnnSearchStrategy(
                         cagraHNSW.getNumBaseLevelSearchEntryPoints(),
-                        cagraHNSW.getTotalNumberOfVectors(),
-                        knnCollector.getSearchStrategy()
+                                                                  cagraHNSW.getTotalNumberOfVectors(),
+                                                                  knnCollector.getSearchStrategy()
                     );
                 }
             };

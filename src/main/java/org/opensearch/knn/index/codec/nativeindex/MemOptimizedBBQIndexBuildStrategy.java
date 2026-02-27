@@ -5,7 +5,6 @@
 
 package org.opensearch.knn.index.codec.nativeindex;
 
-import org.apache.lucene.codecs.lucene102.Lucene102BinaryFlatVectorsScorer;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.FloatVectorValues;
@@ -13,6 +12,7 @@ import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.opensearch.knn.index.codec.nativeindex.bbq.BBQReader;
+import org.opensearch.knn.index.codec.nativeindex.bbq.Lucene102BinaryFlatVectorsScorer;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
 import org.opensearch.knn.jni.FaissService;
@@ -44,7 +44,7 @@ public class MemOptimizedBBQIndexBuildStrategy implements NativeIndexBuildStrate
             writeState.context,
             indexInfo.getFieldName()
         );
-        final BBQReader bbqReader = new BBQReader(readState, new Lucene102BinaryFlatVectorsScorer(null));
+        final BBQReader bbqReader = new BBQReader(readState, new Lucene102BinaryFlatVectorsScorer());
         final FloatVectorValues floatVectorValues = bbqReader.getFloatVectorValues(indexInfo.getFieldName());
         final BBQReader.BinarizedVectorValues binarizedVectorValues = (BBQReader.BinarizedVectorValues) floatVectorValues;
         final int quantizedVecBytes = binarizedVectorValues.quantizedVectorValues.vectorValue(0).length;

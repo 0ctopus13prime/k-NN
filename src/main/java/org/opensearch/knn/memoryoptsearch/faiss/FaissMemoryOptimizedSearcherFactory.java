@@ -7,7 +7,11 @@ package org.opensearch.knn.memoryoptsearch.faiss;
 
 import org.apache.lucene.index.FieldInfo;
 import lombok.extern.log4j.Log4j2;
+import org.apache.lucene.index.SegmentReadState;
+import org.apache.lucene.store.DataAccessHint;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FileDataHint;
+import org.apache.lucene.store.FileTypeHint;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
@@ -27,16 +31,16 @@ public class FaissMemoryOptimizedSearcherFactory implements VectorSearcherFactor
 
     @Override
     public VectorSearcher createVectorSearcher(
-        final Directory directory,
-        final String fileName,
-        final FieldInfo fieldInfo,
-        final IOContext ioContext
+        final SegmentReadState readState,
+        final String faissFileName,
+        final FieldInfo fieldInfo
     ) throws IOException {
-        final IndexInput indexInput = directory.openInput(fileName, ioContext);
+        final IndexInput indexInput = readState.directory.openInput(
+            faissFileName, readState.context.withHints(FileTypeHint.DATA, FileDataHint.KNN_VECTORS, DataAccessHint.RANDOM));
 
         try {
             // Try load it. Not all FAISS index types are currently supported at the moment.
-            return new FaissMemoryOptimizedSearcher(indexInput, fieldInfo);
+            return new FaissMemoryOptimizedSearcher(indexInput, fieldInfo, readState);
         } catch (UnsupportedFaissIndexException e) {
             // Clean up input stream.
             try {

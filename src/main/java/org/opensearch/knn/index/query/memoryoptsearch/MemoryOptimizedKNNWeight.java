@@ -92,7 +92,6 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
         final int k
     ) {
         try {
-            final Version segmentLuceneVersion = reader.getSegmentInfo().info.getVersion();
             if (k > 0) {
                 // KNN search
                 if (quantizedTargetVector != null) {

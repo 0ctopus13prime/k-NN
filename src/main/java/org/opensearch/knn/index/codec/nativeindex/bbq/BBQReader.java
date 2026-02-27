@@ -7,7 +7,6 @@ package org.opensearch.knn.index.codec.nativeindex.bbq;
 
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
-import org.apache.lucene.codecs.lucene102.Lucene102BinaryFlatVectorsScorer;
 import org.apache.lucene.codecs.lucene95.OrdToDocDISIReaderConfiguration;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.CorruptIndexException;
@@ -181,7 +180,7 @@ public class BBQReader extends FlatVectorsReader {
                 fi.vectorDataOffset,
                 fi.vectorDataLength,
                 quantizedVectorData);
-        return new BinarizedVectorValues(bvv);
+        return new BinarizedVectorValues(bvv, fi.dimension);
     }
 
     @Override
@@ -312,14 +311,16 @@ public class BBQReader extends FlatVectorsReader {
     /** Binarized vector values holding row and quantized vector values */
     public static final class BinarizedVectorValues extends FloatVectorValues {
         public final BinarizedByteVectorValues quantizedVectorValues;
+        private final int dimension;
 
-        public BinarizedVectorValues(BinarizedByteVectorValues quantizedVectorValues) {
+        public BinarizedVectorValues(BinarizedByteVectorValues quantizedVectorValues, int dimension) {
             this.quantizedVectorValues = quantizedVectorValues;
+            this.dimension = dimension;
         }
 
         @Override
         public int dimension() {
-            throw new UnsupportedOperationException();
+            return dimension;
         }
 
         @Override
@@ -334,7 +335,7 @@ public class BBQReader extends FlatVectorsReader {
 
         @Override
         public BinarizedVectorValues copy() throws IOException {
-            return new BinarizedVectorValues(quantizedVectorValues.copy());
+            return new BinarizedVectorValues(quantizedVectorValues.copy(), dimension);
         }
 
         @Override

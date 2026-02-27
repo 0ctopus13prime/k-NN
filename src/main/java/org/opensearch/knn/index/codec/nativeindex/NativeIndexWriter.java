@@ -186,7 +186,7 @@ public class NativeIndexWriter {
             knnVectorValues.nextDoc();
         }
 
-        bbqWriter.flush(maxDoc, null);
+        bbqWriter.flush(maxDoc + 1, null);
         bbqWriter.finish();
         bbqWriter.close();
     }
