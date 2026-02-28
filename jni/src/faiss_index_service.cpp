@@ -10,6 +10,7 @@
 #include "faiss_index_service.h"
 #include "faiss_methods.h"
 #include "faiss/Index.h"
+#include "faiss/MetricType.h"
 #include "faiss/IndexBinary.h"
 #include "faiss/IndexHNSW.h"
 #include "faiss/IndexBinaryHNSW.h"
@@ -229,7 +230,7 @@ jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
     // Create index using Faiss factory method
     FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim);
     // TODO : Fix hard coded hnsw m 16
-    std::unique_ptr<faiss::IndexHNSWFlat> index (new faiss::IndexHNSWFlat(dim, 16));
+    std::unique_ptr<faiss::IndexHNSWFlat> index (new faiss::IndexHNSWFlat(dim, 16, faiss::MetricType::METRIC_INNER_PRODUCT));
     delete index->storage;
     index->storage = bbqFlat;
 

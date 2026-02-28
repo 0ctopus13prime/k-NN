@@ -1,8 +1,10 @@
 #ifndef KNNPLUGIN_JNI_FAISS_BBQ_FLAT_H
 #define KNNPLUGIN_JNI_FAISS_BBQ_FLAT_H
 
-#include <cstdint>
 #include "faiss/Index.h"
+#include "faiss/MetricType.h"
+
+#include <cstdint>
 #include <stdexcept>
 #include <iostream>
 
@@ -173,7 +175,7 @@ struct FaissBBQFlat final : public faiss::Index {
     int32_t dimension;
 
     FaissBBQFlat(int64_t _numVectors, int32_t _quantizedVectorBytes, float _centroidDp, int32_t _dimension)
-        : faiss::Index(_dimension),
+        : faiss::Index(_dimension, faiss::MetricType::METRIC_INNER_PRODUCT),
           numVectors(_numVectors),
           quantizedVectorBytes(_quantizedVectorBytes),
           centroidDp(_centroidDp),
