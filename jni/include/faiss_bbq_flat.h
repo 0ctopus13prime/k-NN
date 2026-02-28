@@ -17,19 +17,29 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
     float queryAdditional;
     float y1;
     int32_t dimension;
+    int32_t numVectors;
 
-    BBQDistanceComputer(int32_t _oneElementByteSize, const void* _data, float _centroidDp, int32_t _dimension)
+    BBQDistanceComputer(int32_t _oneElementByteSize, const void* _data, float _centroidDp, int32_t _dimension, int32_t _numVectors)
       : faiss::DistanceComputer(),
         oneElementByteSize(_oneElementByteSize),
         quantizedVectorBytes(_oneElementByteSize - (sizeof(float) * 3 - sizeof(int32_t))),
         data((const uint8_t*) _data),
         query(),
         centroidDp(_centroidDp),
-        dimension(_dimension) {
+        dimension(_dimension),
+        numVectors(_numVectors) {
     }
 
     void set_query(const float* x) final {
         query = (uint8_t*) x;
+        if (uint64_t(query) >= uint64_t(data + numVectors * oneElementByteSize)) {
+            std::cout << "_____________ query=" << uint64_t(query)
+                      << ", data=" << uint64_t(data)
+                      << ", end=" << uint64_t(data + numVectors * oneElementByteSize)
+                      << std::endl;
+            std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+            throw std::runtime_error("Query address is out of range.");
+        }
         setCorrectionFactors(query, ay, ly, queryAdditional, y1);
     }
 
@@ -178,7 +188,7 @@ struct FaissBBQFlat final : public faiss::Index {
         std::cout << "___________ FaissBBQFlat::get_distance_computer(), quantizedVectorsAndCorrectionFactors.size()="
                   << quantizedVectorsAndCorrectionFactors.size()
                   << std::endl;
-        return new BBQDistanceComputer(oneElementSize, quantizedVectorsAndCorrectionFactors.data(), centroidDp, dimension);
+        return new BBQDistanceComputer(oneElementSize, quantizedVectorsAndCorrectionFactors.data(), centroidDp, dimension, numVectors);
     }
 
     void reset() final {

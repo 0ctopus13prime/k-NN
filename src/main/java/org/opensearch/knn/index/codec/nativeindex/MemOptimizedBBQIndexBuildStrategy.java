@@ -99,13 +99,13 @@ public class MemOptimizedBBQIndexBuildStrategy implements NativeIndexBuildStrate
         for (int i = 0; i < binarizedVectorValues.size(); ) {
             final int loopSize = Math.min(binarizedVectorValues.size() - i, batchSize);
             for (int j = 0, o = 0; j < loopSize; ++j) {
-                final byte[] binaryVector = binarizedVectorValues.quantizedVectorValues.vectorValue(i);
+                final byte[] binaryVector = binarizedVectorValues.quantizedVectorValues.vectorValue(i + j);
                 if (buffer == null) {
                     // [Quantized Vector | lowerInterval (float) | upperInterval (float) | additionalCorrection (float) | quantizedComponentSum (int)]
                     buffer = new byte[(binaryVector.length + Integer.BYTES * 4) * batchSize];
                 }
                 final OptimizedScalarQuantizer.QuantizationResult quantizationResult =
-                    binarizedVectorValues.quantizedVectorValues.getCorrectiveTerms(i);
+                    binarizedVectorValues.quantizedVectorValues.getCorrectiveTerms(i + j);
 
                 // Copy quantized vector
                 System.arraycopy(binaryVector, 0, buffer, o, binaryVector.length);

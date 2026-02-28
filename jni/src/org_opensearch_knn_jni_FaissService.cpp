@@ -92,10 +92,6 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_passBBQVectors
 
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQIndex
   (JNIEnv *env, jclass cls, jlong indexMemoryAddrJ, jintArray docIdsJ, jint numDocs, jint numAdded) {
-    std::cout << "____________________ addDocsToBBQIndex"
-              << ", numDocs=" << numDocs
-              << ", numAdded=" << numAdded
-              << std::endl;
 
     auto idMap = (faiss::IndexIDMap*) indexMemoryAddrJ;
     auto indexHNSW = (faiss::IndexHNSW*) idMap->index;
@@ -111,7 +107,15 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQInde
 
     // Pass docs and vectors
     auto* vecPtr =
-        (float*) faissBBQFlat->quantizedVectorsAndCorrectionFactors.data() + (numAdded * faissBBQFlat->oneElementSize);
+        (float*) (faissBBQFlat->quantizedVectorsAndCorrectionFactors.data() + (numAdded * faissBBQFlat->oneElementSize));
+
+    std::cout << "____________________ addDocsToBBQIndex"
+              << ", numDocs=" << numDocs
+              << ", numAdded=" << numAdded
+              << ", bbq-ntotal=" << faissBBQFlat->ntotal
+              << ", oneElemSize=" << faissBBQFlat->oneElementSize
+              << ", vecPtr=" << uint64_t(vecPtr)
+              << std::endl;
     idMap->add_with_ids(numDocs, vecPtr, &docIds[0]);
     std::cout << "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR" << std::endl;
 }
