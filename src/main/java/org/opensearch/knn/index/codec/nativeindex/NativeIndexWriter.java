@@ -9,7 +9,6 @@ import lombok.AllArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.hnsw.FlatFieldVectorsWriter;
-import org.apache.lucene.codecs.lucene102.Lucene102BinaryFlatVectorsScorer;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.MergePolicy;
@@ -28,6 +27,7 @@ import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.nativeindex.bbq.BBQWriter;
+import org.opensearch.knn.index.codec.nativeindex.bbq.Lucene102BinaryFlatVectorsScorer;
 import org.opensearch.knn.index.codec.nativeindex.model.BuildIndexParams;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
@@ -175,7 +175,7 @@ public class NativeIndexWriter {
             state.context,
             fieldInfo.name
         );
-        final BBQWriter bbqWriter = new BBQWriter(new Lucene102BinaryFlatVectorsScorer(null), newState);
+        final BBQWriter bbqWriter = new BBQWriter(new Lucene102BinaryFlatVectorsScorer(), newState);
         final FlatFieldVectorsWriter flatFieldVectorsWriter = bbqWriter.addField(fieldInfo);
         final KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
         initializeVectorValues(knnVectorValues);

@@ -12,7 +12,7 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
     const int64_t oneElementByteSize;
     const uint64_t quantizedVectorBytes;
     const uint8_t* data;
-    const uint8_t* query;
+    const uint64_t* query;
     const float centroidDp;
     float ay;
     float ly;
@@ -24,7 +24,7 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
     BBQDistanceComputer(int32_t _oneElementByteSize, const void* _data, float _centroidDp, int32_t _dimension, int32_t _numVectors)
       : faiss::DistanceComputer(),
         oneElementByteSize(_oneElementByteSize),
-        quantizedVectorBytes(_oneElementByteSize - (sizeof(float) * 3 - sizeof(int32_t))),
+        quantizedVectorBytes(_oneElementByteSize - (sizeof(float) * 3 + sizeof(int32_t))),
         data((const uint8_t*) _data),
         query(),
         centroidDp(_centroidDp),
@@ -33,7 +33,7 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
     }
 
     void set_query(const float* x) final {
-        query = (uint8_t*) x;
+        query = (uint64_t*) x;
         if (uint64_t(query) >= uint64_t(data + numVectors * oneElementByteSize)) {
             std::cout << "_____________ query=" << uint64_t(query)
                       << ", data=" << uint64_t(data)
@@ -59,7 +59,7 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
 //                  << std::endl;
     }
 
-    float scoringSecondPart(const void* target, const float hamming) {
+    float scoringSecondPart(const void* target, const float dp) {
         // Get correction factors
         float ax;
         float lx;
@@ -71,7 +71,7 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         return ax * ay * dimension
                + ay * lx * x1
                + ax * ly * y1
-               + lx * ly * hamming
+               + lx * ly * dp
                + queryAdditional
                + additional
                - centroidDp;
@@ -83,13 +83,15 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
 
         const uint64_t words = quantizedVectorBytes >> 3; // divide by 8
 
-        uint32_t hamming = 0;
+        uint32_t dp = 0;
 
         for (size_t i = 0; i < words; ++i) {
-            hamming += __builtin_popcountll(query[i] ^ target[i]);
+            dp += __builtin_popcountll(query[i] & target[i]);
         }
 
-        return scoringSecondPart(target, hamming);
+        const float score = scoringSecondPart(target, dp);
+        // std::cout << "___________ operator()(" << i << ")=" << score << std::endl;
+        return score;
     }
 
     /// compute distances of current query to 4 stored vectors.
@@ -111,22 +113,25 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
 
         const uint64_t words = quantizedVectorBytes >> 3; // divide by 8
 
-        uint32_t hamming1 = 0;
-        uint32_t hamming2 = 0;
-        uint32_t hamming3 = 0;
-        uint32_t hamming4 = 0;
+        uint32_t dp1 = 0;
+        uint32_t dp2 = 0;
+        uint32_t dp3 = 0;
+        uint32_t dp4 = 0;
 
         for (size_t i = 0; i < words; ++i) {
-            hamming1 += __builtin_popcountll(query[i] ^ target1[i]);
-            hamming2 += __builtin_popcountll(query[i] ^ target2[i]);
-            hamming3 += __builtin_popcountll(query[i] ^ target3[i]);
-            hamming4 += __builtin_popcountll(query[i] ^ target4[i]);
+            dp1 += __builtin_popcountll(query[i] & target1[i]);
+            dp2 += __builtin_popcountll(query[i] & target2[i]);
+            dp3 += __builtin_popcountll(query[i] & target3[i]);
+            dp4 += __builtin_popcountll(query[i] & target4[i]);
         }
 
-        dis0 = scoringSecondPart(target1, hamming1);
-        dis1 = scoringSecondPart(target2, hamming2);
-        dis2 = scoringSecondPart(target3, hamming3);
-        dis3 = scoringSecondPart(target4, hamming4);
+        dis0 = scoringSecondPart(target1, dp1);
+        dis1 = scoringSecondPart(target2, dp2);
+        dis2 = scoringSecondPart(target3, dp3);
+        dis3 = scoringSecondPart(target4, dp4);
+
+        // std::cout << "___________ distances_batch_4(" << idx0 << ", " << idx1 << ", " << idx2 << ", " << idx3 << ") = "
+        //         << dis0 << ", " << dis1 << ", " << dis2 << ", " << dis3 << std::endl;
     }
 
     /// compute distance between two stored vectors
@@ -136,10 +141,10 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
 
         const uint64_t words = quantizedVectorBytes >> 3; // divide by 8
 
-        uint32_t hamming = 0;
+        uint32_t dp = 0;
 
         for (size_t i = 0; i < words; ++i) {
-            hamming += __builtin_popcountll(target1[i] ^ target2[i]);
+            dp += __builtin_popcountll(target1[i] & target2[i]);
         }
 
         // Get correction factors
@@ -156,13 +161,16 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         setCorrectionFactors(target2, az, lz, additionalz, z1);
 
         // Scoring
-        return ax * az * dimension
+        const float score = ax * az * dimension
                + az * lx * x1
                + ax * lz * z1
-               + lx * lz * hamming
+               + lx * lz * dp
                + additional
                + additionalz
                - centroidDp;
+
+        // std::cout << "___________ symmetric_dis(" << i << "," << j << ")=" << score << std::endl;
+        return score;
     }
 };
 

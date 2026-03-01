@@ -76,7 +76,7 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         return "Lucene102BinaryFlatVectorsScorer()";
     }
 
-    static float quantizedScore(
+    public static float quantizedScore(
         byte[] quantizedQuery,
         OptimizedScalarQuantizer.QuantizationResult queryCorrections,
         BinarizedByteVectorValues targetVectors,
