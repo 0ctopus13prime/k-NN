@@ -99,7 +99,7 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
             writeVectors(directory, vectors, segmentInfo, fieldInfo);
 
             // Step 2: Read back via BBQReader and ingest into FaissBBQFlat via JNI
-            final long indexMemoryAddress = ingestIntoFaiss(directory, dimension, numVectors, segmentInfo, fieldInfo);
+            final long indexMemoryAddress = ingestIntoFaiss(directory, dimension, numVectors, segmentInfo, fieldInfo, vectors);
 
             // Step 3: Call JNI validation scan
             FaissService.bbqValidationScan(indexMemoryAddress, TOP_K, QUERY_VECTOR_ORDINAL);
@@ -163,11 +163,6 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
         try (BBQWriter writer = new BBQWriter(scorer, writeState)) {
             FlatFieldVectorsWriter fieldWriter = writer.addField(fieldInfo);
             for (int i = 0; i < vectors.length; i++) {
-                // TMP
-                if (i == 385) {
-                    System.out.println();
-                }
-                // TMP
                 fieldWriter.addValue(i, vectors[i].clone());
             }
             writer.flush(vectors.length, null);
@@ -175,7 +170,7 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
         }
     }
 
-    private long ingestIntoFaiss(Directory directory, int dimension, int numVectors, SegmentInfo segmentInfo, FieldInfo fieldInfo) throws IOException {
+    private long ingestIntoFaiss(Directory directory, int dimension, int numVectors, SegmentInfo segmentInfo, FieldInfo fieldInfo, float[][] vectors) throws IOException {
         FieldInfos fieldInfos = new FieldInfos(new FieldInfo[] { fieldInfo });
         SegmentReadState readState = new SegmentReadState(
             directory, segmentInfo, fieldInfos, IOContext.DEFAULT, "test_field"
@@ -205,23 +200,26 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
             subParameters.put("indexThreadQty", 1);
 
             long indexMemoryAddress = FaissService.initBBQIndex(
-                numVectors, dimension, parameters, centroidDp, quantizedVecBytes
+                numVectors, dimension, parameters, centroidDp, quantizedVecBytes,
+                quantizedVectorValues.getCentroid()
             );
 
             // Pass quantized vectors + correction factors in batches
             passQuantizedVectors(indexMemoryAddress, binarizedVectorValues);
 
-            // Add doc IDs
+            // Add doc IDs and float vectors for ADC scoring
             int batchSize = 500;
             int[] docIds = new int[batchSize];
             int numAdded = 0;
             int remaining = numVectors;
             while (remaining > 0) {
                 int count = Math.min(batchSize, remaining);
+                float[] batchVectors = new float[count * dimension];
                 for (int i = 0; i < count; i++) {
                     docIds[i] = numAdded + i;
+                    System.arraycopy(vectors[numAdded + i], 0, batchVectors, i * dimension, dimension);
                 }
-                FaissService.addDocsToBBQIndex(indexMemoryAddress, docIds, count, numAdded);
+                FaissService.addDocsToBBQIndex(indexMemoryAddress, docIds, batchVectors, count, numAdded);
                 numAdded += count;
                 remaining -= count;
             }

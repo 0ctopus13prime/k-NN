@@ -38,10 +38,10 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBinaryIndex
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    initBBQIndex
- * Signature: (JILjava/util/Map;F)J
+ * Signature: (JILjava/util/Map;FI[F)J
  */
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
-  (JNIEnv *, jclass, jlong, jint, jobject, jfloat, jint);
+  (JNIEnv *, jclass, jlong, jint, jobject, jfloat, jint, jfloatArray);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService
@@ -302,10 +302,10 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_passBBQVectors
 /*
  * Class:     org_opensearch_knn_jni_FaissService
  * Method:    addDocsToBBQIndex
- * Signature: ([II)V
+ * Signature: (J[I[FII)V
  */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQIndex
-  (JNIEnv *, jclass, jlong, jintArray, jint, jint);
+  (JNIEnv *, jclass, jlong, jintArray, jfloatArray, jint, jint);
 
 /*
  * Class:     org_opensearch_knn_jni_FaissService

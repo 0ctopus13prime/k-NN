@@ -468,11 +468,11 @@ public class FaissService {
     //
     // BBQ
     //
-    public static native long initBBQIndex(long numDocs, int dim, Map<String, Object> parameters, float centroidDp, int quantizedVecBytes);
+    public static native long initBBQIndex(long numDocs, int dim, Map<String, Object> parameters, float centroidDp, int quantizedVecBytes, float[] centroid);
 
     public static native void passBBQVectors(long indexMemoryAddress, byte[] buffer, int loopSize);
 
-    public static native void addDocsToBBQIndex(long indexMemoryAddress, int[] docIds, int numDocs, int numAdded);
+    public static native void addDocsToBBQIndex(long indexMemoryAddress, int[] docIds, float[] vectors, int numDocs, int numAdded);
 
     public static native void writeBBQIndex(
         IndexOutputWithBuffer indexOutputWithBuffer,

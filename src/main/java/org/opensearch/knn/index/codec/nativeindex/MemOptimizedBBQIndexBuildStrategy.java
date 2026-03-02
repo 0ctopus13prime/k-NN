@@ -49,32 +49,56 @@ public class MemOptimizedBBQIndexBuildStrategy implements NativeIndexBuildStrate
         final BBQReader.BinarizedVectorValues binarizedVectorValues = (BBQReader.BinarizedVectorValues) floatVectorValues;
         final int quantizedVecBytes = binarizedVectorValues.quantizedVectorValues.vectorValue(0).length;
         final float centroidDp = binarizedVectorValues.quantizedVectorValues.getCentroidDP();
+        final float[] centroid;
+        try {
+            centroid = binarizedVectorValues.quantizedVectorValues.getCentroid();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to get centroid from binarized vector values", e);
+        }
 
-        // Initialize the index
+        // Initialize the index with centroid
         final long indexMemoryAddress =
             AccessController.doPrivileged((PrivilegedAction<Long>) () -> FaissService.initBBQIndex(
                 indexInfo.getTotalLiveDocs(),
                 indexBuildSetup.getDimensions(),
                 indexParameters,
                 centroidDp,
-                quantizedVecBytes
+                quantizedVecBytes,
+                centroid
             ));
 
         // Pass quantized vectors + correction factors
         passQuantizedVectorsCorrectionFactors(indexMemoryAddress, binarizedVectorValues);
 
-        // Transfer document ids
+        // Transfer document ids and float vectors for ADC scoring during HNSW construction
         final int batchSize = 500;
         final int[] docIds = new int[batchSize];
+        final int dimension = indexBuildSetup.getDimensions();
         int numAdded = 0;
-        while (knnVectorValues.docId() != NO_MORE_DOCS) {
+
+        // Get a fresh iterator for float vectors
+        final KNNVectorValues<?> floatVectorIter = indexInfo.getKnnVectorValuesSupplier().get();
+        initializeVectorValues(floatVectorIter);
+
+        while (floatVectorIter.docId() != NO_MORE_DOCS) {
             int i = 0;
-            while (i < batchSize && knnVectorValues.docId() != NO_MORE_DOCS) {
-                docIds[i++] = knnVectorValues.docId();
-                knnVectorValues.nextDoc();
+            float[] batchVectors = new float[batchSize * dimension];
+            while (i < batchSize && floatVectorIter.docId() != NO_MORE_DOCS) {
+                docIds[i] = floatVectorIter.docId();
+                float[] vec = (float[]) floatVectorIter.getVector();
+                System.arraycopy(vec, 0, batchVectors, i * dimension, dimension);
+                i++;
+                floatVectorIter.nextDoc();
             }
 
-            FaissService.addDocsToBBQIndex(indexMemoryAddress, docIds, i, numAdded);
+            // Trim the vectors array if the last batch is smaller
+            if (i < batchSize) {
+                float[] trimmed = new float[i * dimension];
+                System.arraycopy(batchVectors, 0, trimmed, 0, i * dimension);
+                batchVectors = trimmed;
+            }
+
+            FaissService.addDocsToBBQIndex(indexMemoryAddress, docIds, batchVectors, i, numAdded);
             numAdded += i;
         }
 

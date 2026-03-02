@@ -220,7 +220,8 @@ jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
                                  int threadCount,
                                  std::unordered_map<std::string, jobject> parameters,
                                  float centroidDp,
-                                 int quantizedVectorBytes) {
+                                 int quantizedVectorBytes,
+                                 const float* centroid) {
     std::cout << "___________________ BinaryIndexService::initBBQIndex, centroidDp="
               << centroidDp << ", quantizedVectorBytes=" << quantizedVectorBytes
               << ", dim=" << dim
@@ -228,7 +229,7 @@ jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
               << std::endl;
 
     // Create index using Faiss factory method
-    FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim);
+    FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim, centroid);
     // TODO : Fix hard coded hnsw m 16
     std::unique_ptr<faiss::IndexHNSWFlat> index (new faiss::IndexHNSWFlat(dim, 16, faiss::MetricType::METRIC_INNER_PRODUCT));
     delete index->storage;

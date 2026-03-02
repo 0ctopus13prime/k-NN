@@ -104,7 +104,8 @@ jlong knn_jni::faiss_wrapper::InitBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
                                            jobject parametersJ,
                                            BinaryIndexService *indexService,
                                            jfloat centroidDp,
-                                           jint quantizedVecBytes) {
+                                           jint quantizedVecBytes,
+                                           jfloatArray centroidJ) {
     std::cout << "_______________________ knn_jni::faiss_wrapper::InitBBQIndex, centroidDp="
               << centroidDp << ", quantizedVecBytes=" << quantizedVecBytes
               << std::endl;
@@ -153,8 +154,12 @@ jlong knn_jni::faiss_wrapper::InitBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
     }
     // end parameters to pass
 
+    // Extract centroid float array
+    jfloat* centroidPtr = env->GetFloatArrayElements(centroidJ, nullptr);
+    jsize centroidLen = env->GetArrayLength(centroidJ);
+
     // Create index
-    return indexService->initBBQIndex(jniUtil,
+    jlong result = indexService->initBBQIndex(jniUtil,
                                       env,
                                       metric,
                                       std::move(indexDescriptionCpp),
@@ -163,7 +168,11 @@ jlong knn_jni::faiss_wrapper::InitBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
                                       threadCount,
                                       std::move(subParametersCpp),
                                       centroidDp,
-                                      quantizedVecBytes);
+                                      quantizedVecBytes,
+                                      centroidPtr);
+
+    env->ReleaseFloatArrayElements(centroidJ, centroidPtr, 0);
+    return result;
 }
 
 jlong knn_jni::faiss_wrapper::InitIndex(knn_jni::JNIUtilInterface * jniUtil, JNIEnv * env, jlong numDocs, jint dimJ,
