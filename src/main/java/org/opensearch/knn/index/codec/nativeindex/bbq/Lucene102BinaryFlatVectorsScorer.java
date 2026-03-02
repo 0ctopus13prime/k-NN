@@ -41,6 +41,28 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         if (vectorValues instanceof BinarizedByteVectorValues binarizedVectors) {
             OptimizedScalarQuantizer quantizer = binarizedVectors.getQuantizer();
             float[] centroid = binarizedVectors.getCentroid();
+            /*
+            0 = 0.08550828
+            1 = 0.06966767
+            2 = -0.0652298
+            3 = 0.080238864
+            4 = -0.09468319
+            5 = 0.027879393
+            6 = 0.37707922
+            7 = -0.30908647
+            ...
+
+            // mean centered
+            0 = 0.2010614
+            1 = -0.1014845
+            2 = 0.13191453
+            3 = -0.047312405
+            4 = 0.08639037
+            5 = 0.14085552
+            6 = -0.37792552
+            7 = -0.051692337
+             */
+
             // We make a copy as the quantization process mutates the input
             float[] copy = ArrayUtil.copyOfSubArray(target, 0, target.length);
             if (similarityFunction == COSINE) {
@@ -83,6 +105,13 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         int targetOrd,
         VectorSimilarityFunction similarityFunction
     ) throws IOException {
+        // TMP
+        //  vec=[187, 6, 23, 35 ...], lower=-0.334691, intervalLength=0.677276, additionalCorrection=135.639, quantizedComponentSum=379
+        if (targetOrd == 248) {
+            System.out.println();
+        }
+        // TMP
+
         byte[] binaryCode = targetVectors.vectorValue(targetOrd);
         float qcDist = VectorUtil.int4BitDotProduct(quantizedQuery, binaryCode);
         OptimizedScalarQuantizer.QuantizationResult indexCorrections = targetVectors.getCorrectiveTerms(targetOrd);
@@ -101,7 +130,8 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         float score = ax * ay * targetVectors.dimension() + ay * lx * x1 + ax * ly * y1 + lx * ly * qcDist;
         score += queryCorrections.additionalCorrection() + indexCorrections.additionalCorrection() - targetVectors.getCentroidDP();
         if (similarityFunction == MAXIMUM_INNER_PRODUCT) {
-            return VectorUtil.scaleMaxInnerProductScore(score);
+            float sss = VectorUtil.scaleMaxInnerProductScore(score);
+            return sss;
         }
         return Math.max((1f + score) / 2f, 0);
     }

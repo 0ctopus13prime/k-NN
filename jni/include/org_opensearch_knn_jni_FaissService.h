@@ -315,6 +315,14 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQInde
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_writeBBQIndex
   (JNIEnv *, jclass, jobject, jlong, jobject);
 
+/*
+ * Class:     org_opensearch_knn_jni_FaissService
+ * Method:    bbqValidationScan
+ * Signature: (JII)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bbqValidationScan
+  (JNIEnv *, jclass, jlong, jint, jint);
+
 #ifdef __cplusplus
 }
 #endif

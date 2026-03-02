@@ -55,6 +55,93 @@ void JNI_OnUnload(JavaVM *vm, void *reserved) {
 // BBQ
 //
 
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bbqValidationScan
+  (JNIEnv *env, jclass cls, jlong indexMemoryAddrJ, jint topK, jint queryVectorOrdinal) {
+    try {
+        auto idMap = (faiss::IndexIDMap*) indexMemoryAddrJ;
+        auto indexHNSW = (faiss::IndexHNSW*) idMap->index;
+        auto faissBBQFlat = (FaissBBQFlat*) indexHNSW->storage;
+
+        auto* dc = dynamic_cast<BBQDistanceComputer*>(faissBBQFlat->get_distance_computer());
+        if (dc == nullptr) {
+            throw std::runtime_error("Failed to get BBQDistanceComputer");
+        }
+
+        int32_t numVectors = faissBBQFlat->numVectors;
+
+        // Collect all symmetric distances
+        std::vector<std::pair<int32_t, float>> results;
+        results.reserve(numVectors);
+
+        for (int32_t i = 0; i < numVectors; i++) {
+            if (i == queryVectorOrdinal) {
+                continue;
+            }
+            float dist = dc->symmetric_dis(queryVectorOrdinal, i);
+
+            // TMP
+            if (i == 385) {
+                auto vec = &faissBBQFlat->quantizedVectorsAndCorrectionFactors[faissBBQFlat->oneElementSize * i];
+                const auto* correctionFactors = (const float*) ((const uint8_t*) vec + faissBBQFlat->quantizedVectorBytes);
+                const auto lowerInterval = correctionFactors[0];
+                const auto intervalLength = correctionFactors[1] - correctionFactors[0];
+                const auto additionalCorrection = correctionFactors[2];
+                const auto quantizedComponentSum = *((const int32_t*) (&correctionFactors[3]));
+
+                auto vec0 = &faissBBQFlat->quantizedVectorsAndCorrectionFactors[0];
+                const auto* correctionFactors0 = (const float*) ((const uint8_t*) vec0 + faissBBQFlat->quantizedVectorBytes);
+                const auto lowerInterval0 = correctionFactors0[0];
+                const auto intervalLength0 = correctionFactors0[1] - correctionFactors0[0];
+                const auto additionalCorrection0 = correctionFactors0[2];
+                const auto quantizedComponentSum0 = *((const int32_t*) (&correctionFactors0[3]));
+
+
+                std::cout << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ i=" << i
+                          << ", dist=" << dist
+                          << ", vec=[" << (int) vec[0] << ", " << (int) vec[1] << ", " << (int) vec[2] << ", " << (int) vec[3] << " ...]"
+                          << ", lower=" << lowerInterval
+                          << ", intervalLength=" << intervalLength
+                          << ", additionalCorrection=" << additionalCorrection
+                          << ", quantizedComponentSum=" << quantizedComponentSum
+                          << ", vec0=[" << (int) vec0[0] << ", " << (int) vec0[1] << ", " << (int) vec0[2] << ", " << (int) vec0[3] << " ...]"
+                          << ", lower0=" << lowerInterval0
+                          << ", intervalLength0=" << intervalLength0
+                          << ", additionalCorrection0=" << additionalCorrection0
+                          << ", quantizedComponentSum0=" << quantizedComponentSum0
+                          << std::endl;
+            }
+            // TMP
+
+            results.push_back({i, dist});
+        }
+
+        // Sort by score descending (inner product: higher is better)
+        std::sort(results.begin(), results.end(),
+            [](const std::pair<int32_t, float>& a, const std::pair<int32_t, float>& b) {
+                return a.second > b.second;
+            });
+
+        // Print top-k
+        int32_t limit = std::min((int32_t) topK, (int32_t) results.size());
+        std::cout << "=== BBQDistanceComputer Symmetric Scoring Top-" << topK
+                  << " (query ordinal=" << queryVectorOrdinal << ") ===" << std::endl;
+        for (int32_t i = 0; i < limit; i++) {
+            const auto dist = results[i].second;
+            const float score = dist < 0 ? 1.0 / (1.0 + -1.0 * dist) : dist + 1.0;
+            std::cout << results[i].first << "\t" << dist << std::endl;
+        }
+        /*
+    public static float scaleMaxInnerProductScore(float vectorDotProductSimilarity) {
+        return vectorDotProductSimilarity < 0.0F ? 1.0F / (1.0F + -1.0F * vectorDotProductSimilarity) : vectorDotProductSimilarity + 1.0F;
+    }
+        */
+
+        delete dc;
+    } catch (...) {
+        jniUtil.CatchCppExceptionAndThrowJava(env);
+    }
+}
+
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
   (JNIEnv *env, jclass cls, jlong numDocs, jint dimJ, jobject parametersJ, jfloat centroidDp, jint quantizedVecBytes) {
     std::cout << "_____________________ Initializing BBQ Index / Java_org_opensearch_knn_jni_FaissService_initBBQIndex" << std::endl;

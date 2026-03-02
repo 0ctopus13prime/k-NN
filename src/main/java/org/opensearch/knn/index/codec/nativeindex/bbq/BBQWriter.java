@@ -24,19 +24,24 @@ import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.CloseableRandomVectorScorerSupplier;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
+import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.BINARIZED_VECTOR_COMPONENT;
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.QUERY_BITS;
 import static org.apache.lucene.index.VectorSimilarityFunction.COSINE;
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import static org.apache.lucene.util.RamUsageEstimator.shallowSizeOfInstance;
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.packAsBinary;
+import static org.opensearch.knn.index.codec.util.KNNCodecUtil.initializeVectorValues;
 
 public class BBQWriter extends FlatVectorsWriter {
     static final int VERSION_START = 0;
@@ -101,9 +106,6 @@ public class BBQWriter extends FlatVectorsWriter {
     public void flush(int maxDoc, Sorter.DocMap sortMap) throws IOException {
         for (FieldWriter field : fields) {
             // after raw vectors are written, normalize vectors for clustering and quantization
-            if (VectorSimilarityFunction.COSINE == field.fieldInfo.getVectorSimilarityFunction()) {
-                field.normalizeVectors();
-            }
             final float[] clusterCenter;
             int vectorCount = field.vectors.size();
             clusterCenter = new float[field.dimensionSums.length];
@@ -111,12 +113,6 @@ public class BBQWriter extends FlatVectorsWriter {
                 for (int i = 0; i < field.dimensionSums.length; i++) {
                     clusterCenter[i] = field.dimensionSums[i] / vectorCount;
                 }
-                if (VectorSimilarityFunction.COSINE == field.fieldInfo.getVectorSimilarityFunction()) {
-                    VectorUtil.l2normalize(clusterCenter);
-                }
-            }
-            if (segmentWriteState.infoStream.isEnabled(BINARIZED_VECTOR_COMPONENT)) {
-                segmentWriteState.infoStream.message(BINARIZED_VECTOR_COMPONENT, "Vectors' count:" + vectorCount);
             }
             OptimizedScalarQuantizer quantizer = new OptimizedScalarQuantizer(field.fieldInfo.getVectorSimilarityFunction());
             if (sortMap == null) {
@@ -235,8 +231,92 @@ public class BBQWriter extends FlatVectorsWriter {
     }
 
     @Override
-    public void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
+    public void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * 2-phase merge: reads vectors twice to avoid holding all fp32 vectors in memory.
+     * Pass 1: iterate vectors to compute centroid (dimensionSums) and build docsWithFieldSet.
+     * Pass 2: iterate vectors again to quantize against the centroid and write binarized data.
+     */
+    public void mergeOneField(FieldInfo fieldInfo, Supplier<KNNVectorValues<?>> knnVectorValuesSupplier) throws IOException {
+        // Pass 1: compute centroid + build docsWithFieldSet
+        FieldWriter fieldWriter = new FieldWriter(fieldInfo);
+        KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
+        initializeVectorValues(knnVectorValues);
+
+        int maxDoc = 0;
+        int vectorCount = 0;
+        while (knnVectorValues.docId() != NO_MORE_DOCS) {
+            maxDoc = knnVectorValues.docId();
+            fieldWriter.addValueForMerge(knnVectorValues.docId(), (float[]) knnVectorValues.getVector());
+            vectorCount++;
+            knnVectorValues.nextDoc();
+        }
+
+        // Compute cluster center from accumulated sums
+        float[] clusterCenter = new float[fieldInfo.getVectorDimension()];
+        if (vectorCount > 0) {
+            for (int i = 0; i < fieldWriter.dimensionSums.length; i++) {
+                clusterCenter[i] = fieldWriter.dimensionSums[i] / vectorCount;
+            }
+        }
+
+        OptimizedScalarQuantizer quantizer = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+
+        // Pass 2: quantize and write
+        writeFieldForMerge(fieldInfo, clusterCenter, maxDoc + 1, quantizer, knnVectorValuesSupplier, fieldWriter.getDocsWithFieldSet());
+        fieldWriter.finish();
+    }
+
+    private void writeFieldForMerge(
+        FieldInfo fieldInfo,
+        float[] clusterCenter,
+        int maxDoc,
+        OptimizedScalarQuantizer quantizer,
+        Supplier<KNNVectorValues<?>> knnVectorValuesSupplier,
+        DocsWithFieldSet docsWithFieldSet
+    ) throws IOException {
+        long vectorDataOffset = binarizedVectorData.alignFilePointer(Float.BYTES);
+        writeBinarizedVectorsForMerge(fieldInfo, clusterCenter, quantizer, knnVectorValuesSupplier);
+        long vectorDataLength = binarizedVectorData.getFilePointer() - vectorDataOffset;
+        float centroidDp = docsWithFieldSet.cardinality() > 0 ? VectorUtil.dotProduct(clusterCenter, clusterCenter) : 0;
+
+        writeMeta(fieldInfo, maxDoc, vectorDataOffset, vectorDataLength, clusterCenter, centroidDp, docsWithFieldSet);
+    }
+
+    private void writeBinarizedVectorsForMerge(
+        FieldInfo fieldInfo,
+        float[] clusterCenter,
+        OptimizedScalarQuantizer scalarQuantizer,
+        Supplier<KNNVectorValues<?>> knnVectorValuesSupplier
+    ) throws IOException {
+        int discreteDims = discretize(fieldInfo.getVectorDimension(), 64);
+        byte[] quantizationScratch = new byte[discreteDims];
+        byte[] vector = new byte[discreteDims / 8];
+
+        // Get a fresh iterator for the second pass
+        KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
+        initializeVectorValues(knnVectorValues);
+
+        while (knnVectorValues.docId() != NO_MORE_DOCS) {
+            float[] v = (float[]) knnVectorValues.getVector();
+            OptimizedScalarQuantizer.QuantizationResult corrections = scalarQuantizer.scalarQuantize(
+                v,
+                quantizationScratch,
+                INDEX_BITS,
+                clusterCenter
+            );
+            packAsBinary(quantizationScratch, vector);
+            binarizedVectorData.writeBytes(vector, vector.length);
+            binarizedVectorData.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(corrections.upperInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
+            assert corrections.quantizedComponentSum() >= 0 && corrections.quantizedComponentSum() <= 0xffff;
+            binarizedVectorData.writeShort((short) corrections.quantizedComponentSum());
+            knnVectorValues.nextDoc();
+        }
     }
 
     @Override
@@ -280,16 +360,6 @@ public class BBQWriter extends FlatVectorsWriter {
             return vectors;
         }
 
-        public void normalizeVectors() {
-            for (int i = 0; i < vectors.size(); i++) {
-                float[] vector = vectors.get(i);
-                float magnitude = magnitudes.get(i);
-                for (int j = 0; j < vector.length; j++) {
-                    vector[j] /= magnitude;
-                }
-            }
-        }
-
         @Override
         public DocsWithFieldSet getDocsWithFieldSet() {
             return docsWithFieldSet;
@@ -313,17 +383,19 @@ public class BBQWriter extends FlatVectorsWriter {
             vectors.add(vectorValue);
             docsWithFieldSet.add(docID);
 
-            if (fieldInfo.getVectorSimilarityFunction() == COSINE) {
-                float dp = VectorUtil.dotProduct(vectorValue, vectorValue);
-                float divisor = (float) Math.sqrt(dp);
-                magnitudes.add(divisor);
-                for (int i = 0; i < vectorValue.length; i++) {
-                    dimensionSums[i] += (vectorValue[i] / divisor);
-                }
-            } else {
-                for (int i = 0; i < vectorValue.length; i++) {
-                    dimensionSums[i] += vectorValue[i];
-                }
+            for (int i = 0; i < vectorValue.length; i++) {
+                dimensionSums[i] += vectorValue[i];
+            }
+        }
+
+        /**
+         * Adds a value for the merge path: accumulates dimension sums and tracks docs,
+         * but does NOT store the vector in memory.
+         */
+        public void addValueForMerge(int docID, float[] vectorValue) {
+            docsWithFieldSet.add(docID);
+            for (int i = 0; i < vectorValue.length; i++) {
+                dimensionSums[i] += vectorValue[i];
             }
         }
 

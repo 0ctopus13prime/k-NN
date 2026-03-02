@@ -149,7 +149,8 @@ public class NativeEngines990KnnVectorsWriter extends KnnVectorsWriter {
             return;
         }
 
-        final QuantizationState quantizationState = train(fieldInfo, knnVectorValuesSupplier, totalLiveDocs);
+        // final QuantizationState quantizationState = train(fieldInfo, knnVectorValuesSupplier, totalLiveDocs);
+        final QuantizationState quantizationState = null;
         // should skip graph building only for non quantization use case and if threshold is met
         if (quantizationState == null && shouldSkipBuildingVectorDataStructure(totalLiveDocs)) {
             log.debug(

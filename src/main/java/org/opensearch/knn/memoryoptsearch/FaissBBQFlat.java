@@ -18,13 +18,13 @@ import org.opensearch.knn.memoryoptsearch.faiss.FaissIndex;
 
 import java.io.IOException;
 
-public class FaissBBQFLat extends FaissIndex {
+public class FaissBBQFlat extends FaissIndex {
     @Getter
     private FlatVectorsReader bbqFlatReader;
     @Getter
     private String fieldName;
 
-    public FaissBBQFLat(final String indexType) {
+    public FaissBBQFlat(final String indexType) {
         super(indexType);
     }
 

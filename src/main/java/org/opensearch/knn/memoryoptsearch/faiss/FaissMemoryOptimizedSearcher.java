@@ -29,7 +29,7 @@ import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
 import org.opensearch.knn.jni.SimdVectorComputeService;
-import org.opensearch.knn.memoryoptsearch.FaissBBQFLat;
+import org.opensearch.knn.memoryoptsearch.FaissBBQFlat;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.faiss.cagra.FaissCagraHNSW;
 
@@ -60,7 +60,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     private final long fileSize;
     private boolean isAdc;
     private SimdVectorComputeService.SimilarityFunctionType nativeSimilarityFunctionType;
-    private final FaissBBQFLat bbqFlat;
+    private final FaissBBQFlat bbqFlat;
 
     public FaissMemoryOptimizedSearcher(final IndexInput indexInput, final FieldInfo fieldInfo, final SegmentReadState readState)
         throws IOException {
@@ -77,7 +77,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             readState.context,
             fieldInfo.getName()
         );
-        bbqFlat = ((FaissBBQFLat) ((FaissHNSWIndex) ((FaissIdMapIndex) faissIndex).getNestedIndex()).getFlatVectors());
+        bbqFlat = ((FaissBBQFlat) ((FaissHNSWIndex) ((FaissIdMapIndex) faissIndex).getNestedIndex()).getFlatVectors());
         bbqFlat.tempDoLoadManually(
             bbqReadState,
             fieldInfo.getName()
@@ -134,7 +134,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
             // scorerSupplier = () -> flatVectorsScorer.getRandomVectorScorer(vectorSimilarityFunction, knnVectorValues, target);
 
             // TMP : For bbq
-            scorerSupplier = () -> bbqFlat.getBbqFlatReader().getRandomVectorScorer(bbqFlat.getFieldName(), target);
+            scorerSupplier = () -> bbqFlat.getBbqFlatReader().getRandomVectorScorer(bbqFlat.getFieldName(), target.clone());
         }
 
         search(VectorEncoding.FLOAT32, scorerSupplier, knnCollector, acceptDocs);

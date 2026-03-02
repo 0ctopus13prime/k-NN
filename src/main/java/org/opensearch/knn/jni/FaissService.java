@@ -479,4 +479,14 @@ public class FaissService {
         long indexMemoryAddress,
         Map<String, Object> indexParameters
     );
+
+    /**
+     * Validation method: full-scan top-k using BBQDistanceComputer::symmetric_dis on the in-memory FaissBBQFlat.
+     * Prints (vectorOrdinal, score) pairs to stdout.
+     *
+     * @param indexMemoryAddress memory address of the index (IndexIDMap -> IndexHNSW -> FaissBBQFlat)
+     * @param topK number of top results to return
+     * @param queryVectorOrdinal ordinal of the query vector within the quantized data
+     */
+    public static native void bbqValidationScan(long indexMemoryAddress, int topK, int queryVectorOrdinal);
 }

@@ -152,7 +152,7 @@ public class NativeIndexWriter {
         final String engineFileName =
             buildEngineFileName(state.segmentInfo.name, knnEngine.getVersion(), fieldInfo.name, knnEngine.getExtension());
 
-        writeBBQ(knnVectorValuesSupplier);
+        writeBBQ(knnVectorValuesSupplier, isFlush);
 
         try (IndexOutput output = state.directory.createOutput(engineFileName, state.context)) {
             final IndexOutputWithBuffer indexOutputWithBuffer = new IndexOutputWithBuffer(output);
@@ -165,7 +165,7 @@ public class NativeIndexWriter {
         }
     }
 
-    private void writeBBQ(Supplier<KNNVectorValues<?>> knnVectorValuesSupplier) throws IOException {
+    private void writeBBQ(Supplier<KNNVectorValues<?>> knnVectorValuesSupplier, boolean isFlush) throws IOException {
         final SegmentWriteState newState = new SegmentWriteState(
             InfoStream.NO_OUTPUT,
             state.directory,
@@ -176,17 +176,21 @@ public class NativeIndexWriter {
             fieldInfo.name
         );
         final BBQWriter bbqWriter = new BBQWriter(new Lucene102BinaryFlatVectorsScorer(), newState);
-        final FlatFieldVectorsWriter flatFieldVectorsWriter = bbqWriter.addField(fieldInfo);
-        final KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
-        initializeVectorValues(knnVectorValues);
 
-        int maxDoc = 0;
-        while (knnVectorValues.docId() != NO_MORE_DOCS) {
-            flatFieldVectorsWriter.addValue(maxDoc = knnVectorValues.docId(), knnVectorValues.getVector());
-            knnVectorValues.nextDoc();
+        // Use 2-phase merge path: reads vectors twice, never stores fp32 vectors in memory
+        if (isFlush) {
+            final FlatFieldVectorsWriter flatFieldVectorsWriter = bbqWriter.addField(fieldInfo);
+            final KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
+            initializeVectorValues(knnVectorValues);
+            int maxDoc = 0;
+            while (knnVectorValues.docId() != NO_MORE_DOCS) {
+                flatFieldVectorsWriter.addValue(maxDoc = knnVectorValues.docId(), knnVectorValues.getVector());
+                knnVectorValues.nextDoc();
+            }
+            bbqWriter.flush(maxDoc + 1, null);
+        } else {
+            bbqWriter.mergeOneField(fieldInfo, knnVectorValuesSupplier);
         }
-
-        bbqWriter.flush(maxDoc + 1, null);
         bbqWriter.finish();
         bbqWriter.close();
     }
