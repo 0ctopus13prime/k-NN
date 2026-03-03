@@ -201,17 +201,11 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
     int32_t numVectors;
     const float* centroid; // pointer to centroid stored in FaissBBQFlat
 
-    // 4-bit transposed query vector for ADC scoring
-    std::vector<uint8_t> quantized4bit;
-    // Query correction factors
-    float ay;
-    float ly; // already scaled by FOUR_BIT_SCALE
-    float queryAdditional;
-    float y1;
-
-    // Scratch buffers for quantization (allocated once, reused per set_query)
-    std::vector<float> centeredScratch;
-    std::vector<uint8_t> rawQuantized;
+    // fp32 query vector (centered on centroid)
+    std::vector<float> centeredQuery;
+    // Query-side correction terms
+    float queryCentroidDot;  // query · centroid
+    float queryCenteredSum;  // sum of (query - centroid)
 
     BBQDistanceComputer(int32_t _oneElementByteSize, const void* _data, float _centroidDp,
                         int32_t _dimension, int32_t _numVectors, const float* _centroid)
@@ -223,47 +217,19 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         dimension(_dimension),
         numVectors(_numVectors),
         centroid(_centroid),
-        ay(0), ly(0), queryAdditional(0), y1(0)
+        queryCentroidDot(0), queryCenteredSum(0)
     {
-        int discreteDim = discretize(_dimension, 64);
-        int binaryLen = discreteDim / 8; // bytes for 1-bit vector
-        quantized4bit.resize(4 * binaryLen, 0);
-        centeredScratch.resize(_dimension, 0);
-        rawQuantized.resize(_dimension, 0);
-
-        std::cout << "_______________________ BBQDistanceComputer::BBQDistanceComputer(), discreteDim=" << discreteDim
-                  << ", binaryLen=" << binaryLen
-                  << ", centroid[0]=" << _centroid[0]
-                  << ", centroid[1]=" << _centroid[1]
-                  << ", centroid[2]=" << _centroid[2]
-                  << ", centroid[3]=" << _centroid[3]
-                  << std::endl;
+        centeredQuery.resize(_dimension, 0);
     }
 
     void set_query(const float* x) final {
-        // Quantize the float query to 4-bit
-        ScalarQuantizeResult result = scalarQuantize4bit(
-            x, dimension, centroid, centeredScratch.data(), rawQuantized.data());
-
-        // Transpose into bit-plane layout
-        std::fill(quantized4bit.begin(), quantized4bit.end(), 0);
-        transposeHalfByte(rawQuantized.data(), dimension, quantized4bit.data(), (int)quantized4bit.size());
-
-        // Store correction factors with FOUR_BIT_SCALE applied to ly
-        ay = result.lowerInterval;
-        ly = (result.upperInterval - result.lowerInterval) * FOUR_BIT_SCALE;
-        queryAdditional = result.additionalCorrection;
-        y1 = (float)result.quantizedComponentSum;
-
-//        std::cout << "_______________________ BBQDistanceComputer::set_query(), ay=" << ay
-//                  << ", ly=" << ly
-//                  << ", queryAdditional=" << queryAdditional
-//                  << ", y1=" << y1
-//                  << ", q[0]=" << x[0]
-//                  << ", q[1]=" << x[1]
-//                  << ", q[2]=" << x[2]
-//                  << ", q[3]=" << x[3]
-//                  << std::endl;
+        queryCentroidDot = 0;
+        queryCenteredSum = 0;
+        for (int i = 0; i < dimension; ++i) {
+            queryCentroidDot += x[i] * centroid[i];
+            centeredQuery[i] = x[i] - centroid[i];
+            queryCenteredSum += centeredQuery[i];
+        }
     }
 
     void setCorrectionFactors(const void* target, float& lowerInterval, float& intervalLength,
@@ -275,23 +241,42 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         quantizedComponentSum = *((const int32_t*) (&correctionFactors[3]));
     }
 
-    float scoringSecondPart(const void* target, const float dp) {
-        float ax, lx, additional, x1;
-        setCorrectionFactors(target, ax, lx, additional, x1);
-        return ax * ay * dimension
-               + ay * lx * x1
-               + ax * ly * y1
-               + lx * ly * dp
-               + queryAdditional
-               + additional
-               - centroidDp;
+    // Compute dot product between fp32 centered query and 1-bit packed vector
+    // For each set bit at position h, accumulate centeredQuery[h]
+    float fp32BitDotProduct(const uint8_t* binaryVec) const {
+        float result = 0;
+        int h = 0;
+        for (int byteIdx = 0; byteIdx < (int)quantizedVectorBytes && h < dimension; ++byteIdx) {
+            uint8_t byte = binaryVec[byteIdx];
+            // Bits are packed MSB first (bit 7 = first dimension in the group)
+            for (int bit = 7; bit >= 0 && h < dimension; --bit, ++h) {
+                if ((byte >> bit) & 1) {
+                    result += centeredQuery[h];
+                }
+            }
+        }
+        return result;
     }
 
-    /// compute distance of vector i to current query using 4-bit x 1-bit ADC
+    float scoreFromFp32(const void* target) {
+        float ax, lx, additional, x1;
+        setCorrectionFactors(target, ax, lx, additional, x1);
+
+        float dp = fp32BitDotProduct((const uint8_t*)target);
+
+        // score = centroidDot_query + centroidDot_stored - centroidDp
+        //       + ax * queryCenteredSum + lx * dp
+        return queryCentroidDot
+               + additional       // stored centroidDot
+               - centroidDp
+               + ax * queryCenteredSum
+               + lx * dp;
+    }
+
+    /// compute distance of vector i to current query using fp32 x 1-bit
     float operator()(faiss::idx_t i) final {
         const uint8_t* target = data + i * oneElementByteSize;
-        float dp = (float)int4BitDotProduct(quantized4bit.data(), target, (int)quantizedVectorBytes);
-        return scoringSecondPart(target, dp);
+        return scoreFromFp32(target);
     }
 
     void distances_batch_4(
@@ -303,28 +288,10 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
             float& dis1,
             float& dis2,
             float& dis3) final {
-        const uint8_t* t0 = data + idx0 * oneElementByteSize;
-        const uint8_t* t1 = data + idx1 * oneElementByteSize;
-        const uint8_t* t2 = data + idx2 * oneElementByteSize;
-        const uint8_t* t3 = data + idx3 * oneElementByteSize;
-
-        int binaryLen = (int)quantizedVectorBytes;
-        float dp0 = (float)int4BitDotProduct(quantized4bit.data(), t0, binaryLen);
-        float dp1 = (float)int4BitDotProduct(quantized4bit.data(), t1, binaryLen);
-        float dp2 = (float)int4BitDotProduct(quantized4bit.data(), t2, binaryLen);
-        float dp3 = (float)int4BitDotProduct(quantized4bit.data(), t3, binaryLen);
-
-        dis0 = scoringSecondPart(t0, dp0);
-        dis1 = scoringSecondPart(t1, dp1);
-        dis2 = scoringSecondPart(t2, dp2);
-        dis3 = scoringSecondPart(t3, dp3);
-
-//        std::cout << "_______________________ BBQDistanceComputer::distances_batch_4()"
-//                  << ", idx0=" << idx0 << ", dis0=" << dis0
-//                  << ", idx1=" << idx1 << ", dis1=" << dis1
-//                  << ", idx2=" << idx2 << ", dis2=" << dis2
-//                  << ", idx3=" << idx3 << ", dis3=" << dis3
-//                  << std::endl;
+        dis0 = scoreFromFp32(data + idx0 * oneElementByteSize);
+        dis1 = scoreFromFp32(data + idx1 * oneElementByteSize);
+        dis2 = scoreFromFp32(data + idx2 * oneElementByteSize);
+        dis3 = scoreFromFp32(data + idx3 * oneElementByteSize);
     }
 
     /// compute distance between two stored vectors — stays 1-bit x 1-bit symmetric
@@ -343,19 +310,13 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         float az, lz, additionalz, z1;
         setCorrectionFactors(target2, az, lz, additionalz, z1);
 
-        float score = ax * az * dimension
+        return ax * az * dimension
                + az * lx * x1
                + ax * lz * z1
                + lx * lz * dp
                + additional
                + additionalz
                - centroidDp;
-
-//        std::cout << "_______________________ FaissBBQFlat::symmetric_dis(), i=" << i << ", j=" << j
-//                  << ", score=" << score
-//                  << std::endl;
-
-        return score;
     }
 };
 
