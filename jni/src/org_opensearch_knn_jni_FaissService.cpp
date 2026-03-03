@@ -157,6 +157,11 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQInde
     std::cout << "____________________ addDocsToBBQIndex"
               << ", numDocs=" << numDocs
               << ", numAdded=" << numAdded
+              << ", vecPtr[0]=" << vecPtr[0]
+              << ", vecPtr[1]=" << vecPtr[1]
+              << ", vecPtr[2]=" << vecPtr[2]
+              << ", vecPtr[3]=" << vecPtr[3]
+              << ", addr(vecPtr)=" << ((uint64_t) vecPtr)
               << std::endl;
     idMap->add_with_ids(numDocs, vecPtr, &docIds[0]);
 

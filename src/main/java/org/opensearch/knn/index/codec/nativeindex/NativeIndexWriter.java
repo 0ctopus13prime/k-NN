@@ -184,7 +184,7 @@ public class NativeIndexWriter {
             initializeVectorValues(knnVectorValues);
             int maxDoc = 0;
             while (knnVectorValues.docId() != NO_MORE_DOCS) {
-                flatFieldVectorsWriter.addValue(maxDoc = knnVectorValues.docId(), knnVectorValues.getVector());
+                flatFieldVectorsWriter.addValue(maxDoc = knnVectorValues.docId(), ((float[]) knnVectorValues.getVector()).clone());
                 knnVectorValues.nextDoc();
             }
             bbqWriter.flush(maxDoc + 1, null);

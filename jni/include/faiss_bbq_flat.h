@@ -254,6 +254,16 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         ly = (result.upperInterval - result.lowerInterval) * FOUR_BIT_SCALE;
         queryAdditional = result.additionalCorrection;
         y1 = (float)result.quantizedComponentSum;
+
+//        std::cout << "_______________________ BBQDistanceComputer::set_query(), ay=" << ay
+//                  << ", ly=" << ly
+//                  << ", queryAdditional=" << queryAdditional
+//                  << ", y1=" << y1
+//                  << ", q[0]=" << x[0]
+//                  << ", q[1]=" << x[1]
+//                  << ", q[2]=" << x[2]
+//                  << ", q[3]=" << x[3]
+//                  << std::endl;
     }
 
     void setCorrectionFactors(const void* target, float& lowerInterval, float& intervalLength,
@@ -308,6 +318,13 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         dis1 = scoringSecondPart(t1, dp1);
         dis2 = scoringSecondPart(t2, dp2);
         dis3 = scoringSecondPart(t3, dp3);
+
+//        std::cout << "_______________________ BBQDistanceComputer::distances_batch_4()"
+//                  << ", idx0=" << idx0 << ", dis0=" << dis0
+//                  << ", idx1=" << idx1 << ", dis1=" << dis1
+//                  << ", idx2=" << idx2 << ", dis2=" << dis2
+//                  << ", idx3=" << idx3 << ", dis3=" << dis3
+//                  << std::endl;
     }
 
     /// compute distance between two stored vectors — stays 1-bit x 1-bit symmetric
@@ -326,13 +343,19 @@ struct BBQDistanceComputer final : faiss::DistanceComputer {
         float az, lz, additionalz, z1;
         setCorrectionFactors(target2, az, lz, additionalz, z1);
 
-        return ax * az * dimension
+        float score = ax * az * dimension
                + az * lx * x1
                + ax * lz * z1
                + lx * lz * dp
                + additional
                + additionalz
                - centroidDp;
+
+//        std::cout << "_______________________ FaissBBQFlat::symmetric_dis(), i=" << i << ", j=" << j
+//                  << ", score=" << score
+//                  << std::endl;
+
+        return score;
     }
 };
 

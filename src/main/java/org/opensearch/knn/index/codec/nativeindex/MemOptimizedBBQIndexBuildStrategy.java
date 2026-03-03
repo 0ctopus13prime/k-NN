@@ -87,7 +87,7 @@ public class MemOptimizedBBQIndexBuildStrategy implements NativeIndexBuildStrate
                 docIds[i] = floatVectorIter.docId();
                 float[] vec = (float[]) floatVectorIter.getVector();
                 System.arraycopy(vec, 0, batchVectors, i * dimension, dimension);
-                i++;
+                ++i;
                 floatVectorIter.nextDoc();
             }
 
