@@ -111,11 +111,14 @@ public class BBQReader extends FlatVectorsReader {
         }
 
         int binaryDims = discretize(dimension, 64) / 8;
-        long numQuantizedVectorBytes = Math.multiplyExact((binaryDims + (Float.BYTES * 3) + Short.BYTES), (long) fieldEntry.size);
+        // Primary: binaryDims + 3 floats (12B) + 1 short (2B) = binaryDims + 14
+        // Residual: binaryDims + 3 floats (12B) + 1 short (2B) = binaryDims + 14
+        long perVector = (binaryDims + 14) * 2L;
+        long numQuantizedVectorBytes = perVector * (long) fieldEntry.size;
         if (numQuantizedVectorBytes != fieldEntry.vectorDataLength) {
             throw new IllegalStateException(
                 "Binarized vector data length " + fieldEntry.vectorDataLength + " not matching size = " + fieldEntry.size
-                + " * (binaryBytes=" + binaryDims + " + 14" + ") = " + numQuantizedVectorBytes);
+                + " * " + perVector + " = " + numQuantizedVectorBytes);
         }
     }
 

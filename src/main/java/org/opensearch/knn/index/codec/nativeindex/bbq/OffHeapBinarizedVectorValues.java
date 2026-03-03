@@ -59,7 +59,9 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         this.centroidDp = centroidDp;
         this.numBytes = discretize(dimension, 64) / 8;
         this.correctiveValues = new float[3];
-        this.byteSize = numBytes + (Float.BYTES * 3) + Short.BYTES;
+        // Primary block: numBytes + 3 floats + 1 short = numBytes + 14
+        // Residual block: numBytes + 3 floats + 1 short = numBytes + 14
+        this.byteSize = (numBytes + (Float.BYTES * 3) + Short.BYTES) * 2;
         this.byteBuffer = ByteBuffer.allocate(numBytes);
         this.binaryValue = byteBuffer.array();
         this.binaryQuantizer = quantizer;

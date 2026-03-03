@@ -15,7 +15,6 @@ import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Sorter;
-import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.FloatArrayList;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
@@ -36,7 +35,6 @@ import java.util.function.Supplier;
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.BINARIZED_VECTOR_COMPONENT;
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.QUERY_BITS;
-import static org.apache.lucene.index.VectorSimilarityFunction.COSINE;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import static org.apache.lucene.util.RamUsageEstimator.shallowSizeOfInstance;
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
@@ -51,6 +49,23 @@ public class BBQWriter extends FlatVectorsWriter {
     static final String META_EXTENSION = "vemb";
     static final String VECTOR_DATA_EXTENSION = "veb";
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
+
+    /** Number of bits used for quantizing the error residual. */
+    public static final byte ERROR_RESIDUAL_BITS = 1;
+
+    /**
+     * Dequantize a scalar quantized code back to a float value.
+     *
+     * @param code the quantized code (e.g. 0 or 1 for 1-bit)
+     * @param lower the lower interval bound
+     * @param upper the upper interval bound
+     * @param bits number of bits used for quantization
+     * @return the dequantized float value
+     */
+    public static float dequantize(int code, float lower, float upper, int bits) {
+        float step = (upper - lower) / ((1 << bits) - 1);
+        return lower + code * step;
+    }
 
     private static final long SHALLOW_RAM_BYTES_USED = shallowSizeOfInstance(BBQWriter.class);
 
@@ -145,9 +160,15 @@ public class BBQWriter extends FlatVectorsWriter {
 
     private void writeBinarizedVectors(FieldWriter fieldData, float[] clusterCenter, OptimizedScalarQuantizer scalarQuantizer)
         throws IOException {
-        int discreteDims = discretize(fieldData.fieldInfo.getVectorDimension(), 64);
+        int dimension = fieldData.fieldInfo.getVectorDimension();
+        int discreteDims = discretize(dimension, 64);
         byte[] quantizationScratch = new byte[discreteDims];
         byte[] vector = new byte[discreteDims / 8];
+        // Scratch buffers for error residual quantization
+        float[] residual = new float[dimension];
+        float[] zeroVector = new float[dimension];
+        byte[] residualScratch = new byte[discreteDims];
+        byte[] residualVector = new byte[discreteDims / 8];
         for (int i = 0; i < fieldData.getVectors().size(); i++) {
             float[] v = fieldData.getVectors().get(i);
             OptimizedScalarQuantizer.QuantizationResult corrections =
@@ -159,6 +180,21 @@ public class BBQWriter extends FlatVectorsWriter {
             binarizedVectorData.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
             assert corrections.quantizedComponentSum() >= 0 && corrections.quantizedComponentSum() <= 0xffff;
             binarizedVectorData.writeShort((short) corrections.quantizedComponentSum());
+
+            // Compute error residual: r[i] = v[i] (already centered) - dequantize(code[i])
+            for (int d = 0; d < dimension; d++) {
+                residual[d] = v[d] - dequantize(quantizationScratch[d], corrections.lowerInterval(), corrections.upperInterval(), INDEX_BITS);
+            }
+            // Quantize the residual with zero centroid (residual is already in error space)
+            OptimizedScalarQuantizer.QuantizationResult residualCorrections =
+                scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
+            packAsBinary(residualScratch, residualVector);
+            binarizedVectorData.writeBytes(residualVector, residualVector.length);
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.additionalCorrection()));
+            assert residualCorrections.quantizedComponentSum() >= 0 && residualCorrections.quantizedComponentSum() <= 0xffff;
+            binarizedVectorData.writeShort((short) residualCorrections.quantizedComponentSum());
         }
     }
 
@@ -292,9 +328,15 @@ public class BBQWriter extends FlatVectorsWriter {
         OptimizedScalarQuantizer scalarQuantizer,
         Supplier<KNNVectorValues<?>> knnVectorValuesSupplier
     ) throws IOException {
-        int discreteDims = discretize(fieldInfo.getVectorDimension(), 64);
+        int dimension = fieldInfo.getVectorDimension();
+        int discreteDims = discretize(dimension, 64);
         byte[] quantizationScratch = new byte[discreteDims];
         byte[] vector = new byte[discreteDims / 8];
+        // Scratch buffers for error residual quantization
+        float[] residual = new float[dimension];
+        float[] zeroVector = new float[dimension];
+        byte[] residualScratch = new byte[discreteDims];
+        byte[] residualVector = new byte[discreteDims / 8];
 
         // Get a fresh iterator for the second pass
         KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
@@ -315,6 +357,22 @@ public class BBQWriter extends FlatVectorsWriter {
             binarizedVectorData.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
             assert corrections.quantizedComponentSum() >= 0 && corrections.quantizedComponentSum() <= 0xffff;
             binarizedVectorData.writeShort((short) corrections.quantizedComponentSum());
+
+            // Compute error residual: r[i] = v[i] (already centered) - dequantize(code[i])
+            for (int d = 0; d < dimension; d++) {
+                residual[d] = v[d] - dequantize(quantizationScratch[d], corrections.lowerInterval(), corrections.upperInterval(), INDEX_BITS);
+            }
+            // Quantize the residual with zero centroid (residual is already in error space)
+            OptimizedScalarQuantizer.QuantizationResult residualCorrections =
+                scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
+            packAsBinary(residualScratch, residualVector);
+            binarizedVectorData.writeBytes(residualVector, residualVector.length);
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));
+            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.additionalCorrection()));
+            assert residualCorrections.quantizedComponentSum() >= 0 && residualCorrections.quantizedComponentSum() <= 0xffff;
+            binarizedVectorData.writeShort((short) residualCorrections.quantizedComponentSum());
+
             knnVectorValues.nextDoc();
         }
     }
