@@ -157,7 +157,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
      * @param queryVector the query vector
      */
     public void initRerank(float[] queryVector) {
-        this.centeredQueryVector = queryVector;
+        this.centeredQueryVector = queryVector.clone();
         for (int i = 0 ; i < this.centeredQueryVector.length ; ++i) {
             this.centeredQueryVector[i] -= centroid[i];
         }

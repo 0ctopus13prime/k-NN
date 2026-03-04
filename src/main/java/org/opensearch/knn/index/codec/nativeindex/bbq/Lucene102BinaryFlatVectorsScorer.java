@@ -83,6 +83,12 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         int targetOrd,
         VectorSimilarityFunction similarityFunction
     ) throws IOException {
+        // TMP
+        if (targetOrd == 4183) {
+            System.out.println("");
+        }
+        // TMP
+
         byte[] binaryCode = targetVectors.vectorValue(targetOrd);
         float qcDist = VectorUtil.int4BitDotProduct(quantizedQuery, binaryCode);
         OptimizedScalarQuantizer.QuantizationResult indexCorrections = targetVectors.getCorrectiveTerms(targetOrd);

@@ -127,7 +127,7 @@ public class BBQWriter extends FlatVectorsWriter {
         return componentSum;
     }
 
-    private static final boolean PRINT_RESIDUAL_HISTOGRAM = false;
+    private static final boolean PRINT_RESIDUAL_HISTOGRAM = true;
 
     /**
      * Print a histogram of raw residual values for debugging.
@@ -138,6 +138,7 @@ public class BBQWriter extends FlatVectorsWriter {
         int[] histogram = new int[numBuckets];
         float bucketWidth = delta / numBuckets;
         int outOfRange = 0;
+        int maxCount = 0;
         for (float r : residual) {
             if (r < -halfDelta || r > halfDelta) {
                 outOfRange++;
@@ -145,19 +146,25 @@ public class BBQWriter extends FlatVectorsWriter {
             }
             int bucket = (int) ((r + halfDelta) / bucketWidth);
             if (bucket >= numBuckets) bucket = numBuckets - 1;
-            histogram[bucket] = histogram[bucket] + 1;
+            histogram[bucket]++;
+            if (histogram[bucket] > maxCount) maxCount = histogram[bucket];
         }
+        int maxBarWidth = 40;
         StringBuilder sb = new StringBuilder();
-        sb.append("___ Residual histogram (delta=").append(delta).append(", dim=").append(residual.length).append("):\n");
+        sb.append("___ Residual histogram (delta=").append(String.format("%.4f", delta))
+          .append(", dim=").append(residual.length).append(")\n");
         for (int i = 0; i < numBuckets; i++) {
             float lo = -halfDelta + i * bucketWidth;
             float hi = lo + bucketWidth;
-            sb.append(String.format("  [%+.4f, %+.4f): %d%n", lo, hi, histogram[i]));
+            int barLen = (maxCount > 0) ? (histogram[i] * maxBarWidth / maxCount) : 0;
+            sb.append(String.format("  [%+.4f,%+.4f) %4d | ", lo, hi, histogram[i]));
+            for (int j = 0; j < barLen; j++) sb.append('■');
+            sb.append('\n');
         }
         if (outOfRange > 0) {
-            sb.append("  out-of-range: ").append(outOfRange).append("\n");
+            sb.append("  out-of-range: ").append(outOfRange).append('\n');
         }
-        System.out.println(sb);
+        System.out.print(sb);
     }
 
     private static final long SHALLOW_RAM_BYTES_USED = shallowSizeOfInstance(BBQWriter.class);
