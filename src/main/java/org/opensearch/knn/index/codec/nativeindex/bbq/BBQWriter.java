@@ -102,6 +102,64 @@ public class BBQWriter extends FlatVectorsWriter {
         return discretize(dimension * bitsPerCode, 64) / 8;
     }
 
+    /**
+     * Quantize a residual vector using uniform scalar quantization with fixed bounds [-delta/2, delta/2]
+     * as defined in the LVQ paper: Q_res(r; B', -delta/2, delta/2).
+     *
+     * @param residual the residual vector (r = centered_v - dequantize(Q(v)))
+     * @param destination output quantized codes (one byte per dimension, value in [0, 2^bits - 1])
+     * @param bits number of bits for residual quantization
+     * @param delta the first-level quantization step size: (upper - lower) / (2^INDEX_BITS - 1)
+     * @return the sum of quantized component codes
+     */
+    public static int quantizeResidualUniform(float[] residual, byte[] destination, byte bits, float delta) {
+        float halfDelta = delta / 2.0f;
+        int nSteps = (1 << bits) - 1;
+        float step = delta / nSteps;
+        int componentSum = 0;
+        for (int i = 0; i < residual.length; i++) {
+            float clamped = Math.min(Math.max(residual[i], -halfDelta), halfDelta);
+            int code = Math.round((clamped + halfDelta) / step);
+            code = Math.min(Math.max(code, 0), nSteps);
+            destination[i] = (byte) code;
+            componentSum += code;
+        }
+        return componentSum;
+    }
+
+    private static final boolean PRINT_RESIDUAL_HISTOGRAM = false;
+
+    /**
+     * Print a histogram of raw residual values for debugging.
+     */
+    public static void printErrorResidualHistogram(float[] residual, float delta) {
+        float halfDelta = delta / 2.0f;
+        int numBuckets = 20;
+        int[] histogram = new int[numBuckets];
+        float bucketWidth = delta / numBuckets;
+        int outOfRange = 0;
+        for (float r : residual) {
+            if (r < -halfDelta || r > halfDelta) {
+                outOfRange++;
+                continue;
+            }
+            int bucket = (int) ((r + halfDelta) / bucketWidth);
+            if (bucket >= numBuckets) bucket = numBuckets - 1;
+            histogram[bucket] = histogram[bucket] + 1;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("___ Residual histogram (delta=").append(delta).append(", dim=").append(residual.length).append("):\n");
+        for (int i = 0; i < numBuckets; i++) {
+            float lo = -halfDelta + i * bucketWidth;
+            float hi = lo + bucketWidth;
+            sb.append(String.format("  [%+.4f, %+.4f): %d%n", lo, hi, histogram[i]));
+        }
+        if (outOfRange > 0) {
+            sb.append("  out-of-range: ").append(outOfRange).append("\n");
+        }
+        System.out.println(sb);
+    }
+
     private static final long SHALLOW_RAM_BYTES_USED = shallowSizeOfInstance(BBQWriter.class);
 
     private final SegmentWriteState segmentWriteState;
@@ -201,7 +259,6 @@ public class BBQWriter extends FlatVectorsWriter {
         byte[] vector = new byte[discreteDims / 8];
         // Scratch buffers for error residual quantization
         float[] residual = new float[dimension];
-        float[] zeroVector = new float[dimension];
         byte[] residualScratch = new byte[discreteDims];
         int residualPackedSize = packedBytesSize(dimension, ERROR_RESIDUAL_BITS);
         byte[] residualVector = new byte[residualPackedSize];
@@ -218,19 +275,23 @@ public class BBQWriter extends FlatVectorsWriter {
             binarizedVectorData.writeShort((short) corrections.quantizedComponentSum());
 
             // Compute error residual: r[i] = v[i] (already centered) - dequantize(code[i])
+            float delta = (corrections.upperInterval() - corrections.lowerInterval()) / ((1 << INDEX_BITS) - 1);
             for (int d = 0; d < dimension; d++) {
                 residual[d] = v[d] - dequantize(quantizationScratch[d], corrections.lowerInterval(), corrections.upperInterval(), INDEX_BITS);
             }
-            // Quantize the residual with zero centroid (residual is already in error space)
-            OptimizedScalarQuantizer.QuantizationResult residualCorrections =
-                scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
+            if (PRINT_RESIDUAL_HISTOGRAM) {
+                printErrorResidualHistogram(residual, delta);
+            }
+            // Quantize residual with fixed bounds [-delta/2, delta/2] per LVQ paper
+            float halfDelta = delta / 2.0f;
+            int residualComponentSum = quantizeResidualUniform(residual, residualScratch, ERROR_RESIDUAL_BITS, delta);
             packBits(residualScratch, residualVector, ERROR_RESIDUAL_BITS);
             binarizedVectorData.writeBytes(residualVector, residualVector.length);
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.additionalCorrection()));
-            assert residualCorrections.quantizedComponentSum() >= 0 && residualCorrections.quantizedComponentSum() <= 0xffff;
-            binarizedVectorData.writeShort((short) residualCorrections.quantizedComponentSum());
+            binarizedVectorData.writeInt(Float.floatToIntBits(-halfDelta));
+            binarizedVectorData.writeInt(Float.floatToIntBits(halfDelta));
+            binarizedVectorData.writeInt(Float.floatToIntBits(0f));  // additionalCorrection not needed for residual
+            assert residualComponentSum >= 0 && residualComponentSum <= 0xffff;
+            binarizedVectorData.writeShort((short) residualComponentSum);
         }
     }
 
@@ -371,7 +432,6 @@ public class BBQWriter extends FlatVectorsWriter {
         byte[] vector = new byte[discreteDims / 8];
         // Scratch buffers for error residual quantization
         float[] residual = new float[dimension];
-        float[] zeroVector = new float[dimension];
         byte[] residualScratch = new byte[discreteDims];
         int residualPackedSize = packedBytesSize(dimension, ERROR_RESIDUAL_BITS);
         byte[] residualVector = new byte[residualPackedSize];
@@ -397,19 +457,23 @@ public class BBQWriter extends FlatVectorsWriter {
             binarizedVectorData.writeShort((short) corrections.quantizedComponentSum());
 
             // Compute error residual: r[i] = v[i] (already centered) - dequantize(code[i])
+            float delta = (corrections.upperInterval() - corrections.lowerInterval()) / ((1 << INDEX_BITS) - 1);
             for (int d = 0; d < dimension; d++) {
                 residual[d] = v[d] - dequantize(quantizationScratch[d], corrections.lowerInterval(), corrections.upperInterval(), INDEX_BITS);
             }
-            // Quantize the residual with zero centroid (residual is already in error space)
-            OptimizedScalarQuantizer.QuantizationResult residualCorrections =
-                scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
+            if (PRINT_RESIDUAL_HISTOGRAM) {
+                printErrorResidualHistogram(residual, delta);
+            }
+            // Quantize residual with fixed bounds [-delta/2, delta/2] per LVQ paper
+            float halfDelta = delta / 2.0f;
+            int residualComponentSum = quantizeResidualUniform(residual, residualScratch, ERROR_RESIDUAL_BITS, delta);
             packBits(residualScratch, residualVector, ERROR_RESIDUAL_BITS);
             binarizedVectorData.writeBytes(residualVector, residualVector.length);
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));
-            binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.additionalCorrection()));
-            assert residualCorrections.quantizedComponentSum() >= 0 && residualCorrections.quantizedComponentSum() <= 0xffff;
-            binarizedVectorData.writeShort((short) residualCorrections.quantizedComponentSum());
+            binarizedVectorData.writeInt(Float.floatToIntBits(-halfDelta));
+            binarizedVectorData.writeInt(Float.floatToIntBits(halfDelta));
+            binarizedVectorData.writeInt(Float.floatToIntBits(0f));  // additionalCorrection not needed for residual
+            assert residualComponentSum >= 0 && residualComponentSum <= 0xffff;
+            binarizedVectorData.writeShort((short) residualComponentSum);
 
             knnVectorValues.nextDoc();
         }
