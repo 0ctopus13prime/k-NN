@@ -13,7 +13,6 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.VectorScorer;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
@@ -44,6 +43,9 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
     private final int discretizedDimensions;
     // Rerank support
     private float[] centeredQueryVector;
+    final int errorResidualBits;
+    final int residualNumBytes;
+    final int primaryBlockSize;
 
     OffHeapBinarizedVectorValues(
         int dimension,
@@ -53,6 +55,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         OptimizedScalarQuantizer quantizer,
         VectorSimilarityFunction similarityFunction,
         FlatVectorsScorer vectorsScorer,
+        int errorResidualBits,
         IndexInput slice
     ) {
         this.dimension = dimension;
@@ -64,9 +67,15 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         this.centroidDp = centroidDp;
         this.numBytes = discretize(dimension, 64) / 8;
         this.correctiveValues = new float[3];
-        // Primary block: numBytes + 3 floats + 1 short = numBytes + 14
-        // Residual block: numBytes + 3 floats + 1 short = numBytes + 14
-        this.byteSize = (numBytes + (Float.BYTES * 3) + Short.BYTES) * 2;
+        this.primaryBlockSize = numBytes + (Float.BYTES * 3) + Short.BYTES;
+        this.errorResidualBits = errorResidualBits;
+        this.residualNumBytes = (errorResidualBits > 0)
+            ? discretize(dimension * errorResidualBits, 64) / 8
+            : 0;
+        int residualBlockSize = (errorResidualBits > 0)
+            ? residualNumBytes + (Float.BYTES * 3) + Short.BYTES
+            : 0;
+        this.byteSize = primaryBlockSize + residualBlockSize;
         this.byteBuffer = ByteBuffer.allocate(numBytes);
         this.binaryValue = byteBuffer.array();
         this.binaryQuantizer = quantizer;
@@ -148,7 +157,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
      * @param queryVector the query vector
      */
     public void initRerank(float[] queryVector) {
-        this.centeredQueryVector = queryVector.clone();
+        this.centeredQueryVector = queryVector;
         for (int i = 0 ; i < this.centeredQueryVector.length ; ++i) {
             this.centeredQueryVector[i] -= centroid[i];
         }
@@ -163,11 +172,10 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
      * @throws IOException if an I/O error occurs
      */
     public BinarizedByteVectorValues.QuantizedErrorResidual getQuantizedErrorResidual(int targetOrd) throws IOException {
-        // Jump to the residual block: primary block size = byteSize / 2
-        int primaryBlockSize = byteSize / 2;
+        // Jump to the residual block: after the primary block
         slice.seek((long) targetOrd * byteSize + primaryBlockSize);
-        byte[] residualBytes = new byte[numBytes];
-        slice.readBytes(residualBytes, 0, numBytes);
+        byte[] residualBytes = new byte[residualNumBytes];
+        slice.readBytes(residualBytes, 0, residualNumBytes);
         float[] resCorrectiveValues = new float[3];
         slice.readFloats(resCorrectiveValues, 0, 3);
         int resQuantizedComponentSum = Short.toUnsignedInt(slice.readShort());
@@ -192,29 +200,45 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
      * @throws IOException if an I/O error occurs
      */
     public float rerank(int targetOrd, float approximatedMipScore) throws IOException {
-        // 1. Get the 1-bit residual metadata
+        // Reverse scaleMaxInnerProductScore to get raw dot product
+        float rawApproxDot = unscaleMaxInnerProductScore(approximatedMipScore);
+
         BinarizedByteVectorValues.QuantizedErrorResidual residual = getQuantizedErrorResidual(targetOrd);
         float rLow = residual.lowerInterval();
         float rHigh = residual.upperInterval();
-        byte[] packedErrorResidualBits = residual.quantizedErrorResidual();
+        byte[] packedResidual = residual.quantizedErrorResidual();
 
-        // 2. Compute the Correction: < (q - c), R >
-        float correction = 0f;
-        for (int d = 0; d < dimension; d++) {
-            // Extract the bit for the residual
-            int bit = (packedErrorResidualBits[d >> 3] >> (7 - (d % 8))) & 1;
+        // Compute <q, Q_res(r)> by dequantizing the residual and dotting with query
+        float qDotResidual = 0f;
+        int nSteps = (1 << errorResidualBits) - 1;
+        float step = (nSteps > 0) ? (rHigh - rLow) / nSteps : 0f;
 
-            // Dequantize the residual value
-            float r_d = (bit == 1) ? rHigh : rLow;
-
-            // Multiply by the CENTERED query component
-            // Note: centeredQuery[d] = query[d] - centroid[d]
-            correction += centeredQueryVector[d] * r_d;
+        if (errorResidualBits == 1) {
+            // Fast path for 1-bit: each dimension is 1 bit, packed 8 per byte
+            for (int d = 0; d < dimension; d++) {
+                int bit = (packedResidual[d >> 3] >> (7 - (d & 7))) & 1;
+                float dequantized = (bit == 0) ? rLow : rHigh;
+                qDotResidual += centeredQueryVector[d] * dequantized;
+            }
+        } else {
+            // General path for multi-bit: extract B-bit codes from packed bytes
+            for (int d = 0; d < dimension; d++) {
+                int bitOffset = d * errorResidualBits;
+                int code = 0;
+                for (int b = 0; b < errorResidualBits; b++) {
+                    int globalBit = bitOffset + b;
+                    int byteIdx = globalBit / 8;
+                    int bitIdx = 7 - (globalBit % 8);
+                    code = (code << 1) | ((packedResidual[byteIdx] >> bitIdx) & 1);
+                }
+                float dequantized = rLow + code * step;
+                qDotResidual += centeredQueryVector[d] * dequantized;
+            }
         }
 
-        // 3. Add the correction to the first-pass score
-        // We use the same scaling logic if the first pass was MIP
-        return approximatedMipScore + VectorUtil.scaleMaxInnerProductScore(correction);
+        // rawApproxDot already includes <q, centroid> from the first-pass scorer
+        float rawTotal = rawApproxDot + qDotResidual;
+        return scaleMaxInnerProductScore(rawTotal);
     }
     /**
      * Reverse of {@link org.apache.lucene.util.VectorUtil#scaleMaxInnerProductScore(float)}.
@@ -241,6 +265,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         FlatVectorsScorer vectorsScorer,
         float[] centroid,
         float centroidDp,
+        int errorResidualBits,
         long quantizedVectorDataOffset,
         long quantizedVectorDataLength,
         IndexInput vectorData
@@ -252,27 +277,13 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         IndexInput bytesSlice = vectorData.slice("quantized-vector-data", quantizedVectorDataOffset, quantizedVectorDataLength);
         if (configuration.isDense()) {
             return new DenseOffHeapVectorValues(
-                dimension,
-                                                size,
-                                                centroid,
-                                                centroidDp,
-                                                binaryQuantizer,
-                                                similarityFunction,
-                                                vectorsScorer,
-                                                bytesSlice
+                dimension, size, centroid, centroidDp, binaryQuantizer,
+                similarityFunction, vectorsScorer, errorResidualBits, bytesSlice
             );
         } else {
             return new SparseOffHeapVectorValues(
-                configuration,
-                dimension,
-                size,
-                centroid,
-                centroidDp,
-                binaryQuantizer,
-                vectorData,
-                similarityFunction,
-                vectorsScorer,
-                bytesSlice
+                configuration, dimension, size, centroid, centroidDp, binaryQuantizer,
+                vectorData, similarityFunction, vectorsScorer, errorResidualBits, bytesSlice
             );
         }
     }
@@ -280,29 +291,18 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
     /** Dense off-heap binarized vector values */
     static class DenseOffHeapVectorValues extends OffHeapBinarizedVectorValues {
         DenseOffHeapVectorValues(
-            int dimension,
-            int size,
-            float[] centroid,
-            float centroidDp,
-            OptimizedScalarQuantizer binaryQuantizer,
-            VectorSimilarityFunction similarityFunction,
-            FlatVectorsScorer vectorsScorer,
-            IndexInput slice
+            int dimension, int size, float[] centroid, float centroidDp,
+            OptimizedScalarQuantizer binaryQuantizer, VectorSimilarityFunction similarityFunction,
+            FlatVectorsScorer vectorsScorer, int errorResidualBits, IndexInput slice
         ) {
-            super(dimension, size, centroid, centroidDp, binaryQuantizer, similarityFunction, vectorsScorer, slice);
+            super(dimension, size, centroid, centroidDp, binaryQuantizer, similarityFunction, vectorsScorer, errorResidualBits, slice);
         }
 
         @Override
         public DenseOffHeapVectorValues copy() throws IOException {
             return new DenseOffHeapVectorValues(
-                dimension,
-                                                size,
-                                                centroid,
-                                                centroidDp,
-                                                binaryQuantizer,
-                                                similarityFunction,
-                                                vectorsScorer,
-                                                slice.clone()
+                dimension, size, centroid, centroidDp, binaryQuantizer,
+                similarityFunction, vectorsScorer, errorResidualBits, slice.clone()
             );
         }
 
@@ -345,17 +345,12 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
 
         SparseOffHeapVectorValues(
             OrdToDocDISIReaderConfiguration configuration,
-            int dimension,
-            int size,
-            float[] centroid,
-            float centroidDp,
-            OptimizedScalarQuantizer binaryQuantizer,
-            IndexInput dataIn,
-            VectorSimilarityFunction similarityFunction,
-            FlatVectorsScorer vectorsScorer,
-            IndexInput slice
+            int dimension, int size, float[] centroid, float centroidDp,
+            OptimizedScalarQuantizer binaryQuantizer, IndexInput dataIn,
+            VectorSimilarityFunction similarityFunction, FlatVectorsScorer vectorsScorer,
+            int errorResidualBits, IndexInput slice
         ) throws IOException {
-            super(dimension, size, centroid, centroidDp, binaryQuantizer, similarityFunction, vectorsScorer, slice);
+            super(dimension, size, centroid, centroidDp, binaryQuantizer, similarityFunction, vectorsScorer, errorResidualBits, slice);
             this.configuration = configuration;
             this.dataIn = dataIn;
             this.ordToDoc = configuration.getDirectMonotonicReader(dataIn);
@@ -365,16 +360,8 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         @Override
         public SparseOffHeapVectorValues copy() throws IOException {
             return new SparseOffHeapVectorValues(
-                configuration,
-                                                 dimension,
-                                                 size,
-                                                 centroid,
-                                                 centroidDp,
-                                                 binaryQuantizer,
-                                                 dataIn,
-                                                 similarityFunction,
-                                                 vectorsScorer,
-                                                 slice.clone()
+                configuration, dimension, size, centroid, centroidDp, binaryQuantizer,
+                dataIn, similarityFunction, vectorsScorer, errorResidualBits, slice.clone()
             );
         }
 
@@ -427,7 +414,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
 
     private static class EmptyOffHeapVectorValues extends OffHeapBinarizedVectorValues {
         EmptyOffHeapVectorValues(int dimension, VectorSimilarityFunction similarityFunction, FlatVectorsScorer vectorsScorer) {
-            super(dimension, 0, null, Float.NaN, null, similarityFunction, vectorsScorer, null);
+            super(dimension, 0, null, Float.NaN, null, similarityFunction, vectorsScorer, 0, null);
         }
 
         @Override

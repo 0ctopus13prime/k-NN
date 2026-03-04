@@ -51,7 +51,7 @@ public class BBQWriter extends FlatVectorsWriter {
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
 
     /** Number of bits used for quantizing the error residual. */
-    public static final byte ERROR_RESIDUAL_BITS = 1;
+    public static final byte ERROR_RESIDUAL_BITS = 4;
 
     /**
      * Dequantize a scalar quantized code back to a float value.
@@ -65,6 +65,41 @@ public class BBQWriter extends FlatVectorsWriter {
     public static float dequantize(int code, float lower, float upper, int bits) {
         float step = (upper - lower) / ((1 << bits) - 1);
         return lower + code * step;
+    }
+
+    /**
+     * Pack quantized codes into a byte array. Each code uses {@code bitsPerCode} bits.
+     * For 1-bit, this is equivalent to {@code packAsBinary}.
+     *
+     * @param codes the quantized codes (one byte per dimension, value in [0, 2^bitsPerCode - 1])
+     * @param packed the output packed byte array
+     * @param bitsPerCode number of bits per code
+     */
+    public static void packBits(byte[] codes, byte[] packed, int bitsPerCode) {
+        if (bitsPerCode == 1) {
+            packAsBinary(codes, packed);
+            return;
+        }
+        java.util.Arrays.fill(packed, (byte) 0);
+        for (int d = 0; d < codes.length; d++) {
+            int code = codes[d] & 0xFF;
+            int bitOffset = d * bitsPerCode;
+            for (int b = 0; b < bitsPerCode; b++) {
+                int globalBit = bitOffset + (bitsPerCode - 1 - b);
+                int byteIdx = globalBit / 8;
+                int bitIdx = 7 - (globalBit % 8);
+                if ((code & (1 << b)) != 0) {
+                    packed[byteIdx] |= (byte) (1 << bitIdx);
+                }
+            }
+        }
+    }
+
+    /**
+     * Compute the packed byte size for a given dimension and bits per code.
+     */
+    public static int packedBytesSize(int dimension, int bitsPerCode) {
+        return discretize(dimension * bitsPerCode, 64) / 8;
     }
 
     private static final long SHALLOW_RAM_BYTES_USED = shallowSizeOfInstance(BBQWriter.class);
@@ -168,7 +203,8 @@ public class BBQWriter extends FlatVectorsWriter {
         float[] residual = new float[dimension];
         float[] zeroVector = new float[dimension];
         byte[] residualScratch = new byte[discreteDims];
-        byte[] residualVector = new byte[discreteDims / 8];
+        int residualPackedSize = packedBytesSize(dimension, ERROR_RESIDUAL_BITS);
+        byte[] residualVector = new byte[residualPackedSize];
         for (int i = 0; i < fieldData.getVectors().size(); i++) {
             float[] v = fieldData.getVectors().get(i);
             OptimizedScalarQuantizer.QuantizationResult corrections =
@@ -188,7 +224,7 @@ public class BBQWriter extends FlatVectorsWriter {
             // Quantize the residual with zero centroid (residual is already in error space)
             OptimizedScalarQuantizer.QuantizationResult residualCorrections =
                 scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
-            packAsBinary(residualScratch, residualVector);
+            packBits(residualScratch, residualVector, ERROR_RESIDUAL_BITS);
             binarizedVectorData.writeBytes(residualVector, residualVector.length);
             binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
             binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));
@@ -239,6 +275,7 @@ public class BBQWriter extends FlatVectorsWriter {
             buffer.asFloatBuffer().put(clusterCenter);
             meta.writeBytes(buffer.array(), buffer.array().length);
             meta.writeInt(Float.floatToIntBits(centroidDp));
+            meta.writeByte(ERROR_RESIDUAL_BITS);
         }
         OrdToDocDISIReaderConfiguration.writeStoredMeta(
             DIRECT_MONOTONIC_BLOCK_SHIFT,
@@ -336,7 +373,8 @@ public class BBQWriter extends FlatVectorsWriter {
         float[] residual = new float[dimension];
         float[] zeroVector = new float[dimension];
         byte[] residualScratch = new byte[discreteDims];
-        byte[] residualVector = new byte[discreteDims / 8];
+        int residualPackedSize = packedBytesSize(dimension, ERROR_RESIDUAL_BITS);
+        byte[] residualVector = new byte[residualPackedSize];
 
         // Get a fresh iterator for the second pass
         KNNVectorValues<?> knnVectorValues = knnVectorValuesSupplier.get();
@@ -365,7 +403,7 @@ public class BBQWriter extends FlatVectorsWriter {
             // Quantize the residual with zero centroid (residual is already in error space)
             OptimizedScalarQuantizer.QuantizationResult residualCorrections =
                 scalarQuantizer.scalarQuantize(residual, residualScratch, ERROR_RESIDUAL_BITS, zeroVector);
-            packAsBinary(residualScratch, residualVector);
+            packBits(residualScratch, residualVector, ERROR_RESIDUAL_BITS);
             binarizedVectorData.writeBytes(residualVector, residualVector.length);
             binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.lowerInterval()));
             binarizedVectorData.writeInt(Float.floatToIntBits(residualCorrections.upperInterval()));

@@ -111,9 +111,16 @@ public class BBQReader extends FlatVectorsReader {
         }
 
         int binaryDims = discretize(dimension, 64) / 8;
-        // Primary: binaryDims + 3 floats (12B) + 1 short (2B) = binaryDims + 14
-        // Residual: binaryDims + 3 floats (12B) + 1 short (2B) = binaryDims + 14
-        long perVector = (binaryDims + 14) * 2L;
+        int primaryBlockSize = binaryDims + (Float.BYTES * 3) + Short.BYTES;
+        // Residual quantized vector size depends on errorResidualBits
+        // For B bits: each dimension needs B bits, packed into bytes, discretized to 64-bit boundary
+        int residualBinaryDims = (fieldEntry.errorResidualBits > 0)
+            ? discretize(dimension * fieldEntry.errorResidualBits, 64) / 8
+            : 0;
+        int residualBlockSize = (fieldEntry.errorResidualBits > 0)
+            ? residualBinaryDims + (Float.BYTES * 3) + Short.BYTES
+            : 0;
+        long perVector = primaryBlockSize + residualBlockSize;
         long numQuantizedVectorBytes = perVector * (long) fieldEntry.size;
         if (numQuantizedVectorBytes != fieldEntry.vectorDataLength) {
             throw new IllegalStateException(
@@ -138,6 +145,7 @@ public class BBQReader extends FlatVectorsReader {
                 vectorScorer,
                 fi.centroid,
                 fi.centroidDP,
+                fi.errorResidualBits,
                 fi.vectorDataOffset,
                 fi.vectorDataLength,
                 quantizedVectorData
@@ -180,6 +188,7 @@ public class BBQReader extends FlatVectorsReader {
                 vectorScorer,
                 fi.centroid,
                 fi.centroidDP,
+                fi.errorResidualBits,
                 fi.vectorDataOffset,
                 fi.vectorDataLength,
                 quantizedVectorData);
@@ -278,7 +287,8 @@ public class BBQReader extends FlatVectorsReader {
 
     private record FieldEntry(VectorSimilarityFunction similarityFunction, VectorEncoding vectorEncoding, int dimension,
                               int descritizedDimension, long vectorDataOffset, long vectorDataLength, int size, float[] centroid,
-                              float centroidDP, OrdToDocDISIReaderConfiguration ordToDocDISIReaderConfiguration) {
+                              float centroidDP, int errorResidualBits,
+                              OrdToDocDISIReaderConfiguration ordToDocDISIReaderConfiguration) {
 
         static FieldEntry create(IndexInput input, VectorEncoding vectorEncoding, VectorSimilarityFunction similarityFunction)
             throws IOException {
@@ -288,10 +298,12 @@ public class BBQReader extends FlatVectorsReader {
             int size = input.readVInt();
             final float[] centroid;
             float centroidDP = 0;
+            int errorResidualBits = 0;
             if (size > 0) {
                 centroid = new float[dimension];
                 input.readFloats(centroid, 0, dimension);
                 centroidDP = Float.intBitsToFloat(input.readInt());
+                errorResidualBits = input.readByte();
             } else {
                 centroid = null;
             }
@@ -306,6 +318,7 @@ public class BBQReader extends FlatVectorsReader {
                 size,
                 centroid,
                 centroidDP,
+                errorResidualBits,
                 conf
             );
         }
