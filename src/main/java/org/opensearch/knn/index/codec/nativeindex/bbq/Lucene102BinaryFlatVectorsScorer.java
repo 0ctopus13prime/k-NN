@@ -53,6 +53,13 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
             transposeHalfByte(initial, quantized);
             return new RandomVectorScorer.AbstractRandomVectorScorer(binarizedVectors) {
                 @Override
+                public void bulkScore(int[] nodes, float[] scores, int numNodes) throws IOException {
+                    for(int i = 0; i < numNodes; ++i) {
+                        scores[i] = this.score(nodes[i]);
+                    }
+                }
+
+                @Override
                 public float score(int node) throws IOException {
                     return quantizedScore(quantized, queryCorrections, binarizedVectors, node, similarityFunction);
                 }
@@ -83,12 +90,6 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
         int targetOrd,
         VectorSimilarityFunction similarityFunction
     ) throws IOException {
-        // TMP
-        if (targetOrd == 4183) {
-            System.out.println("");
-        }
-        // TMP
-
         byte[] binaryCode = targetVectors.vectorValue(targetOrd);
         float qcDist = VectorUtil.int4BitDotProduct(quantizedQuery, binaryCode);
         OptimizedScalarQuantizer.QuantizationResult indexCorrections = targetVectors.getCorrectiveTerms(targetOrd);

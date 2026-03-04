@@ -49,6 +49,7 @@ public class BBQWriter extends FlatVectorsWriter {
     static final String META_EXTENSION = "vemb";
     static final String VECTOR_DATA_EXTENSION = "veb";
     static final int DIRECT_MONOTONIC_BLOCK_SHIFT = 16;
+    private static final boolean PRINT_RESIDUAL_HISTOGRAM = false;
 
     /** Number of bits used for quantizing the error residual. */
     public static final byte ERROR_RESIDUAL_BITS = 4;
@@ -126,8 +127,6 @@ public class BBQWriter extends FlatVectorsWriter {
         }
         return componentSum;
     }
-
-    private static final boolean PRINT_RESIDUAL_HISTOGRAM = true;
 
     /**
      * Print a histogram of raw residual values for debugging.
