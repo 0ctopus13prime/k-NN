@@ -5,12 +5,15 @@
 
 package org.opensearch.knn.memoryoptsearch;
 
+import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.search.AcceptDocs;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.util.Bits;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * This searcher performs vector search on non-Lucene index, for example FAISS index.
@@ -52,4 +55,15 @@ public interface VectorSearcher extends Closeable {
      *     if they are all allowed to match.
      */
     void search(byte[] target, KnnCollector knnCollector, AcceptDocs acceptDocs) throws IOException;
+
+    /**
+     * Rerank candidates using quantized error residuals.
+     *
+     * @param queryVector the original query vector
+     * @param iterator iterator over candidate doc ids
+     * @param docIdToScore mapping of doc id to approximated score from first pass
+     * @param knnCollector collector for reranked results
+     */
+    void rerank(float[] queryVector, DocIdSetIterator iterator, Map<Integer, Float> docIdToScore, KnnCollector knnCollector)
+        throws IOException;
 }

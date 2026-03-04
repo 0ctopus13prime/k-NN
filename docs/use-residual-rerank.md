@@ -40,6 +40,42 @@ C++ Considerations
 2. But, passQuantizedVectorsCorrectionFactors in MemOptimizedBBQIndexBuildStrategy should be changed to skip error residual part.
   - Original format is | quantized vector | 4 correction factors |, which not becomes | quantized vector | 4 correction factors | error residual quantized vector |
 
+# Phase 2: Rerank with error residual.
+To quickly test out rerank based on error residual, we can quickly do this.
+
+## Required changes in codec layer
+Note that <q, v> is dot product between vectors q and v.
+For the fp32 inner product, you can use KNNVectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.
+In this POC, underlying KnnVectorValues type is always be OffHeapBinarizedVectorValues.
+
+1. We should add the method `void initRerank(float[] queryVector)` in OffHeapBinarizedVectorValues to pre-compute <q, centroid>. (of course we need new member variables for query and <q, centroid>)
+2. We should add the method `QuantizedErrorResidual getQuantizedErrorResidual(int node)` in OffHeapBinarizedVectorValues. It should jump to `targetOrd * byteSize + byteSize / 2`, and copy quantized error and 4 correction factors and return.
+3. We should add the method `void rerank(int node)` in OffHeapBinarizedVectorValues, where calculating <q, centroid> + <q, Q_res(x)> where <q, centroid> is already pre-computed, and <q, Q_res(x)> is the one distance between query vector and error residual.
+4. We need to add `void rerank(KnnVectorValues.DocIndexIterator iterator, Map<Integer, Float> docIdToScore, KnnCollector knnCollector)` method in VectorSearcher.
+5. In FaissMemoryOptimizedSearcher which is the sole implementation of VectorSearcher, it should implement `rerank` method.
+  - In there, it should get OffHeapBinarizedVectorValues from bbqFlat.getFloatValues() method. It's safe to cast it.
+  - Then call `initRerank` and pass query vector.
+  - And iterate the given iterator to get doc_id and vector ordinal.
+  - Call `rerank` method and add <q, Q(x)> which can be acquired from doc_to_score mapping.
+  - Put the score value into collector.
+6. In NativeEngines990KnnVectorsReader, getFloatVectorValues should return RerankableKnnVectorValues.
+  - RerankableKnnVectorValues should bypasses parameters to VectorSearcher. That's all
+  - Currently, it's implementation is empty, need to fill few methods.
+
+
+## Required changes in ExactSearcher
+1. Pass perLeafeResult to ExactSearcher.ExactSearcherContext to build doc to score mapping. i.e. doc id -> <q, Q(x)>
+2. In searchLeaf method in ExactSearcher, it should do followings:
+  - Build doc to score map i.e. doc id -> <q, Q(x)>
+  - Get conjunctioned disi with following:
+    - final DocIdSetIterator matchedDocs = getMatchedDocsIterator(
+          exactSearcherContext.getMatchedDocsIterator(),
+          reader.getFloatVectorValues(...).iterator()
+      );
+  - Cast `matchedDocs` to KnnVectorValues.DocIndexIterator.
+  - Get FloatVectorValues from vectorReader, whose type is RerankableKnnVectorValues.
+  - Prepare TopKnnCollector
+  - Call rerank, and convert results to TopDocs.
 
 
 

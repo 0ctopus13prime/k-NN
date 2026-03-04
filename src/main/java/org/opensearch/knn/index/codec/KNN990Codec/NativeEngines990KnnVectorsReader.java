@@ -13,18 +13,22 @@ package org.opensearch.knn.index.codec.KNN990Codec;
 
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
+import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.search.AcceptDocs;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
+import org.apache.lucene.search.VectorScorer;
 import org.apache.lucene.store.DataAccessHint;
 import org.apache.lucene.store.FileDataHint;
 import org.apache.lucene.store.FileTypeHint;
@@ -34,6 +38,7 @@ import org.apache.lucene.util.IOSupplier;
 import org.apache.lucene.util.IOUtils;
 import org.opensearch.common.UUIDs;
 import org.opensearch.knn.common.FieldInfoExtractor;
+import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.codec.util.KNNCodecUtil;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.KNNEngine;
@@ -104,7 +109,12 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
      */
     @Override
     public FloatVectorValues getFloatVectorValues(final String field) throws IOException {
-        return flatVectorsReader.getFloatVectorValues(field);
+        FloatVectorValues values = flatVectorsReader.getFloatVectorValues(field);
+        VectorSearcher searcher = vectorSearcherHolder.getVectorSearcher();
+        if (searcher != null) {
+            return new RerankableKnnVectorValues(searcher, values);
+        }
+        return values;
     }
 
     /**
@@ -373,6 +383,91 @@ public class NativeEngines990KnnVectorsReader extends KnnVectorsReader {
 
         public boolean isSet() {
             return vectorSearcher != null;
+        }
+    }
+
+    @RequiredArgsConstructor
+    public static class RerankableKnnVectorValues extends FloatVectorValues {
+        public final VectorSearcher vectorSearcher;
+        public final FloatVectorValues nested;
+
+        @Override
+        public float[] vectorValue(int i) throws IOException {
+            return nested.vectorValue(i);
+        }
+
+        @Override
+        public VectorScorer scorer(float[] target) throws IOException {
+            return nested.scorer(target);
+        }
+
+        @Override
+        public int dimension() {
+            return nested.dimension();
+        }
+
+        @Override
+        public int size() {
+            return nested.size();
+        }
+
+        @Override
+        public int ordToDoc(int ord) {
+            return nested.ordToDoc(ord);
+        }
+
+        @Override
+        public DocIndexIterator iterator() {
+            return nested.iterator();
+        }
+
+        @Override
+        public FloatVectorValues copy() throws IOException {
+            return new RerankableKnnVectorValues(vectorSearcher, nested.copy());
+        }
+
+        public void rerank(
+            float[] queryVector,
+            DocIdSetIterator iterator,
+            Map<Integer, Float> docIdToScore,
+            KnnCollector knnCollector
+        ) throws IOException {
+            vectorSearcher.rerank(queryVector, iterator, docIdToScore, knnCollector);
+
+//            // Debug: get fp32 values for ground truth comparison
+//            FloatVectorValues fp32Values = nested.copy();
+//            KnnVectorValues.DocIndexIterator fp32Iter = fp32Values.iterator();
+//
+//            // Still delegate the actual rerank
+//            vectorSearcher.rerank(queryVector, iterator, docIdToScore, new KnnCollector() {
+//                @Override public boolean earlyTerminated() { return knnCollector.earlyTerminated(); }
+//                @Override public void incVisitedCount(int count) { knnCollector.incVisitedCount(count); }
+//                @Override public long visitedCount() { return knnCollector.visitedCount(); }
+//                @Override public long visitLimit() { return knnCollector.visitLimit(); }
+//                @Override public int k() { return knnCollector.k(); }
+//                @Override public boolean collect(int docId, float score) {
+//                    try {
+//                        // Find the ord for this docId from fp32Values
+//                        int d = fp32Iter.advance(docId);
+//                        if (d == docId) {
+//                            float[] fullVec = fp32Values.vectorValue(fp32Iter.index());
+//                            float trueMip = KNNVectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.compare(queryVector, fullVec);
+//                            Float approxMip = docIdToScore.get(docId);
+//                            System.out.println("___ docId=" + docId
+//                                + " approxMip=" + approxMip
+//                                + " rerankedMip=" + score
+//                                + " trueMip=" + trueMip);
+//                            System.out.println();
+//                        }
+//                    } catch (IOException e) {
+//                        throw new RuntimeException(e);
+//                    }
+//                    return knnCollector.collect(docId, score);
+//                }
+//                @Override public float minCompetitiveSimilarity() { return knnCollector.minCompetitiveSimilarity(); }
+//                @Override public TopDocs topDocs() { return knnCollector.topDocs(); }
+//                @Override public org.apache.lucene.search.knn.KnnSearchStrategy getSearchStrategy() { return knnCollector.getSearchStrategy(); }
+//            });
         }
     }
 }

@@ -32,8 +32,11 @@ import org.opensearch.knn.jni.SimdVectorComputeService;
 import org.opensearch.knn.memoryoptsearch.FaissBBQFlat;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.faiss.cagra.FaissCagraHNSW;
+import org.opensearch.knn.index.codec.nativeindex.bbq.BBQReader;
+import org.opensearch.knn.index.codec.nativeindex.bbq.OffHeapBinarizedVectorValues;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -168,6 +171,31 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     @Override
     public void close() throws IOException {
         indexInput.close();
+    }
+
+    @Override
+    public void rerank(
+        float[] queryVector,
+        DocIdSetIterator iterator,
+        Map<Integer, Float> docIdToScore,
+        KnnCollector knnCollector
+    ) throws IOException {
+        // Get OffHeapBinarizedVectorValues from bbqFlat
+        FloatVectorValues floatValues = bbqFlat.getFloatValues(getSlicedIndexInput());
+        BBQReader.BinarizedVectorValues binarizedValues = (BBQReader.BinarizedVectorValues) floatValues;
+        OffHeapBinarizedVectorValues offHeapValues = (OffHeapBinarizedVectorValues) binarizedValues.quantizedVectorValues;
+
+        // Pre-compute <q, centroid>
+        offHeapValues.initRerank(queryVector);
+
+        // Iterate candidates and rerank
+        for (int docId = iterator.nextDoc(); docId != DocIdSetIterator.NO_MORE_DOCS; docId = iterator.nextDoc()) {
+            int ord = iterator.docID();
+            float approxScore = docIdToScore.get(docId);
+            float rerankedScore = offHeapValues.rerank(ord, approxScore);
+            knnCollector.incVisitedCount(1);
+            knnCollector.collect(docId, rerankedScore);
+        }
     }
 
     private void search(

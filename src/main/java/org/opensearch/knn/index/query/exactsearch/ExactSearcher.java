@@ -40,12 +40,19 @@ import org.opensearch.knn.indices.ModelDao;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
+
+import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.index.FloatVectorValues;
+import org.apache.lucene.index.KnnVectorValues;
+import org.apache.lucene.search.TopKnnCollector;
+import org.opensearch.knn.index.codec.KNN990Codec.NativeEngines990KnnVectorsReader;
 
 @Log4j2
 @AllArgsConstructor
@@ -62,18 +69,37 @@ public class ExactSearcher {
      * @throws IOException exception during execution of exact search
      */
     public TopDocs searchLeaf(final LeafReaderContext leafReaderContext, final ExactSearcherContext context) throws IOException {
-        final ExactKNNIterator iterator = getKNNIterator(leafReaderContext, context);
-        // because of any reason if we are not able to get ExactKNNIterator, return empty top docss
-        if (iterator == null) {
+        final SegmentReader reader = Lucene.segmentReader(leafReaderContext.reader());
+
+        // Build doc-to-score map from first pass results
+        if (context.getFirstPassTopDocs() == null || context.getFirstPassTopDocs().scoreDocs.length == 0) {
             return TopDocsCollector.EMPTY_TOPDOCS;
         }
-        if (context.getRadius() != null) {
-            return doRadialSearch(leafReaderContext, context, iterator);
+        final Map<Integer, Float> docIdToScore = new HashMap<>();
+        for (ScoreDoc scoreDoc : context.getFirstPassTopDocs().scoreDocs) {
+            docIdToScore.put(scoreDoc.doc, scoreDoc.score);
         }
-        if (context.getMatchedDocsIterator() != null && context.numberOfMatchedDocs <= context.getK()) {
-            return scoreAllDocs(iterator);
+
+        // Get conjunction of matched docs and vector values iterator
+        final FieldInfo fieldInfo = FieldInfoExtractor.getFieldInfo(reader, context.getField());
+        if (fieldInfo == null) {
+            return TopDocsCollector.EMPTY_TOPDOCS;
         }
-        return searchTopCandidates(iterator, context.getK(), Predicates.alwaysTrue());
+
+        final FloatVectorValues floatVectorValues = reader.getFloatVectorValues(context.getField());
+        if (!(floatVectorValues instanceof NativeEngines990KnnVectorsReader.RerankableKnnVectorValues rerankable)) {
+            throw new IllegalStateException("WTF!");
+        }
+
+        final DocIdSetIterator matchedDocs = context.getMatchedDocsIterator();
+
+        // Prepare collector and rerank
+        final TopKnnCollector knnCollector = new TopKnnCollector(context.getK(), Integer.MAX_VALUE);
+        rerankable.rerank(context.getFloatQueryVector(), matchedDocs, docIdToScore, knnCollector);
+
+        // Convert to TopDocs
+        TopDocs topDocs = knnCollector.topDocs();
+        return topDocs;
     }
 
     /**
@@ -311,5 +337,10 @@ public class ExactSearcher {
         Integer maxResultWindow;
         VectorSimilarityFunction similarityFunction;
         Boolean isMemoryOptimizedSearchEnabled;
+        /**
+         * First-pass TopDocs from HNSW search, used to build doc-to-score mapping for residual reranking.
+         */
+        @Nullable
+        TopDocs firstPassTopDocs;
     }
 }

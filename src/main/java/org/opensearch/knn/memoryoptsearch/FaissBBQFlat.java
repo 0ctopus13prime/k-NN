@@ -20,7 +20,7 @@ import java.io.IOException;
 
 public class FaissBBQFlat extends FaissIndex {
     @Getter
-    private FlatVectorsReader bbqFlatReader;
+    private BBQReader bbqFlatReader;
     @Getter
     private String fieldName;
 
