@@ -32,9 +32,9 @@ faiss::IndexIDMapTemplate<faiss::IndexBinary>* FaissMethods::indexBinaryIdMap(fa
 
 void FaissMethods::writeIndex(const faiss::Index* idx, faiss::IOWriter* writer, bool skipFlat) {
     constexpr int IO_FLAG_SKIP_STORAGE = 1;
-    std::cout << "______________ FaissMethods::writeIndex, skip flag="
-              << (skipFlat ? IO_FLAG_SKIP_STORAGE : 0)
-              << std::endl;
+    // std::cout << "______________ FaissMethods::writeIndex, skip flag="
+    //           << (skipFlat ? IO_FLAG_SKIP_STORAGE : 0)
+    //           << std::endl;
     faiss::write_index(idx, writer, skipFlat ? IO_FLAG_SKIP_STORAGE : 0);
 }
 
