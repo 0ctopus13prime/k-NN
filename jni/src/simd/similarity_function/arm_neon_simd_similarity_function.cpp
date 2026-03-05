@@ -160,12 +160,165 @@ struct ArmNeonFP16L2 final : BaseSimilarityFunction<BulkScoreTransformFunc, Scor
 
 
 //
+// BBQ (ADC: 4-bit query x 1-bit data) - Naive C++ implementation (Phase-1, no SIMD optimization)
+//
+// The query is 4-bit quantized and transposed into 4 bit planes.
+// Each bit plane has `binaryCodeBytes` bytes. The int4BitDotProduct computes:
+//   sum over i in [0..3]: popcount(q[i*size..(i+1)*size] AND d[0..size]) << i
+// This gives a weighted dot product where each 4-bit query nibble contributes 0..15.
+//
+
+static constexpr float FOUR_BIT_SCALE = 1.0f / 15.0f;
+
+// Compute int4BitDotProduct: 4-bit transposed query vs 1-bit binary code
+// q has 4 * binaryCodeBytes bytes (4 bit planes), d has binaryCodeBytes bytes
+static inline int64_t int4BitDotProduct(const uint8_t* q, const uint8_t* d, const int32_t binaryCodeBytes) {
+    int64_t result = 0;
+    for (int32_t bitPlane = 0 ; bitPlane < 4 ; ++bitPlane) {
+        const auto* qPlane = reinterpret_cast<const uint64_t*>(q + bitPlane * binaryCodeBytes);
+        const auto* dPtr = reinterpret_cast<const uint64_t*>(d);
+        const int32_t words = binaryCodeBytes >> 3;
+
+        int64_t subResult = 0;
+        for (int32_t w = 0 ; w < words ; ++w) {
+            subResult += __builtin_popcountll(qPlane[w] & dPtr[w]);
+        }
+
+        // Handle remaining bytes (if binaryCodeBytes is not a multiple of 8)
+        const int32_t remainStart = words * 8;
+        for (int32_t r = remainStart ; r < binaryCodeBytes ; ++r) {
+            subResult += __builtin_popcount((q[bitPlane * binaryCodeBytes + r] & d[r]) & 0xFF);
+        }
+
+        result += subResult << bitPlane;
+    }
+    return result;
+}
+
+struct ArmNeonBBQIP final : SimilarityFunction {
+    void calculateSimilarityInBulk(SimdVectorSearchContext* srchContext,
+                                   int32_t* internalVectorIds,
+                                   float* scores,
+                                   const int32_t numVectors) {
+        const auto* queryPtr = reinterpret_cast<const uint8_t*>(srchContext->queryVectorSimdAligned);
+        const int32_t dim = srchContext->dimension;
+        // Binary code bytes for 1-bit data vectors: discretize(dim, 64) / 8
+        const int32_t binaryCodeBytes = ((dim + 63) / 64) * 64 / 8;
+
+        // Read query correction factors from tmpBuffer
+        const auto* queryCorrectionPtr = reinterpret_cast<const float*>(srchContext->tmpBuffer.data());
+        const float ay = queryCorrectionPtr[0];  // lowerInterval
+        // ADC: ly includes FOUR_BIT_SCALE for 4-bit query quantization
+        const float ly = (queryCorrectionPtr[1] - queryCorrectionPtr[0]) * FOUR_BIT_SCALE;
+        const float queryAdditional = queryCorrectionPtr[2];  // additionalCorrection
+        const float y1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&queryCorrectionPtr[3]));  // quantizedComponentSum
+        const float centroidDp = queryCorrectionPtr[4];
+
+        // Process vectors in batches of 4
+        int32_t processedCount = 0;
+        constexpr int32_t vecBlock = 4;
+        uint8_t* vectors[vecBlock];
+
+        for ( ; (processedCount + vecBlock) <= numVectors ; processedCount += vecBlock) {
+            srchContext->getVectorPointersInBulk(vectors, &internalVectorIds[processedCount], vecBlock);
+
+            for (int32_t v = 0 ; v < vecBlock ; ++v) {
+                // Compute ADC distance: int4BitDotProduct(4-bit query, 1-bit data)
+                const float qcDist = static_cast<float>(
+                    int4BitDotProduct(queryPtr, vectors[v], binaryCodeBytes));
+
+                // Read data vector's correction factors
+                // Layout: [binary code | lowerInterval(float) | upperInterval(float) | additionalCorrection(float) | quantizedComponentSum(int32)]
+                const auto* dataCorrectionPtr = reinterpret_cast<const float*>(vectors[v] + binaryCodeBytes);
+                const float ax = dataCorrectionPtr[0];  // lowerInterval
+                const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];  // upperInterval - lowerInterval
+                const float additional = dataCorrectionPtr[2];  // additionalCorrection
+                const float x1 = static_cast<float>(*reinterpret_cast<const int16_t*>(&dataCorrectionPtr[3]));  // quantizedComponentSum
+
+                // BBQ ADC scoring formula
+                scores[processedCount + v] = ax * ay * dim
+                                           + ay * lx * x1
+                                           + ax * ly * y1
+                                           + lx * ly * qcDist
+                                           + queryAdditional
+                                           + additional
+                                           - centroidDp;
+            }
+        }
+
+        // Tail: remaining vectors
+        for ( ; processedCount < numVectors ; ++processedCount) {
+            const auto* dataVec = srchContext->getVectorPointer(internalVectorIds[processedCount]);
+
+            const float qcDist = static_cast<float>(
+                int4BitDotProduct(queryPtr, dataVec, binaryCodeBytes));
+
+            const auto* dataCorrectionPtr = reinterpret_cast<const float*>(dataVec + binaryCodeBytes);
+            const float ax = dataCorrectionPtr[0];
+            const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
+            const float additional = dataCorrectionPtr[2];
+            const float x1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&dataCorrectionPtr[3]));
+
+            scores[processedCount] = ax * ay * dim
+                                   + ay * lx * x1
+                                   + ax * ly * y1
+                                   + lx * ly * qcDist
+                                   + queryAdditional
+                                   + additional
+                                   - centroidDp;
+        }
+
+        // Transform to Max IP score (same as VectorUtil.scaleMaxInnerProductScore)
+        FaissScoreToLuceneScoreTransform::ipToMaxIpTransformBulk(scores, numVectors);
+    }
+
+    float calculateSimilarity(SimdVectorSearchContext* srchContext, const int32_t internalVectorId) {
+        const auto* queryPtr = reinterpret_cast<const uint8_t*>(srchContext->queryVectorSimdAligned);
+        const int32_t dim = srchContext->dimension;
+        const int32_t binaryCodeBytes = ((dim + 63) / 64) * 64 / 8;
+
+        // Read query correction factors from tmpBuffer
+        const auto* queryCorrectionPtr = reinterpret_cast<const float*>(srchContext->tmpBuffer.data());
+        const float ay = queryCorrectionPtr[0];
+        const float ly = (queryCorrectionPtr[1] - queryCorrectionPtr[0]) * FOUR_BIT_SCALE;
+        const float queryAdditional = queryCorrectionPtr[2];
+        const float y1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&queryCorrectionPtr[3]));
+        const float centroidDp = queryCorrectionPtr[4];
+
+        const auto* dataVec = srchContext->getVectorPointer(internalVectorId);
+
+        const float qcDist = static_cast<float>(
+            int4BitDotProduct(queryPtr, dataVec, binaryCodeBytes));
+
+        const auto* dataCorrectionPtr = reinterpret_cast<const float*>(dataVec + binaryCodeBytes);
+        const float ax = dataCorrectionPtr[0];
+        const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
+        const float additional = dataCorrectionPtr[2];
+        const float x1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&dataCorrectionPtr[3]));
+
+        const float score = ax * ay * dim
+                          + ay * lx * x1
+                          + ax * ly * y1
+                          + lx * ly * qcDist
+                          + queryAdditional
+                          + additional
+                          - centroidDp;
+
+        return FaissScoreToLuceneScoreTransform::ipToMaxIpTransform(score);
+    }
+};
+
+
+
+//
 // FP16
 //
 // 1. Max IP
 ArmNeonFP16MaxIP<FaissScoreToLuceneScoreTransform::ipToMaxIpTransformBulk, FaissScoreToLuceneScoreTransform::ipToMaxIpTransform> FP16_MAX_INNER_PRODUCT_SIMIL_FUNC;
 // 2. L2
 ArmNeonFP16L2<FaissScoreToLuceneScoreTransform::l2TransformBulk, FaissScoreToLuceneScoreTransform::l2Transform> FP16_L2_SIMIL_FUNC;
+// 3. BBQ IP
+ArmNeonBBQIP BBQ_IP_SIMIL_FUNC;
 
 #ifndef __NO_SELECT_FUNCTION
 SimilarityFunction* SimilarityFunction::selectSimilarityFunction(const NativeSimilarityFunctionType nativeFunctionType) {
@@ -173,6 +326,8 @@ SimilarityFunction* SimilarityFunction::selectSimilarityFunction(const NativeSim
         return &FP16_MAX_INNER_PRODUCT_SIMIL_FUNC;
     } else if (nativeFunctionType == NativeSimilarityFunctionType::FP16_L2) {
         return &FP16_L2_SIMIL_FUNC;
+    } else if (nativeFunctionType == NativeSimilarityFunctionType::BBQ_IP) {
+        return &BBQ_IP_SIMIL_FUNC;
     }
 
     throw std::runtime_error("Invalid native similarity function type was given, nativeFunctionType="

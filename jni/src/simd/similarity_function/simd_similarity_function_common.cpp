@@ -233,6 +233,15 @@ SimdVectorSearchContext* SimilarityFunction::saveSearchContext(
         // Assign query to Faiss function
         THREAD_LOCAL_SIMD_VEC_SRCH_CTX.faissFunction->set_query(
             reinterpret_cast<float*>(THREAD_LOCAL_SIMD_VEC_SRCH_CTX.queryVectorSimdAligned));
+    } else if (nativeFunctionTypeOrd == static_cast<int32_t>(NativeSimilarityFunctionType::BBQ_IP)) {
+        // Set similarity function to offload similarity calculation
+        THREAD_LOCAL_SIMD_VEC_SRCH_CTX.similarityFunction = selectSimilarityFunction(
+            NativeSimilarityFunctionType::BBQ_IP);
+
+        // oneVectorByteSize = quantized vector bytes + 3 floats + 1 int32_t (correction factors)
+        // discretize(dimension, 64) / 8 gives the quantized vector byte size
+        THREAD_LOCAL_SIMD_VEC_SRCH_CTX.oneVectorByteSize =
+            ((dimension + 63) / 64) * 64 / 8 + 3 * sizeof(float) + sizeof(uint16_t);
     } else {
         throw std::runtime_error(
             std::string("Invalid native similarity function type was given, nativeFunctionTypeOrd=")

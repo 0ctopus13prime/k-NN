@@ -12,10 +12,25 @@ namespace knn_jni::simd::similarity_function {
         // Max inner product will transform inner product to v < 0 ? 1 / (1 - v) : (1 + v)
         FP16_MAXIMUM_INNER_PRODUCT,
         // L2 for FP16
-        FP16_L2
+        FP16_L2,
+        BBQ_IP
     };
 
     struct SimilarityFunction;
+
+    template <typename T>
+    struct FourBytesAlignedAllocator {
+        using value_type = T;
+
+        T* allocate(std::size_t n) {
+            void* p = ::operator new(n * sizeof(T), std::align_val_t(4));
+            return static_cast<T*>(p);
+        }
+
+        void deallocate(T* p, std::size_t) noexcept {
+            ::operator delete(p, std::align_val_t(4));
+        }
+    };
 
     struct SimdVectorSearchContext {
         // SIMD aligned query bytes
@@ -38,7 +53,7 @@ namespace knn_jni::simd::similarity_function {
         // Faiss distance computation function.
         std::unique_ptr<faiss::DistanceComputer> faissFunction;
         // Temp buffer which is reset per search.
-        std::vector<uint8_t> tmpBuffer;
+        std::vector<uint8_t, FourBytesAlignedAllocator<uint8_t>> tmpBuffer;
 
         ~SimdVectorSearchContext();
 

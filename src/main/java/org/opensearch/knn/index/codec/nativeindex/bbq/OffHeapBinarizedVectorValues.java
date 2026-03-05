@@ -5,6 +5,7 @@
 
 package org.opensearch.knn.index.codec.nativeindex.bbq;
 
+import lombok.Getter;
 import org.apache.lucene.codecs.hnsw.FlatVectorsScorer;
 import org.apache.lucene.codecs.lucene90.IndexedDISI;
 import org.apache.lucene.codecs.lucene95.OrdToDocDISIReaderConfiguration;
@@ -16,6 +17,8 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
+import org.opensearch.knn.memoryoptsearch.MemorySegmentAddressExtractorUtil;
+import org.opensearch.knn.memoryoptsearch.faiss.MMapVectorValues;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -50,6 +53,7 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         VectorSimilarityFunction similarityFunction,
         FlatVectorsScorer vectorsScorer,
         IndexInput slice) {
+
         this.dimension = dimension;
         this.size = size;
         this.similarityFunction = similarityFunction;
@@ -149,6 +153,20 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
             vectorData.slice(
                 "quantized-vector-data", quantizedVectorDataOffset, quantizedVectorDataLength);
         if (configuration.isDense()) {
+            long[] addressAndSize = MemorySegmentAddressExtractorUtil.tryExtractAddressAndSize(bytesSlice, 0, quantizedVectorDataLength);
+            if (addressAndSize != null) {
+                return new MMapDenseOffHeapVectorValues(
+                    dimension,
+                    size,
+                    centroid,
+                    centroidDp,
+                    binaryQuantizer,
+                    similarityFunction,
+                    vectorsScorer,
+                    bytesSlice,
+                    addressAndSize);
+            }
+
             return new DenseOffHeapVectorValues(
                 dimension,
                 size,
@@ -235,6 +253,79 @@ public abstract class OffHeapBinarizedVectorValues extends BinarizedByteVectorVa
         @Override
         public DocIndexIterator iterator() {
             return createDenseIterator();
+        }
+    }
+
+    static class MMapDenseOffHeapVectorValues extends OffHeapBinarizedVectorValues implements MMapVectorValues {
+        @Getter
+        private long[] addressAndSize;
+
+        MMapDenseOffHeapVectorValues(
+            int dimension,
+            int size,
+            float[] centroid,
+            float centroidDp,
+            OptimizedScalarQuantizer binaryQuantizer,
+            VectorSimilarityFunction similarityFunction,
+            FlatVectorsScorer vectorsScorer,
+            IndexInput slice,
+            long[] addressAndSize) {
+            super(
+                dimension,
+                size,
+                centroid,
+                centroidDp,
+                binaryQuantizer,
+                similarityFunction,
+                vectorsScorer,
+                slice);
+            this.addressAndSize = addressAndSize;
+        }
+
+        @Override
+        public DenseOffHeapVectorValues copy() throws IOException {
+            return new DenseOffHeapVectorValues(
+                dimension,
+                size,
+                centroid,
+                centroidDp,
+                binaryQuantizer,
+                similarityFunction,
+                vectorsScorer,
+                slice.clone());
+        }
+
+        @Override
+        public Bits getAcceptOrds(Bits acceptDocs) {
+            return acceptDocs;
+        }
+
+        @Override
+        public VectorScorer scorer(float[] target) throws IOException {
+            DenseOffHeapVectorValues copy = copy();
+            DocIndexIterator iterator = copy.iterator();
+            RandomVectorScorer scorer =
+                vectorsScorer.getRandomVectorScorer(similarityFunction, copy, target);
+            return new VectorScorer() {
+                @Override
+                public float score() throws IOException {
+                    return scorer.score(iterator.index());
+                }
+
+                @Override
+                public DocIdSetIterator iterator() {
+                    return iterator;
+                }
+            };
+        }
+
+        @Override
+        public DocIndexIterator iterator() {
+            return createDenseIterator();
+        }
+
+        public float getCentroidDp() {
+            return centroidDp;
         }
     }
 

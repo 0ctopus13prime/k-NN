@@ -81,6 +81,47 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_save
     }
 }
 
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveBBQSearchContext
+  (JNIEnv *env, jclass clazz, jbyteArray quantizedQuery,
+   jfloat lowerInterval, jfloat upperInterval, jfloat additionalCorrection,
+   jint quantizedComponentSum, jlongArray addressAndSize,
+   jint functionTypeOrd, jint dimension, jfloat centroidDp) {
+    try {
+      // Get quantized query bytes
+      const jsize queryByteSize = JNI_UTIL.GetJavaBytesArrayLength(env, quantizedQuery);
+      jbyte* queryPtr = static_cast<jbyte*>(JNI_UTIL.GetPrimitiveArrayCritical(env, quantizedQuery, nullptr));
+
+      // Get mmap address and size
+      const jsize mmapAddressAndSizeLength = JNI_UTIL.GetJavaLongArrayLength(env, addressAndSize);
+      jlong* mmapAddressAndSize = static_cast<jlong*>(JNI_UTIL.GetPrimitiveArrayCritical(env, addressAndSize, nullptr));
+
+      // Store correction factors in tmpBuffer before calling saveSearchContext.
+      // saveSearchContext will reset tmpBuffer at the beginning, so we need to call it first,
+      // then write correction factors after.
+      SimilarityFunction::saveSearchContext(
+          reinterpret_cast<uint8_t*>(queryPtr), queryByteSize,
+          dimension,
+          reinterpret_cast<int64_t*>(mmapAddressAndSize), mmapAddressAndSizeLength,
+          functionTypeOrd);
+
+      // Now store correction factors in tmpBuffer (saveSearchContext clears it, then BBQ_IP branch leaves it empty)
+      SimdVectorSearchContext* ctx = SimilarityFunction::getSearchContext();
+      ctx->tmpBuffer.resize(5 * sizeof(float));
+      auto* correctionPtr = reinterpret_cast<float*>(ctx->tmpBuffer.data());
+      correctionPtr[0] = lowerInterval;
+      correctionPtr[1] = upperInterval;
+      correctionPtr[2] = additionalCorrection;
+      *reinterpret_cast<int32_t*>(&correctionPtr[3]) = quantizedComponentSum;
+      correctionPtr[4] = centroidDp;
+
+      // Release pinned pointers
+      JNI_UTIL.ReleasePrimitiveArrayCritical(env, quantizedQuery, queryPtr, 0);
+      JNI_UTIL.ReleasePrimitiveArrayCritical(env, addressAndSize, mmapAddressAndSize, 0);
+    } catch (...) {
+      JNI_UTIL.CatchCppExceptionAndThrowJava(env);
+    }
+}
+
 JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scoreSimilarity
   (JNIEnv *env, jclass clazz, const jint internalVectorId) {
 
