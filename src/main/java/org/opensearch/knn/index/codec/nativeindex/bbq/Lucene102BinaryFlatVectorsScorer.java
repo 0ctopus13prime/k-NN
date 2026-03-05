@@ -25,6 +25,7 @@ import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.trans
 
 public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
     private static final float FOUR_BIT_SCALE = 1f / ((1 << 4) - 1);
+    public static boolean USE_NATIVE = true;
 
     @Override
     public RandomVectorScorerSupplier getRandomVectorScorerSupplier(
@@ -54,7 +55,7 @@ public class Lucene102BinaryFlatVectorsScorer implements FlatVectorsScorer {
             OptimizedScalarQuantizer.QuantizationResult queryCorrections = quantizer.scalarQuantize(target, initial, (byte) 4, centroid);
             transposeHalfByte(initial, quantized);
 
-            if (binarizedVectors instanceof MMapVectorValues mmapVectorValues) {
+            if (USE_NATIVE && binarizedVectors instanceof MMapVectorValues mmapVectorValues) {
                 return new BBQNativeRandomVectorScorer(
                     quantized,
                     queryCorrections,

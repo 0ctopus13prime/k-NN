@@ -228,12 +228,12 @@ struct ArmNeonBBQIP final : SimilarityFunction {
                     int4BitDotProduct(queryPtr, vectors[v], binaryCodeBytes));
 
                 // Read data vector's correction factors
-                // Layout: [binary code | lowerInterval(float) | upperInterval(float) | additionalCorrection(float) | quantizedComponentSum(int32)]
+                // Layout: [binary code | lowerInterval(float) | upperInterval(float) | additionalCorrection(float) | quantizedComponentSum(unsigned short)]
                 const auto* dataCorrectionPtr = reinterpret_cast<const float*>(vectors[v] + binaryCodeBytes);
                 const float ax = dataCorrectionPtr[0];  // lowerInterval
                 const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];  // upperInterval - lowerInterval
                 const float additional = dataCorrectionPtr[2];  // additionalCorrection
-                const float x1 = static_cast<float>(*reinterpret_cast<const int16_t*>(&dataCorrectionPtr[3]));  // quantizedComponentSum
+                const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(vectors[v] + binaryCodeBytes + 12));  // quantizedComponentSum
 
                 // BBQ ADC scoring formula
                 scores[processedCount + v] = ax * ay * dim
@@ -257,7 +257,7 @@ struct ArmNeonBBQIP final : SimilarityFunction {
             const float ax = dataCorrectionPtr[0];
             const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
             const float additional = dataCorrectionPtr[2];
-            const float x1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&dataCorrectionPtr[3]));
+            const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(dataVec + binaryCodeBytes + 12));
 
             scores[processedCount] = ax * ay * dim
                                    + ay * lx * x1
@@ -294,7 +294,7 @@ struct ArmNeonBBQIP final : SimilarityFunction {
         const float ax = dataCorrectionPtr[0];
         const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
         const float additional = dataCorrectionPtr[2];
-        const float x1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&dataCorrectionPtr[3]));
+        const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(dataVec + binaryCodeBytes + 12));
 
         const float score = ax * ay * dim
                           + ay * lx * x1

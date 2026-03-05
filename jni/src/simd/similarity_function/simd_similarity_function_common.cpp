@@ -238,8 +238,8 @@ SimdVectorSearchContext* SimilarityFunction::saveSearchContext(
         THREAD_LOCAL_SIMD_VEC_SRCH_CTX.similarityFunction = selectSimilarityFunction(
             NativeSimilarityFunctionType::BBQ_IP);
 
-        // oneVectorByteSize = quantized vector bytes + 3 floats + 1 int32_t (correction factors)
-        // discretize(dimension, 64) / 8 gives the quantized vector byte size
+        // oneVectorByteSize = quantized vector bytes + 3 floats + 1 unsigned short (correction factors)
+        // On-disk layout: [binaryCode | lowerInterval(float) | upperInterval(float) | additionalCorrection(float) | quantizedComponentSum(unsigned short)]
         THREAD_LOCAL_SIMD_VEC_SRCH_CTX.oneVectorByteSize =
             ((dimension + 63) / 64) * 64 / 8 + 3 * sizeof(float) + sizeof(uint16_t);
     } else {
