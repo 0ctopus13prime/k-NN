@@ -11,6 +11,7 @@
 
 #include "simd_similarity_function_common.cpp"
 #include "faiss_score_to_lucene_transform.cpp"
+#include "platform_defs.h"
 
 
 
@@ -160,19 +161,21 @@ struct ArmNeonFP16L2 final : BaseSimilarityFunction<BulkScoreTransformFunc, Scor
 
 
 //
-// BBQ (ADC: 4-bit query x 1-bit data) - Naive C++ implementation (Phase-1, no SIMD optimization)
+// BBQ (ADC: 4-bit query x 1-bit data) - NEON SIMD implementation
 //
-// The query is 4-bit quantized and transposed into 4 bit planes.
+// The query is 4-bit quantized and transposed into 4 bit planes (via transposeHalfByte).
 // Each bit plane has `binaryCodeBytes` bytes. The int4BitDotProduct computes:
-//   sum over i in [0..3]: popcount(q[i*size..(i+1)*size] AND d[0..size]) << i
-// This gives a weighted dot product where each 4-bit query nibble contributes 0..15.
+//   Result = popcount(plane0 AND data) * 1
+//          + popcount(plane1 AND data) * 2
+//          + popcount(plane2 AND data) * 4
+//          + popcount(plane3 AND data) * 8
 //
 
 static constexpr float FOUR_BIT_SCALE = 1.0f / 15.0f;
 
-// Compute int4BitDotProduct: 4-bit transposed query vs 1-bit binary code
+// Scalar fallback for int4BitDotProduct
 // q has 4 * binaryCodeBytes bytes (4 bit planes), d has binaryCodeBytes bytes
-static inline int64_t int4BitDotProduct(const uint8_t* q, const uint8_t* d, const int32_t binaryCodeBytes) {
+static FORCE_INLINE int64_t int4BitDotProduct(const uint8_t* q, const uint8_t* d, const int32_t binaryCodeBytes) {
     int64_t result = 0;
     for (int32_t bitPlane = 0 ; bitPlane < 4 ; ++bitPlane) {
         const auto* qPlane = reinterpret_cast<const uint64_t*>(q + bitPlane * binaryCodeBytes);
@@ -184,7 +187,6 @@ static inline int64_t int4BitDotProduct(const uint8_t* q, const uint8_t* d, cons
             subResult += __builtin_popcountll(qPlane[w] & dPtr[w]);
         }
 
-        // Handle remaining bytes (if binaryCodeBytes is not a multiple of 8)
         const int32_t remainStart = words * 8;
         for (int32_t r = remainStart ; r < binaryCodeBytes ; ++r) {
             subResult += __builtin_popcount((q[bitPlane * binaryCodeBytes + r] & d[r]) & 0xFF);
@@ -195,11 +197,91 @@ static inline int64_t int4BitDotProduct(const uint8_t* q, const uint8_t* d, cons
     return result;
 }
 
+// NEON SIMD batched int4BitDotProduct.
+// Uses vcntq_u8 for per-byte popcount on each plane, then weights by 1/2/4/8.
+template <int BATCH_SIZE>
+static FORCE_INLINE void simd4bitDotProductBatch(
+    const uint8_t* queryPtr,
+    uint8_t** dataVecs,
+    const int32_t binaryCodeBytes,
+    float* results) {
+
+    const uint8_t* plane0 = queryPtr;
+    const uint8_t* plane1 = queryPtr + binaryCodeBytes;
+    const uint8_t* plane2 = queryPtr + 2 * binaryCodeBytes;
+    const uint8_t* plane3 = queryPtr + 3 * binaryCodeBytes;
+
+    uint32x4_t acc[BATCH_SIZE];
+    LOOP_UNROLL(BATCH_SIZE)
+    for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
+        acc[b] = vdupq_n_u32(0);
+    }
+
+    int32_t i = 0;
+    for ( ; i + 16 <= binaryCodeBytes ; i += 16) {
+        // Load 16 bytes from each query plane (shared across all data vectors)
+        uint8x16_t q0 = vld1q_u8(plane0 + i);
+        uint8x16_t q1 = vld1q_u8(plane1 + i);
+        uint8x16_t q2 = vld1q_u8(plane2 + i);
+        uint8x16_t q3 = vld1q_u8(plane3 + i);
+
+        // Prefetch next chunk — issued once before the batch loop so we don't
+        // flood the prefetch queue (ARM cores typically have 4-8 slots).
+        if (i + 16 < binaryCodeBytes) {
+            __builtin_prefetch(plane0 + i + 16);
+            LOOP_UNROLL(BATCH_SIZE)
+            for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
+                __builtin_prefetch(dataVecs[b] + i + 16);
+            }
+        }
+
+        LOOP_UNROLL(BATCH_SIZE)
+        for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
+            // Load 16 bytes of data vector's binary code
+            uint8x16_t d = vld1q_u8(dataVecs[b] + i);
+
+            // AND each plane with data, then per-byte popcount
+            uint8x16_t p0 = vcntq_u8(vandq_u8(q0, d));
+            uint8x16_t p1 = vcntq_u8(vandq_u8(q1, d));
+            uint8x16_t p2 = vcntq_u8(vandq_u8(q2, d));
+            uint8x16_t p3 = vcntq_u8(vandq_u8(q3, d));
+
+            // Weight: p0*1 + p1*2 + p2*4 + p3*8
+            // Max per byte: 8*1 + 8*2 + 8*4 + 8*8 = 120, fits in uint8_t
+            uint8x16_t weighted = vaddq_u8(p0, vshlq_n_u8(p1, 1));
+            weighted = vaddq_u8(weighted, vshlq_n_u8(p2, 2));
+            weighted = vaddq_u8(weighted, vshlq_n_u8(p3, 3));
+
+            // Widen and accumulate: u8 -> u16 -> u32
+            acc[b] = vaddq_u32(acc[b], vpaddlq_u16(vpaddlq_u8(weighted)));
+        }
+    }
+
+    // Horizontal sum into results
+    LOOP_UNROLL(BATCH_SIZE)
+    for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
+        results[b] = static_cast<float>(vaddvq_u32(acc[b]));
+    }
+
+    // Scalar tail for remaining bytes (< 16)
+    for ( ; i < binaryCodeBytes ; ++i) {
+        uint8_t q0b = plane0[i], q1b = plane1[i], q2b = plane2[i], q3b = plane3[i];
+        for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
+            uint8_t db = dataVecs[b][i];
+            results[b] += static_cast<float>(
+                __builtin_popcount((q0b & db) & 0xFF) * 1
+              + __builtin_popcount((q1b & db) & 0xFF) * 2
+              + __builtin_popcount((q2b & db) & 0xFF) * 4
+              + __builtin_popcount((q3b & db) & 0xFF) * 8);
+        }
+    }
+}
+
 struct ArmNeonBBQIP final : SimilarityFunction {
-    void calculateSimilarityInBulk(SimdVectorSearchContext* srchContext,
-                                   int32_t* internalVectorIds,
-                                   float* scores,
-                                   const int32_t numVectors) {
+    HOT_SPOT void calculateSimilarityInBulk(SimdVectorSearchContext* srchContext,
+                                            int32_t* internalVectorIds,
+                                            float* scores,
+                                            const int32_t numVectors) {
         const auto* queryPtr = reinterpret_cast<const uint8_t*>(srchContext->queryVectorSimdAligned);
         const int32_t dim = srchContext->dimension;
         // Binary code bytes for 1-bit data vectors: discretize(dim, 64) / 8
@@ -214,39 +296,64 @@ struct ArmNeonBBQIP final : SimilarityFunction {
         const float y1 = static_cast<float>(*reinterpret_cast<const int32_t*>(&queryCorrectionPtr[3]));  // quantizedComponentSum
         const float centroidDp = queryCorrectionPtr[4];
 
-        // Process vectors in batches of 4
+        // Bulk BBQ with batch size 8
         int32_t processedCount = 0;
-        constexpr int32_t vecBlock = 4;
+        constexpr int32_t vecBlock = 8;
+        constexpr int32_t vecHalfBlock = 4;
         uint8_t* vectors[vecBlock];
 
         for ( ; (processedCount + vecBlock) <= numVectors ; processedCount += vecBlock) {
             srchContext->getVectorPointersInBulk(vectors, &internalVectorIds[processedCount], vecBlock);
 
-            for (int32_t v = 0 ; v < vecBlock ; ++v) {
-                // Compute ADC distance: int4BitDotProduct(4-bit query, 1-bit data)
-                const float qcDist = static_cast<float>(
-                    int4BitDotProduct(queryPtr, vectors[v], binaryCodeBytes));
+            // SIMD bulk ADC — writes dot product results into scores as float
+            simd4bitDotProductBatch<vecBlock>(queryPtr, vectors, binaryCodeBytes, &scores[processedCount]);
 
-                // Read data vector's correction factors
-                // Layout: [binary code | lowerInterval(float) | upperInterval(float) | additionalCorrection(float) | quantizedComponentSum(unsigned short)]
-                const auto* dataCorrectionPtr = reinterpret_cast<const float*>(vectors[v] + binaryCodeBytes);
-                const float ax = dataCorrectionPtr[0];  // lowerInterval
-                const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];  // upperInterval - lowerInterval
-                const float additional = dataCorrectionPtr[2];  // additionalCorrection
-                const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(vectors[v] + binaryCodeBytes + 12));  // quantizedComponentSum
-
-                // BBQ ADC scoring formula
-                scores[processedCount + v] = ax * ay * dim
+            // Apply correction factors
+            for (int32_t i = 0 ; i < vecBlock ; ++i) {
+                if ((i + 1) < vecBlock) {
+                    __builtin_prefetch(vectors[i + 1] + binaryCodeBytes);
+                }
+                const auto* dataCorrectionPtr = reinterpret_cast<const float*>(vectors[i] + binaryCodeBytes);
+                const float ax = dataCorrectionPtr[0];
+                const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
+                const float additional = dataCorrectionPtr[2];
+                const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(vectors[i] + binaryCodeBytes + 12));
+                scores[processedCount + i] = ax * ay * dim
                                            + ay * lx * x1
                                            + ax * ly * y1
-                                           + lx * ly * qcDist
+                                           + lx * ly * scores[processedCount + i]
                                            + queryAdditional
                                            + additional
                                            - centroidDp;
             }
         }
 
-        // Tail: remaining vectors
+        // Batch size 4
+        for ( ; (processedCount + vecHalfBlock) <= numVectors ; processedCount += vecHalfBlock) {
+            srchContext->getVectorPointersInBulk(vectors, &internalVectorIds[processedCount], vecHalfBlock);
+
+            simd4bitDotProductBatch<vecHalfBlock>(queryPtr, vectors, binaryCodeBytes, &scores[processedCount]);
+
+            for (int32_t i = 0 ; i < vecHalfBlock ; ++i) {
+                if ((i + 1) < vecHalfBlock) {
+                    __builtin_prefetch(vectors[i + 1] + binaryCodeBytes);
+                }
+                const auto* dataCorrectionPtr = reinterpret_cast<const float*>(vectors[i] + binaryCodeBytes);
+                const float ax = dataCorrectionPtr[0];
+                const float lx = dataCorrectionPtr[1] - dataCorrectionPtr[0];
+                const float additional = dataCorrectionPtr[2];
+                const float x1 = static_cast<float>(*reinterpret_cast<const uint16_t*>(vectors[i] + binaryCodeBytes + 12));
+                scores[processedCount + i] = ax * ay * dim
+                                           + ay * lx * x1
+                                           + ax * ly * y1
+                                           + lx * ly * scores[processedCount + i]
+                                           + queryAdditional
+                                           + additional
+                                           - centroidDp;
+            }
+        }
+
+        // Tail: remaining vectors (scalar)
         for ( ; processedCount < numVectors ; ++processedCount) {
             const auto* dataVec = srchContext->getVectorPointer(internalVectorIds[processedCount]);
 

@@ -19,3 +19,30 @@
     #define LIKELY(x)   (x)
     #define UNLIKELY(x) (x)
 #endif
+
+#if defined(_MSC_VER)
+    // Microsoft Visual C++
+    #define FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    // GCC and Clang
+    #define FORCE_INLINE inline __attribute__((always_inline))
+#else
+    // Fallback for other compilers
+    #define FORCE_INLINE inline
+#endif // FORCE_INLINE_H
+
+#if defined(__clang__)
+    #define PRAGMA_STR(x) _Pragma(#x)
+    #define LOOP_UNROLL(n) PRAGMA_STR(clang loop unroll_count(n))
+#elif defined(__GNUC__)
+    #define PRAGMA_STR(x) _Pragma(#x)
+    #define LOOP_UNROLL(n) PRAGMA_STR(GCC unroll n)
+#else
+    #define LOOP_UNROLL(n)
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+    #define HOT_SPOT [[gnu::hot]]
+#else
+    #define HOT_SPOT
+#endif
