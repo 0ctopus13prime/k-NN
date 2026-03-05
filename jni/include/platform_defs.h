@@ -31,16 +31,6 @@
     #define FORCE_INLINE inline
 #endif // FORCE_INLINE_H
 
-#if defined(__clang__)
-    #define PRAGMA_STR(x) _Pragma(#x)
-    #define LOOP_UNROLL(n) PRAGMA_STR(clang loop unroll_count(n))
-#elif defined(__GNUC__)
-    #define PRAGMA_STR(x) _Pragma(#x)
-    #define LOOP_UNROLL(n) PRAGMA_STR(GCC unroll n)
-#else
-    #define LOOP_UNROLL(n)
-#endif
-
 #if defined(__GNUC__) || defined(__clang__)
     #define HOT_SPOT [[gnu::hot]]
 #else

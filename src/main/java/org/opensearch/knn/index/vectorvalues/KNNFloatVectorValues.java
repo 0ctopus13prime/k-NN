@@ -18,7 +18,7 @@ import java.util.Arrays;
  * {@link BinaryDocValues}, {@link FloatVectorValues}, {@link KnnFieldVectorsWriter} etc.
  */
 public class KNNFloatVectorValues extends KNNVectorValues<float[]> {
-    KNNFloatVectorValues(final KNNVectorValuesIterator vectorValuesIterator) {
+    public KNNFloatVectorValues(final KNNVectorValuesIterator vectorValuesIterator) {
         super(vectorValuesIterator);
     }
 

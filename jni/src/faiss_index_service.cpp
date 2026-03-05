@@ -221,11 +221,11 @@ jlong BinaryIndexService::initBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
                                  std::unordered_map<std::string, jobject> parameters,
                                  float centroidDp,
                                  int quantizedVectorBytes) {
-    std::cout << "___________________ BinaryIndexService::initBBQIndex, centroidDp="
-              << centroidDp << ", quantizedVectorBytes=" << quantizedVectorBytes
-              << ", dim=" << dim
-              << ", description=" << indexDescription.c_str()
-              << std::endl;
+    // std::cout << "___________________ BinaryIndexService::initBBQIndex, centroidDp="
+    //           << centroidDp << ", quantizedVectorBytes=" << quantizedVectorBytes
+    //           << ", dim=" << dim
+    //           << ", description=" << indexDescription.c_str()
+    //           << std::endl;
 
     // Create index using Faiss factory method
     FaissBBQFlat* bbqFlat = new FaissBBQFlat(numVectors, quantizedVectorBytes, centroidDp, dim);

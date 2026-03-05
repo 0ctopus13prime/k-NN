@@ -105,9 +105,9 @@ jlong knn_jni::faiss_wrapper::InitBBQIndex(knn_jni::JNIUtilInterface *jniUtil,
                                            BinaryIndexService *indexService,
                                            jfloat centroidDp,
                                            jint quantizedVecBytes) {
-    std::cout << "_______________________ knn_jni::faiss_wrapper::InitBBQIndex, centroidDp="
-              << centroidDp << ", quantizedVecBytes=" << quantizedVecBytes
-              << std::endl;
+    // std::cout << "_______________________ knn_jni::faiss_wrapper::InitBBQIndex, centroidDp="
+    //           << centroidDp << ", quantizedVecBytes=" << quantizedVecBytes
+    //           << std::endl;
 
     if (dimJ <= 0) {
         throw std::runtime_error("Vectors dimensions cannot be less than or equal to 0");

@@ -78,40 +78,6 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bbqValidationSca
                 continue;
             }
             float dist = dc->symmetric_dis(queryVectorOrdinal, i);
-
-            // TMP
-            if (i == 385) {
-                auto vec = &faissBBQFlat->quantizedVectorsAndCorrectionFactors[faissBBQFlat->oneElementSize * i];
-                const auto* correctionFactors = (const float*) ((const uint8_t*) vec + faissBBQFlat->quantizedVectorBytes);
-                const auto lowerInterval = correctionFactors[0];
-                const auto intervalLength = correctionFactors[1] - correctionFactors[0];
-                const auto additionalCorrection = correctionFactors[2];
-                const auto quantizedComponentSum = *((const int32_t*) (&correctionFactors[3]));
-
-                auto vec0 = &faissBBQFlat->quantizedVectorsAndCorrectionFactors[0];
-                const auto* correctionFactors0 = (const float*) ((const uint8_t*) vec0 + faissBBQFlat->quantizedVectorBytes);
-                const auto lowerInterval0 = correctionFactors0[0];
-                const auto intervalLength0 = correctionFactors0[1] - correctionFactors0[0];
-                const auto additionalCorrection0 = correctionFactors0[2];
-                const auto quantizedComponentSum0 = *((const int32_t*) (&correctionFactors0[3]));
-
-
-                std::cout << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ i=" << i
-                          << ", dist=" << dist
-                          << ", vec=[" << (int) vec[0] << ", " << (int) vec[1] << ", " << (int) vec[2] << ", " << (int) vec[3] << " ...]"
-                          << ", lower=" << lowerInterval
-                          << ", intervalLength=" << intervalLength
-                          << ", additionalCorrection=" << additionalCorrection
-                          << ", quantizedComponentSum=" << quantizedComponentSum
-                          << ", vec0=[" << (int) vec0[0] << ", " << (int) vec0[1] << ", " << (int) vec0[2] << ", " << (int) vec0[3] << " ...]"
-                          << ", lower0=" << lowerInterval0
-                          << ", intervalLength0=" << intervalLength0
-                          << ", additionalCorrection0=" << additionalCorrection0
-                          << ", quantizedComponentSum0=" << quantizedComponentSum0
-                          << std::endl;
-            }
-            // TMP
-
             results.push_back({i, dist});
         }
 
@@ -144,7 +110,7 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_bbqValidationSca
 
 JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
   (JNIEnv *env, jclass cls, jlong numDocs, jint dimJ, jobject parametersJ, jfloat centroidDp, jint quantizedVecBytes) {
-    std::cout << "_____________________ Initializing BBQ Index / Java_org_opensearch_knn_jni_FaissService_initBBQIndex" << std::endl;
+    // std::cout << "_____________________ Initializing BBQ Index / Java_org_opensearch_knn_jni_FaissService_initBBQIndex" << std::endl;
 
     try {
         std::unique_ptr<knn_jni::faiss_wrapper::FaissMethods> faissMethods(new knn_jni::faiss_wrapper::FaissMethods());
@@ -158,7 +124,7 @@ JNIEXPORT jlong JNICALL Java_org_opensearch_knn_jni_FaissService_initBBQIndex
 
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_passBBQVectors
   (JNIEnv *env, jclass cls, jlong indexMemoryAddrJ, jbyteArray buffer, jint numVectorsAndCorrectionFactors) {
-    std::cout << "___________________ pass BBQ vectors, numVectorsAndCorrectionFactors=" << numVectorsAndCorrectionFactors << std::endl;
+    // std::cout << "___________________ pass BBQ vectors, numVectorsAndCorrectionFactors=" << numVectorsAndCorrectionFactors << std::endl;
 
     auto idMap = (faiss::IndexIDMap*) indexMemoryAddrJ;
     auto indexHNSW = (faiss::IndexHNSW*) idMap->index;
@@ -196,15 +162,15 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_addDocsToBBQInde
     auto* vecPtr =
         (float*) (faissBBQFlat->quantizedVectorsAndCorrectionFactors.data() + (numAdded * faissBBQFlat->oneElementSize));
 
-    std::cout << "____________________ addDocsToBBQIndex"
-              << ", numDocs=" << numDocs
-              << ", numAdded=" << numAdded
-              << ", bbq-ntotal=" << faissBBQFlat->ntotal
-              << ", oneElemSize=" << faissBBQFlat->oneElementSize
-              << ", vecPtr=" << uint64_t(vecPtr)
-              << std::endl;
+    // std::cout << "____________________ addDocsToBBQIndex"
+    //           << ", numDocs=" << numDocs
+    //           << ", numAdded=" << numAdded
+    //           << ", bbq-ntotal=" << faissBBQFlat->ntotal
+    //           << ", oneElemSize=" << faissBBQFlat->oneElementSize
+    //           << ", vecPtr=" << uint64_t(vecPtr)
+    //           << std::endl;
     idMap->add_with_ids(numDocs, vecPtr, &docIds[0]);
-    std::cout << "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR" << std::endl;
+    // std::cout << "RRRRRRRRRRRRRRRRRRRRRRRRRRRRRR" << std::endl;
 }
 
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_FaissService_writeBBQIndex

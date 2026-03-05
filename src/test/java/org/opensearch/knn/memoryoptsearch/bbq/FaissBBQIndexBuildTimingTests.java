@@ -17,8 +17,6 @@ import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.MMapDirectory;
@@ -26,18 +24,13 @@ import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.Version;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
-import org.apache.lucene.search.TopKnnCollector;
-import org.apache.lucene.search.AcceptDocs;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.index.codec.nativeindex.bbq.BBQReader;
 import org.opensearch.knn.index.codec.nativeindex.bbq.BBQWriter;
 import org.opensearch.knn.index.codec.nativeindex.bbq.BinarizedByteVectorValues;
 import org.opensearch.knn.index.codec.nativeindex.bbq.Lucene102BinaryFlatVectorsScorer;
 import org.opensearch.knn.index.store.IndexOutputWithBuffer;
-import org.opensearch.knn.index.store.IndexInputWithBuffer;
 import org.opensearch.knn.jni.FaissService;
-import org.opensearch.knn.memoryoptsearch.faiss.FaissMemoryOptimizedSearcher;
-import org.opensearch.test.OpenSearchTestCase;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,7 +45,7 @@ import java.util.Map;
  * then calls bbqValidationScan to do symmetric scoring on the C++ side.
  */
 @Log4j2
-public class FaissBBQRecallValidationTests extends KNNTestCase {
+public class FaissBBQIndexBuildTimingTests extends KNNTestCase {
 
     // ===== CONFIGURE THESE =====
     private static final String DATA_PATH = "/Users/kdooyong/workspace/io-opt/tmp/vectors.bin";
@@ -74,8 +67,18 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
             final long indexStart = System.nanoTime();
 
             SegmentInfo segmentInfo = new SegmentInfo(
-                directory, Version.LATEST, Version.LATEST, segmentName, vectors.length,
-                false, false, null, new HashMap<>(), segmentId, new HashMap<>(), null
+                directory,
+                                                      Version.LATEST,
+                                                      Version.LATEST,
+                                                      segmentName,
+                                                      vectors.length,
+                                                      false,
+                                                      false,
+                                                      null,
+                                                      new HashMap<>(),
+                                                      segmentId,
+                                                      new HashMap<>(),
+                                                      null
             );
 
             final FieldInfo fieldInfo = new FieldInfo(
@@ -105,13 +108,7 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
             // Step 2: Read back via BBQReader and ingest into FaissBBQFlat via JNI
             final long indexMemoryAddress = ingestIntoFaiss(directory, dimension, numVectors, segmentInfo, fieldInfo);
 
-            final long indexingDone = System.nanoTime();
-            System.out.println("[INDEXING TIME] " + (indexingDone - indexStart) / 1_000_000 + "ms");
-
-            // Step 3: Call JNI validation scan
-            FaissService.bbqValidationScan(indexMemoryAddress, TOP_K, QUERY_VECTOR_ORDINAL);
-
-            // Step 4: Write HNSW index to file
+            // Step 3: Write HNSW index to file
             String faissIndexFileName = "faiss-bbq-validation.hnsw";
             try (var indexOutput = directory.createOutput(faissIndexFileName, IOContext.DEFAULT)) {
                 IndexOutputWithBuffer outputWithBuffer = new IndexOutputWithBuffer(indexOutput);
@@ -130,45 +127,20 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
                 FaissService.writeBBQIndex(outputWithBuffer, indexMemoryAddress, writeParams);
             }
 
-            // Step 5: Load index back and search with FaissMemoryOptimizedSearcher
-            FieldInfos fieldInfos = new FieldInfos(new FieldInfo[] { fieldInfo });
-            SegmentReadState readState = new SegmentReadState(
-                directory, segmentInfo, fieldInfos, IOContext.DEFAULT
-            );
-
-            System.out.println("\nANN search results:");
-            try (var indexInput = directory.openInput(faissIndexFileName, IOContext.DEFAULT)) {
-                try (FaissMemoryOptimizedSearcher searcher = new FaissMemoryOptimizedSearcher(indexInput, fieldInfo, readState)) {
-                    float[] queryVector = vectors[QUERY_VECTOR_ORDINAL];
-                    TopKnnCollector collector = new TopKnnCollector(TOP_K * 2, Integer.MAX_VALUE);
-                    searcher.search(queryVector, collector, AcceptDocs.fromLiveDocs(null, vectors.length));
-                    // Result is discarded — this is for breakpoint debugging
-                    TopDocs results = collector.topDocs();
-                    for (ScoreDoc scoreDoc : results.scoreDocs) {
-                        System.out.println("Doc ID: " + scoreDoc.doc + ", Score: " + scoreDoc.score);
-                    }
-                }
-            }
+            final long indexingDone = System.nanoTime();
+            System.out.println("[INDEXING TIME] " + (indexingDone - indexStart) / 1_000_000 + "ms");
         }
-
-        System.out.println();
     }
 
     private void writeVectors(Directory directory, float[][] vectors, SegmentInfo segmentInfo, FieldInfo fieldInfo) throws IOException {
         FieldInfos fieldInfos = new FieldInfos(new FieldInfo[] { fieldInfo });
-        SegmentWriteState writeState = new SegmentWriteState(
-            InfoStream.NO_OUTPUT, directory, segmentInfo, fieldInfos, null, IOContext.DEFAULT, "test_field"
-        );
+        SegmentWriteState writeState =
+            new SegmentWriteState(InfoStream.NO_OUTPUT, directory, segmentInfo, fieldInfos, null, IOContext.DEFAULT, "test_field");
 
         Lucene102BinaryFlatVectorsScorer scorer = new Lucene102BinaryFlatVectorsScorer();
         try (BBQWriter writer = new BBQWriter(scorer, writeState)) {
             FlatFieldVectorsWriter fieldWriter = writer.addField(fieldInfo);
             for (int i = 0; i < vectors.length; i++) {
-                // TMP
-                if (i == 385) {
-                    System.out.println();
-                }
-                // TMP
                 fieldWriter.addValue(i, vectors[i].clone());
             }
             writer.flush(vectors.length, null);
@@ -176,11 +148,10 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
         }
     }
 
-    private long ingestIntoFaiss(Directory directory, int dimension, int numVectors, SegmentInfo segmentInfo, FieldInfo fieldInfo) throws IOException {
+    private long ingestIntoFaiss(Directory directory, int dimension, int numVectors, SegmentInfo segmentInfo, FieldInfo fieldInfo)
+        throws IOException {
         FieldInfos fieldInfos = new FieldInfos(new FieldInfo[] { fieldInfo });
-        SegmentReadState readState = new SegmentReadState(
-            directory, segmentInfo, fieldInfos, IOContext.DEFAULT, "test_field"
-        );
+        SegmentReadState readState = new SegmentReadState(directory, segmentInfo, fieldInfos, IOContext.DEFAULT, "test_field");
 
         Lucene102BinaryFlatVectorsScorer scorer = new Lucene102BinaryFlatVectorsScorer();
         try (BBQReader reader = new BBQReader(readState, scorer)) {
@@ -205,15 +176,13 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
             subParameters.put("encoder", Collections.emptyMap());
             subParameters.put("indexThreadQty", 1);
 
-            long indexMemoryAddress = FaissService.initBBQIndex(
-                numVectors, dimension, parameters, centroidDp, quantizedVecBytes
-            );
+            long indexMemoryAddress = FaissService.initBBQIndex(numVectors, dimension, parameters, centroidDp, quantizedVecBytes);
 
             // Pass quantized vectors + correction factors in batches
             passQuantizedVectors(indexMemoryAddress, binarizedVectorValues);
 
             // Add doc IDs
-            int batchSize = 500;
+            int batchSize = 1024;
             int[] docIds = new int[batchSize];
             int numAdded = 0;
             int remaining = numVectors;
@@ -231,18 +200,17 @@ public class FaissBBQRecallValidationTests extends KNNTestCase {
         }
     }
 
-    private void passQuantizedVectors(
-        final long indexMemoryAddress,
-        final BBQReader.BinarizedVectorValues binarizedVectorValues
-    ) throws IOException {
-        final int batchSize = 500;
+    private void passQuantizedVectors(final long indexMemoryAddress, final BBQReader.BinarizedVectorValues binarizedVectorValues)
+        throws IOException {
+        final int batchSize = Math.max(1, (int) (binarizedVectorValues.size() * 0.01));
         byte[] buffer = null;
         for (int i = 0; i < binarizedVectorValues.size(); ) {
             final int loopSize = Math.min(binarizedVectorValues.size() - i, batchSize);
             for (int j = 0, o = 0; j < loopSize; ++j) {
                 final byte[] binaryVector = binarizedVectorValues.quantizedVectorValues.vectorValue(i + j);
                 if (buffer == null) {
-                    // [Quantized Vector | lowerInterval (float) | upperInterval (float) | additionalCorrection (float) | quantizedComponentSum (int)]
+                    // [Quantized Vector | lowerInterval (float) | upperInterval (float) | additionalCorrection (float) |
+                    // quantizedComponentSum (int)]
                     buffer = new byte[(binaryVector.length + Integer.BYTES * 4) * batchSize];
                 }
                 final OptimizedScalarQuantizer.QuantizationResult quantizationResult =

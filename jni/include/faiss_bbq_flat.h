@@ -195,9 +195,9 @@ struct FaissBBQFlat final : public faiss::Index {
     }
 
     faiss::DistanceComputer* get_distance_computer() const final {
-        std::cout << "___________ FaissBBQFlat::get_distance_computer(), quantizedVectorsAndCorrectionFactors.size()="
-                  << quantizedVectorsAndCorrectionFactors.size()
-                  << std::endl;
+        // std::cout << "___________ FaissBBQFlat::get_distance_computer(), quantizedVectorsAndCorrectionFactors.size()="
+        //           << quantizedVectorsAndCorrectionFactors.size()
+        //           << std::endl;
         return new BBQDistanceComputer(oneElementSize, quantizedVectorsAndCorrectionFactors.data(), centroidDp, dimension, numVectors);
     }
 

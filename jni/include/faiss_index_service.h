@@ -233,7 +233,7 @@ struct OpenSearchMergeInterruptCallback : faiss::InterruptCallback {
         jenv = jutil->GetJNICurrentEnv();
 
         if (jenv == nullptr) {
-            std::cerr << "JNIEnv not found\n";
+            // std::cerr << "JNIEnv not found\n";
             return false;
         }
         if (mergeHelperClass == nullptr) {

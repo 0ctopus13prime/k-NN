@@ -117,7 +117,10 @@ public interface KNNVectorValuesIterator {
         @Setter
         private Object lastAccessedVector = null;
 
-        DocIdsIteratorValues(@NonNull final KnnVectorValues knnVectorValues) {
+        public DocIdsIteratorValues(
+            @NonNull
+            final KnnVectorValues knnVectorValues
+        ) {
             super(knnVectorValues.iterator());
             this.knnVectorValues = knnVectorValues;
         }

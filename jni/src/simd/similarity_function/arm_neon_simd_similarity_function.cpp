@@ -212,7 +212,6 @@ static FORCE_INLINE void simd4bitDotProductBatch(
     const uint8_t* plane3 = queryPtr + 3 * binaryCodeBytes;
 
     uint32x4_t acc[BATCH_SIZE];
-    LOOP_UNROLL(BATCH_SIZE)
     for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
         acc[b] = vdupq_n_u32(0);
     }
@@ -229,13 +228,11 @@ static FORCE_INLINE void simd4bitDotProductBatch(
         // flood the prefetch queue (ARM cores typically have 4-8 slots).
         if (i + 16 < binaryCodeBytes) {
             __builtin_prefetch(plane0 + i + 16);
-            LOOP_UNROLL(BATCH_SIZE)
             for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
                 __builtin_prefetch(dataVecs[b] + i + 16);
             }
         }
 
-        LOOP_UNROLL(BATCH_SIZE)
         for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
             // Load 16 bytes of data vector's binary code
             uint8x16_t d = vld1q_u8(dataVecs[b] + i);
@@ -258,7 +255,6 @@ static FORCE_INLINE void simd4bitDotProductBatch(
     }
 
     // Horizontal sum into results
-    LOOP_UNROLL(BATCH_SIZE)
     for (int32_t b = 0 ; b < BATCH_SIZE ; ++b) {
         results[b] = static_cast<float>(vaddvq_u32(acc[b]));
     }

@@ -161,7 +161,7 @@ public final class KNNVectorValuesFactory {
     }
 
     @SuppressWarnings("unchecked")
-    private static <T> KNNVectorValues<T> getVectorValues(
+    public static <T> KNNVectorValues<T> getVectorValues(
         final VectorDataType vectorDataType,
         final KNNVectorValuesIterator knnVectorValuesIterator
     ) {
