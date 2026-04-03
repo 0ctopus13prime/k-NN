@@ -160,8 +160,8 @@ public class KNNQueryFactory extends BaseQueryFactory {
             log.warn("Rescoring is not supported when [{}] is set to true", EXPAND_NESTED);
             return luceneKnnQuery;
         }
-        return needsRescore ? new RescoreKNNVectorQuery(luceneKnnQuery, fieldName, k, vector, shardId) : luceneKnnQuery;
-
+        // return needsRescore ? new RescoreKNNVectorQuery(luceneKnnQuery, fieldName, k, vector, shardId) : luceneKnnQuery;
+        return luceneKnnQuery;
     }
 
     private static int getDimension(float[] floatQueryVector, byte[] byteQueryVector) {
