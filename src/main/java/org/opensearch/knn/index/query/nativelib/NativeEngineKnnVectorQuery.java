@@ -119,15 +119,15 @@ public class NativeEngineKnnVectorQuery extends Query {
                 ResultUtil.reduceToTopK(perLeafResults, firstPassKFor2PhaseSearch);
             }
 
-            StopWatch stopWatch = new StopWatch().start();
-            perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
-            long rescoreTime = stopWatch.stop().totalTime().millis();
-            log.debug(
-                "Rescoring results took {} ms. oversampled k:{}, segments:{}",
-                rescoreTime,
-                firstPassKFor2PhaseSearch,
-                leafReaderContexts.size()
-            );
+//            StopWatch stopWatch = new StopWatch().start();
+//            perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
+//            long rescoreTime = stopWatch.stop().totalTime().millis();
+//            log.debug(
+//                "Rescoring results took {} ms. oversampled k:{}, segments:{}",
+//                rescoreTime,
+//                firstPassKFor2PhaseSearch,
+//                leafReaderContexts.size()
+//            );
         }
 
         // Since memory optimized search is using this class, we need to return the same totalHits value when it's disabled.
