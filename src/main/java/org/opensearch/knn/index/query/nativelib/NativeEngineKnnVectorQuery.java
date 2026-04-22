@@ -132,8 +132,7 @@ public class NativeEngineKnnVectorQuery extends Query {
                     leafReaderContexts,
                     perLeafResults,
                     knnQuery.getField(),
-                    knnQuery.getQueryVector(),
-                    finalK
+                    knnQuery.getQueryVector()
                 );
             } else {
                 perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
@@ -525,8 +524,7 @@ public class NativeEngineKnnVectorQuery extends Query {
         List<LeafReaderContext> leafReaderContexts,
         List<PerLeafResult> perLeafResults,
         String field,
-        float[] queryVector,
-        int k
+        float[] queryVector
     ) throws IOException {
         List<Callable<PerLeafResult>> tasks = new ArrayList<>();
         int[] taskIndices = new int[perLeafResults.size()];

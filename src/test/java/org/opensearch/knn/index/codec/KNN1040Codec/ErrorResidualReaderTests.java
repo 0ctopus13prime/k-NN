@@ -102,12 +102,12 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
      * and verify per-vector metadata (lower, upper) and packed residual nibbles.
      *
      * Vec0: [0.5, 0.5, 0.5, 0.5], centroid=[0,0,0,0]
-     *   binaryCode=0x05 (bits [1,0,1,0]), lower=0.0, upper=1.0 → delta=1.0
+     *   binaryCode=0xA0 (MSB-first bits [1,0,1,0] for dims 0-3), lower=0.0, upper=1.0 → delta=1.0
      *   residuals = [-0.5, 0.5, -0.5, 0.5], halfDelta=0.5
      *   q=[0, 15, 0, 15], stored lower=-0.5, upper=0.5
      *
      * Vec1: [1.0, 1.0, 1.0, 1.0], centroid=[0,0,0,0]
-     *   binaryCode=0x0F (bits [1,1,1,1]), lower=0.0, upper=2.0 → delta=2.0
+     *   binaryCode=0xF0 (MSB-first bits [1,1,1,1] for dims 0-3), lower=0.0, upper=2.0 → delta=2.0
      *   residuals = [-1, -1, -1, -1], halfDelta=1.0
      *   q=[0, 0, 0, 0], stored lower=-1.0, upper=1.0
      */
@@ -123,7 +123,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
             dir, vectors, centroid,
             new float[] { 0.0f, 0.0f },
             new float[] { 1.0f, 2.0f },
-            new byte[][] { new byte[] { 0x05 }, new byte[] { 0x0F } }
+            new byte[][] { new byte[] { (byte) 0xA0 }, new byte[] { (byte) 0xF0 } }
         );
 
         try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
@@ -206,7 +206,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
             dir, vectors, centroid,
             new float[] { 0.0f, 0.0f },
             new float[] { 1.0f, 2.0f },  // different upper → different per-vector lower/upper
-            new byte[][] { new byte[] { 0x05 }, new byte[] { 0x0F } }
+            new byte[][] { new byte[] { (byte) 0xA0 }, new byte[] { (byte) 0xF0 } }
         );
 
         try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
@@ -252,7 +252,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
      * lower/upper, verify against true residuals within half a quantization step.
      *
      * Vec=[0.5, 0.5, 0.5, 0.5], centroid=[0,0,0,0]
-     * binaryCode=0x05 (bits [1,0,1,0]), lower=0.0, upper=1.0 → delta=1.0
+     * binaryCode=0xA0 (MSB-first bits [1,0,1,0] for dims 0-3), lower=0.0, upper=1.0 → delta=1.0
      * residuals = [-0.5, 0.5, -0.5, 0.5] — exact boundary values
      * q=[0, 15, 0, 15] → dequantized = [-0.5, 0.5, -0.5, 0.5]
      */
@@ -264,7 +264,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
         writeVerFile(
             dir, vectors, centroid,
             new float[] { 0.0f }, new float[] { 1.0f },
-            new byte[][] { new byte[] { 0x05 } }
+            new byte[][] { new byte[] { (byte) 0xA0 } }
         );
 
         float[] expectedResiduals = { -0.5f, 0.5f, -0.5f, 0.5f };
@@ -289,25 +289,25 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
     }
 
     /**
-     * Round-trip with non-zero centroid to verify the centering step x' = x - c
-     * works correctly through the write→read pipeline.
+     * Round-trip with already-centered vectors (simulating what scalarQuantize does in-place).
      *
-     * Vec=[2.0, 3.0, 4.0, 5.0], centroid=[1.5, 1.5, 1.5, 1.5]
-     * binaryCode=0x05 (bits [1,0,1,0]), lower=0.0, upper=1.0 → delta=1.0
-     * x'=[0.5, 1.5, 2.5, 3.5], Q(x')=[1.0, 0.0, 1.0, 0.0]
+     * Centered vec=[0.5, 1.5, 2.5, 3.5] (original was [2.0,3.0,4.0,5.0] - centroid [1.5,1.5,1.5,1.5])
+     * binaryCode=0xA0 (MSB-first bits [1,0,1,0] for dims 0-3), lower=0.0, upper=1.0 → delta=1.0
+     * Q(x')=[1.0, 0.0, 1.0, 0.0]
      * residuals = [-0.5, 1.5, 1.5, 3.5]
      *   → clamped to [-0.5, 0.5]: [-0.5, 0.5(clamped), 0.5(clamped), 0.5(clamped)]
      *   → q = [0, 15, 15, 15]
      */
     public void testRoundTripDequantization_nonZeroCentroid() throws IOException {
-        List<float[]> vectors = List.of(new float[] { 2.0f, 3.0f, 4.0f, 5.0f });
+        // Vectors are already centered (as scalarQuantize would leave them)
+        List<float[]> vectors = List.of(new float[] { 0.5f, 1.5f, 2.5f, 3.5f });
         float[] centroid = new float[] { 1.5f, 1.5f, 1.5f, 1.5f };
 
         ByteBuffersDirectory dir = new ByteBuffersDirectory();
         writeVerFile(
             dir, vectors, centroid,
             new float[] { 0.0f }, new float[] { 1.0f },
-            new byte[][] { new byte[] { 0x05 } }
+            new byte[][] { new byte[] { (byte) 0xA0 } }
         );
 
         try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {

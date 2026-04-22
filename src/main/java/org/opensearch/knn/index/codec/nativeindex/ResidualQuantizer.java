@@ -87,16 +87,16 @@ public class ResidualQuantizer {
     /**
      * Unpack a single bit from a bit-packed binary code.
      *
-     * The 1-bit SQ binary codes store one bit per dimension, packed into bytes with
-     * the lowest dimension in the least significant bit. For example, dimensions 0-7
-     * are in byte 0, with dimension 0 at bit position 0.
+     * The 1-bit SQ binary codes are packed MSB-first by Lucene's
+     * {@code OptimizedScalarQuantizer.packAsBinary()}: dimension 0 is stored in bit 7 (MSB)
+     * of byte 0, dimension 7 in bit 0 (LSB) of byte 0, dimension 8 in bit 7 of byte 1, etc.
      *
      * @param binaryCode     the bit-packed 1-bit quantized code from {@code .veb}
      * @param dimensionIndex which dimension to unpack (0-based)
      * @return 0 or 1
      */
     public static int unpackBit(byte[] binaryCode, int dimensionIndex) {
-        return (binaryCode[dimensionIndex / 8] >>> (dimensionIndex % 8)) & 1;
+        return (binaryCode[dimensionIndex / 8] >>> (7 - (dimensionIndex % 8))) & 1;
     }
 
     /**
@@ -104,23 +104,24 @@ public class ResidualQuantizer {
      *
      * The residual captures the quantization error for dimension {@code d}:
      * <pre>
-     *   x'_d    = fullVecComponent - centroidComponent       (centered value)
      *   Q(x')_d = lowerInterval + bit_d * delta              (dequantized 1-bit value)
-     *   r_d     = x'_d - Q(x')_d                             (residual)
+     *   r_d     = centeredVecComponent - Q(x')_d              (residual)
      * </pre>
      * For 1-bit SQ, {@code nSteps = 2^1 - 1 = 1}, so {@code delta = upperInterval - lowerInterval}.
      *
-     * @param fullVecComponent  the full-precision value x_d
-     * @param centroidComponent the centroid value c_d
-     * @param binaryCode        the bit-packed 1-bit quantized code
-     * @param dimensionIndex    which dimension (d) — used for bit unpacking
-     * @param lowerInterval     per-vector quantization lower bound
-     * @param delta             upperInterval - lowerInterval
-     * @return the residual r_d = (x_d - c_d) - Q(x')_d
+     * <p>Note: the input vector is expected to be already centered (centroid subtracted).
+     * Lucene's {@code OptimizedScalarQuantizer.scalarQuantize()} mutates the vector in-place
+     * by subtracting the centroid, so vectors read back from the supplier are already centered.
+     *
+     * @param centeredVecComponent the centered value x'_d (already has centroid subtracted)
+     * @param binaryCode           the bit-packed 1-bit quantized code (MSB-first)
+     * @param dimensionIndex       which dimension (d) — used for bit unpacking
+     * @param lowerInterval        per-vector quantization lower bound
+     * @param delta                upperInterval - lowerInterval
+     * @return the residual r_d = x'_d - Q(x')_d
      */
     public static float computeResidual(
-        float fullVecComponent,
-        float centroidComponent,
+        float centeredVecComponent,
         byte[] binaryCode,
         int dimensionIndex,
         float lowerInterval,
@@ -128,8 +129,7 @@ public class ResidualQuantizer {
     ) {
         int bit = unpackBit(binaryCode, dimensionIndex);
         float qVal = lowerInterval + bit * delta;
-        float xPrime = fullVecComponent - centroidComponent;
-        return xPrime - qVal;
+        return centeredVecComponent - qVal;
     }
 
     /**
@@ -270,7 +270,8 @@ public class ResidualQuantizer {
 
             // Compute per-dimension residual: r_d = (x_d - c_d) - Q(x')_d
             for (int d = 0; d < dimension; d++) {
-                residual[d] = computeResidual(fullVec[d], centroid[d], binaryCode, d, lower, delta);
+                // fullVec[d] is already centered (centroid subtracted by scalarQuantize in-place)
+                residual[d] = computeResidual(fullVec[d], binaryCode, d, lower, delta);
             }
 
             // Quantize residual to 4-bit with per-vector bounds [-delta/2, delta/2]
@@ -375,20 +376,22 @@ public class ResidualQuantizer {
      *   for each dimension d:
      *     r_d = lower + nibble_d * residualStep
      *     correction += q'_d * r_d
-     *   correctedScore = phase1Score + correction
+     *   rawDot = unscaleMaxInnerProductScore(phase1Score)
+     *   correctedScore = scaleMaxInnerProductScore(rawDot + correction)
      * </pre>
      *
-     * <p>When {@code upper == lower} (delta was 0 at build time), all dequantized residuals
-     * equal {@code lower}, and the correction is {@code lower * sum(q')}. This is mathematically
-     * correct — no special-casing needed.
+     * <p>The phase-1 score is MIP-scaled (non-linear). We must unscale it to a raw dot product
+     * before adding the correction, then re-scale the result. Adding the correction directly
+     * to the scaled score would give wrong results because MIP scaling is non-linear:
+     * {@code dp >= 0 → score = dp + 1}, {@code dp < 0 → score = 1/(1-dp)}.
      *
      * @param qPrime         precomputed {@code q' = query - centroid} (length = dimension)
      * @param packedResidual 4-bit packed residual bytes from the .ver block (low nibble first)
      * @param lower          per-vector lowerInterval ({@code -delta/2})
      * @param upper          per-vector upperInterval ({@code delta/2})
-     * @param phase1Score    score from 1st-phase approximate search
+     * @param phase1Score    MIP-scaled score from 1st-phase approximate search
      * @param dimension      vector dimensionality
-     * @return corrected score = phase1Score + {@code <q', Q_4(r)>}
+     * @return corrected MIP-scaled score
      */
     public static float computeCorrectedScore(
         float[] qPrime,
@@ -412,6 +415,36 @@ public class ResidualQuantizer {
             correction += qPrime[d] * r_d;
         }
 
-        return phase1Score + correction;
+        // Unscale MIP score → raw dot product, add correction, re-scale
+        float rawDot = unscaleMaxInnerProductScore(phase1Score);
+        return scaleMaxInnerProductScore(rawDot + correction);
+    }
+
+    /**
+     * Reverse of {@code VectorUtil.scaleMaxInnerProductScore}.
+     * Recovers the raw dot product from a MIP-scaled score.
+     *
+     * @param score the MIP-scaled score (always > 0)
+     * @return the raw dot product value
+     */
+    static float unscaleMaxInnerProductScore(float score) {
+        if (score >= 1.0f) {
+            return score - 1.0f;
+        }
+        return -(1.0f / score - 1.0f);
+    }
+
+    /**
+     * Scales a raw dot product to a positive MIP score, matching
+     * {@code VectorUtil.scaleMaxInnerProductScore}.
+     *
+     * @param dotProduct the raw dot product
+     * @return the MIP-scaled score (always > 0)
+     */
+    static float scaleMaxInnerProductScore(float dotProduct) {
+        if (dotProduct >= 0) {
+            return dotProduct + 1.0f;
+        }
+        return 1.0f / (1.0f - dotProduct);
     }
 }

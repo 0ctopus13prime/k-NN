@@ -55,43 +55,51 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
 
     // ──────────────────────────────────────────────────────────────────────────
     // unpackBit: extracts a single dimension's bit from the 1-bit SQ binary code.
-    // The binary code stores bits LSB-first within each byte:
-    //   byte[0] bit 0 = dimension 0, byte[0] bit 7 = dimension 7,
-    //   byte[1] bit 0 = dimension 8, etc.
+    // Lucene's packAsBinary packs MSB-first: dimension 0 → bit 7, dimension 7 → bit 0.
+    //   byte[0] bit 7 = dimension 0, byte[0] bit 0 = dimension 7,
+    //   byte[1] bit 7 = dimension 8, etc.
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Verify all 8 bit positions within a single byte.
-     * 0xB4 = 0b10110100: dims [0..7] = [0,0,1,0,1,1,0,1]
+     * Verify all 8 bit positions within a single byte (MSB-first layout).
+     * 0xB4 = 0b10110100:
+     *   bit 7=1 → dim 0 = 1
+     *   bit 6=0 → dim 1 = 0
+     *   bit 5=1 → dim 2 = 1
+     *   bit 4=1 → dim 3 = 1
+     *   bit 3=0 → dim 4 = 0
+     *   bit 2=1 → dim 5 = 1
+     *   bit 1=0 → dim 6 = 0
+     *   bit 0=0 → dim 7 = 0
      */
     public void testUnpackBit() {
         byte[] binaryCode = new byte[] { (byte) 0xB4 };
 
-        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 0));
+        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 0));
         assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 1));
         assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 2));
-        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 3));
-        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 4));
+        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 3));
+        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 4));
         assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 5));
         assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 6));
-        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 7));
+        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 7));
     }
 
     /**
-     * Verify bit unpacking across byte boundaries.
-     * byte[0]=0x01 (only bit 0 set), byte[1]=0x80 (only bit 7 set → dimension 15).
+     * Verify bit unpacking across byte boundaries (MSB-first layout).
+     * byte[0]=0x01 (only bit 0 set → dimension 7), byte[1]=0x80 (only bit 7 set → dimension 8).
      */
     public void testUnpackBit_multipleBytes() {
         byte[] binaryCode = new byte[] { 0x01, (byte) 0x80 };
 
-        // Byte 0: dimension 0 is set, all others are 0
-        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 0));
-        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 1));
-        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 7));
+        // Byte 0: 0x01 = 0b00000001 → only dim 7 is set (bit 0 = dim 7)
+        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 0));  // bit 7 = 0
+        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 1));  // bit 6 = 0
+        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 7));  // bit 0 = 1
 
-        // Byte 1: only dimension 15 (bit 7 of byte 1) is set
-        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 8));
-        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 15));
+        // Byte 1: 0x80 = 0b10000000 → only dim 8 is set (bit 7 = dim 8)
+        assertEquals(1, ResidualQuantizer.unpackBit(binaryCode, 8));  // bit 7 = 1
+        assertEquals(0, ResidualQuantizer.unpackBit(binaryCode, 15)); // bit 0 = 0
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -100,45 +108,49 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * When the quantized bit is 1:
-     * x'_d = 1.5 - 0.5 = 1.0
+     * When the quantized bit is 1 (MSB-first: dim 0 = bit 7):
+     * 0x80 = 0b10000000 → dim 0 has bit=1
+     * Input is already centered: x'_d = 1.0 (= original 1.5 - centroid 0.5)
      * Q(x')_d = -0.2 + 1 * 1.4 = 1.2
      * residual = 1.0 - 1.2 = -0.2
      */
     public void testComputeResidual() {
-        byte[] binaryCode = new byte[] { 0x01 }; // bit 0 = 1
+        byte[] binaryCode = new byte[] { (byte) 0x80 }; // bit 7 = 1 → dim 0 = 1
 
-        float r = ResidualQuantizer.computeResidual(1.5f, 0.5f, binaryCode, 0, -0.2f, 1.4f);
+        // Pass already-centered value (1.5 - 0.5 = 1.0)
+        float r = ResidualQuantizer.computeResidual(1.0f, binaryCode, 0, -0.2f, 1.4f);
         assertEquals(-0.2f, r, 1e-6f);
     }
 
     /**
      * When the quantized bit is 0:
-     * Q(x')_d = lower + 0 * delta = lower = 0.3
-     * x'_d = 2.0 - 0.5 = 1.5
+     * Input is already centered: x'_d = 1.5 (= original 2.0 - centroid 0.5)
+     * Q(x')_d = lower + 0 * delta = 0.3
      * residual = 1.5 - 0.3 = 1.2
      */
     public void testComputeResidual_bitZero() {
         byte[] binaryCode = new byte[] { 0x00 }; // all bits 0
 
-        float r = ResidualQuantizer.computeResidual(2.0f, 0.5f, binaryCode, 0, 0.3f, 1.0f);
+        // Pass already-centered value (2.0 - 0.5 = 1.5)
+        float r = ResidualQuantizer.computeResidual(1.5f, binaryCode, 0, 0.3f, 1.0f);
         assertEquals(1.2f, r, 1e-6f);
     }
 
     /**
-     * P2: Verify computeResidual across byte boundaries (dimension >= 8).
-     * byte[0]=0x00, byte[1]=0x01 → dimension 8 has bit=1, dimension 9 has bit=0.
+     * Verify computeResidual across byte boundaries (dimension >= 8, MSB-first).
+     * byte[0]=0x00, byte[1]=0x80 → dim 8 has bit=1 (bit 7 of byte 1)
      *
-     * dim 8 (bit=1): x'=3.0-0.5=2.5, Q(x')=0.0+1*2.0=2.0, residual=0.5
-     * dim 9 (bit=0): x'=1.0-0.5=0.5, Q(x')=0.0+0*2.0=0.0, residual=0.5
+     * dim 8 (bit=1): x'=2.5 (already centered), Q(x')=0.0+1*2.0=2.0, residual=0.5
+     * dim 9 (bit=0): x'=0.5 (already centered), Q(x')=0.0+0*2.0=0.0, residual=0.5
      */
     public void testComputeResidual_crossByteBoundary() {
-        byte[] binaryCode = new byte[] { 0x00, 0x01 }; // byte1 bit0 = dimension 8 = 1
+        byte[] binaryCode = new byte[] { 0x00, (byte) 0x80 }; // byte1 bit7 = dim 8 = 1
 
-        float r8 = ResidualQuantizer.computeResidual(3.0f, 0.5f, binaryCode, 8, 0.0f, 2.0f);
+        // Already-centered values (3.0-0.5=2.5, 1.0-0.5=0.5)
+        float r8 = ResidualQuantizer.computeResidual(2.5f, binaryCode, 8, 0.0f, 2.0f);
         assertEquals(0.5f, r8, 1e-6f);
 
-        float r9 = ResidualQuantizer.computeResidual(1.0f, 0.5f, binaryCode, 9, 0.0f, 2.0f);
+        float r9 = ResidualQuantizer.computeResidual(0.5f, binaryCode, 9, 0.0f, 2.0f);
         assertEquals(0.5f, r9, 1e-6f);
     }
 
@@ -262,86 +274,78 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // computeCorrectedScore: dequantizes per-vector 4-bit residuals and computes
-    // <q', Q_4(r)> dot product, added to phase1 score.
+    // computeCorrectedScore: dequantizes per-vector 4-bit residuals, computes
+    // <q', Q_4(r)> dot product, unscales MIP score, adds correction, re-scales.
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Hand-computed example with dim=4, per-vector bounds [-0.5, 0.5].
      *
      * qPrime = [1.0, -1.0, 0.5, -0.5]
-     * packedResidual nibbles = [0, 15, 8, 7]
-     *   byte[0] = (15 << 4) | 0 = 0xF0
-     *   byte[1] = (7 << 4) | 8  = 0x78
-     * lower=-0.5, upper=0.5, step=1.0/15
-     * Dequantized residuals:
-     *   r[0] = -0.5 + 0 * (1/15)  = -0.5
-     *   r[1] = -0.5 + 15 * (1/15) = 0.5
-     *   r[2] = -0.5 + 8 * (1/15)  ≈ 0.0333
-     *   r[3] = -0.5 + 7 * (1/15)  ≈ -0.0333
-     * correction = 1.0*(-0.5) + (-1.0)*0.5 + 0.5*0.0333 + (-0.5)*(-0.0333)
-     *            = -0.5 + -0.5 + 0.01667 + 0.01667 = -0.96667
-     * phase1Score = 5.0
-     * correctedScore ≈ 5.0 + (-0.96667) = 4.0333
+     * nibbles = [0, 15, 8, 7], lower=-0.5, upper=0.5, step=1/15
+     * correction ≈ -0.96667
+     *
+     * phase1Score = 5.0 (MIP-scaled, rawDot = 5.0 - 1.0 = 4.0)
+     * rawTotal = 4.0 + (-0.96667) = 3.0333
+     * expectedResult = scale(3.0333) = 3.0333 + 1.0 = 4.0333
      */
     public void testComputeCorrectedScore() {
         float[] qPrime = { 1.0f, -1.0f, 0.5f, -0.5f };
         byte[] packed = { (byte) 0xF0, (byte) 0x78 }; // nibbles: [0, 15, 8, 7]
         float lower = -0.5f;
         float upper = 0.5f;
+        // phase1Score = scale(4.0) = 5.0
         float phase1Score = 5.0f;
 
         float result = ResidualQuantizer.computeCorrectedScore(qPrime, packed, lower, upper, phase1Score, 4);
 
-        // Hand-computed correction (independently verified):
-        //   step = 1.0/15 ≈ 0.06667
-        //   r[0] = -0.5 + 0*step = -0.5       → q'[0]*r[0] = 1.0 * -0.5   = -0.5
-        //   r[1] = -0.5 + 15*step = 0.5        → q'[1]*r[1] = -1.0 * 0.5   = -0.5
-        //   r[2] = -0.5 + 8*step ≈ 0.03333     → q'[2]*r[2] = 0.5 * 0.0333 ≈ 0.01667
-        //   r[3] = -0.5 + 7*step ≈ -0.03333    → q'[3]*r[3] = -0.5*-0.0333 ≈ 0.01667
-        //   correction = -0.5 + -0.5 + 0.01667 + 0.01667 ≈ -0.96667
-        //   correctedScore = 5.0 + (-0.96667) ≈ 4.0333
+        // correction ≈ -0.96667, rawDot = 4.0, rawTotal = 3.0333, scale(3.0333) = 4.0333
         assertEquals(4.0333f, result, 1e-3f);
     }
 
     /**
-     * When lower == upper (delta was 0 at build time), all dequantized residuals equal lower.
-     * correction = lower * sum(q'), which is well-defined — no division by zero.
+     * When lower == upper (delta=0), correction = 0, so result == phase1Score.
      */
     public void testComputeCorrectedScore_zeroDelta() {
         float[] qPrime = { 1.0f, 2.0f, 3.0f, 4.0f };
-        // All nibbles = 7 (midpoint, written by build when delta=0)
         byte[] packed = { (byte) 0x77, (byte) 0x77 }; // nibbles: [7, 7, 7, 7]
         float lower = 0.0f;
-        float upper = 0.0f; // delta=0
+        float upper = 0.0f;
+        // phase1Score = scale(9.0) = 10.0
         float phase1Score = 10.0f;
 
         float result = ResidualQuantizer.computeCorrectedScore(qPrime, packed, lower, upper, phase1Score, 4);
 
-        // step = 0, so all r_d = lower = 0.0, correction = 0
+        // correction = 0, rawDot = 9.0, rawTotal = 9.0, scale(9.0) = 10.0
         assertEquals(10.0f, result, 1e-6f);
     }
 
     /**
-     * All nibbles = 0 and all nibbles = 15 (boundary extremes).
-     * With lower=-1.0, upper=1.0, step=2/15:
-     *   nibble=0  → r=-1.0
-     *   nibble=15 → r=1.0
+     * Boundary nibble values with MIP scaling.
+     * qPrime = [1.0, 1.0], lower=-1.0, upper=1.0
+     *
+     * All nibbles=0: correction = -2.0
+     *   phase1Score = scale(0.0) = 1.0 → rawDot=0 → rawTotal=-2.0 → scale(-2.0) = 1/(1+2) = 0.3333
+     *
+     * All nibbles=15: correction = 2.0
+     *   phase1Score = scale(0.0) = 1.0 → rawDot=0 → rawTotal=2.0 → scale(2.0) = 3.0
      */
     public void testComputeCorrectedScore_boundaryNibbles() {
         float[] qPrime = { 1.0f, 1.0f };
         float lower = -1.0f;
         float upper = 1.0f;
+        // phase1Score = scale(0.0) = 1.0
+        float phase1Score = 1.0f;
 
-        // All nibbles = 0 → r=[-1.0, -1.0], correction = 1*(-1) + 1*(-1) = -2.0
+        // All nibbles = 0 → correction = -2.0 → rawTotal = -2.0 → scale(-2.0) = 1/(1-(-2)) = 1/3
         byte[] packedAllZero = { (byte) 0x00 };
-        float result0 = ResidualQuantizer.computeCorrectedScore(qPrime, packedAllZero, lower, upper, 0.0f, 2);
-        assertEquals(-2.0f, result0, 1e-4f);
+        float result0 = ResidualQuantizer.computeCorrectedScore(qPrime, packedAllZero, lower, upper, phase1Score, 2);
+        assertEquals(1.0f / 3.0f, result0, 1e-4f);
 
-        // All nibbles = 15 → r=[1.0, 1.0], correction = 1*1 + 1*1 = 2.0
+        // All nibbles = 15 → correction = 2.0 → rawTotal = 2.0 → scale(2.0) = 3.0
         byte[] packedAllMax = { (byte) 0xFF };
-        float result15 = ResidualQuantizer.computeCorrectedScore(qPrime, packedAllMax, lower, upper, 0.0f, 2);
-        assertEquals(2.0f, result15, 1e-4f);
+        float result15 = ResidualQuantizer.computeCorrectedScore(qPrime, packedAllMax, lower, upper, phase1Score, 2);
+        assertEquals(3.0f, result15, 1e-4f);
     }
 
     /**
@@ -361,14 +365,16 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
         byte[] packed = { (byte) 0xF0, (byte) 0x08, (byte) 0x0F };
         float lower = -1.0f;
         float upper = 1.0f;
+        // phase1Score = scale(0.0) = 1.0
+        float phase1Score = 1.0f;
 
-        float result = ResidualQuantizer.computeCorrectedScore(qPrime, packed, lower, upper, 0.0f, 5);
+        float result = ResidualQuantizer.computeCorrectedScore(qPrime, packed, lower, upper, phase1Score, 5);
 
-        // r[0]=-1.0, r[1]=1.0, r[2]=-1+8*(2/15)≈0.0667, r[3]=-1.0, r[4]=1.0
-        // correction ≈ -1 + 1 + 0.0667 + -1 + 1 = 0.0667
+        // correction ≈ 0.0667, rawDot = 0.0, rawTotal = 0.0667
+        // scale(0.0667) = 0.0667 + 1.0 = 1.0667
         float step = 2.0f / 15.0f;
-        float expectedR2 = -1.0f + 8 * step;
-        assertEquals(expectedR2, result, 1e-3f);
+        float correction = -1.0f + 1.0f + (-1.0f + 8 * step) + (-1.0f) + 1.0f;
+        assertEquals(1.0f + correction, result, 1e-3f);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -455,7 +461,7 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
      * Round-trip: write .ver, read back, dequantize, compare against true residuals.
      *
      * Vec=[0.5, 0.5, 0.5, 0.5], centroid=[0,0,0,0]
-     * binaryCode=0x05 (bits [1,0,1,0]), lower=0.0, upper=1.0 → delta=1.0
+     * binaryCode=0xA0 (MSB-first bits [1,0,1,0] for dims 0-3), lower=0.0, upper=1.0 → delta=1.0
      * Q(x')=[1.0, 0.0, 1.0, 0.0]
      * residuals = [-0.5, 0.5, -0.5, 0.5] — exact boundary values
      * q = [0, 15, 0, 15], dequantized = [-0.5, 0.5, -0.5, 0.5] — exact match
@@ -465,7 +471,7 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
         float[] centroid = new float[] { 0.0f, 0.0f, 0.0f, 0.0f };
 
         QuantizedByteVectorValues mockQuantized = createMockQuantizedValues(
-            new byte[][] { new byte[] { 0x05 } }, new float[] { 0.0f }, new float[] { 1.0f }
+            new byte[][] { new byte[] { (byte) 0xA0 } }, new float[] { 0.0f }, new float[] { 1.0f }
         );
         Supplier<KNNVectorValues<?>> supplier = () -> KNNVectorValuesFactory.getVectorValues(
             VectorDataType.FLOAT, new TestVectorValues.PreDefinedFloatVectorValues(vectors)
@@ -687,7 +693,7 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
 
         ByteBuffersDirectory dir = new ByteBuffersDirectory();
         QuantizedByteVectorValues mockQuantized = createMockQuantizedValues(
-            new byte[][] { new byte[] { 0x05 } }, new float[] { 0.0f }, new float[] { 1.0f }
+            new byte[][] { new byte[] { (byte) 0xA0 } }, new float[] { 0.0f }, new float[] { 1.0f }
         );
         Supplier<KNNVectorValues<?>> supplier = () -> KNNVectorValuesFactory.getVectorValues(
             VectorDataType.FLOAT, new TestVectorValues.PreDefinedFloatVectorValues(vectors)
@@ -717,10 +723,13 @@ public class ResidualQuantizerTests extends OpenSearchTestCase {
             float upper = meta.getFloat();
 
             // Use the actual search-time methods
+            // phase1Score = scale(9.0) = 10.0 (rawDot = 9.0)
             float[] qPrime = ResidualQuantizer.computeQPrime(query, centroid);
             float corrected = ResidualQuantizer.computeCorrectedScore(qPrime, packedResidual, lower, upper, 10.0f, 4);
 
-            // True correction = <q', r> = -2.0, so correctedScore ≈ 8.0
+            // True correction = <q', r> = -2.0
+            // rawDot = unscale(10.0) = 9.0, rawTotal = 9.0 + (-2.0) = 7.0
+            // expected = scale(7.0) = 8.0
             assertEquals(8.0f, corrected, 0.1f);
         }
     }
