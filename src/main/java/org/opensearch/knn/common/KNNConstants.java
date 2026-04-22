@@ -123,6 +123,7 @@ public class KNNConstants {
     // Faiss specific constants
     public static final String FAISS_NAME = "faiss";
     public final static String FAISS_EXTENSION = ".faiss";
+    public static final String RESIDUAL_FILE_EXTENSION = ".ver";
     public static final String INDEX_DESCRIPTION_PARAMETER = "index_description";
     public static final String METHOD_ENCODER_PARAMETER = "encoder";
     public static final String METHOD_PARAMETER_NPROBES = "nprobes";

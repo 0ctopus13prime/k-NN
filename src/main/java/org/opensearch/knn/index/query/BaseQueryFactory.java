@@ -22,6 +22,7 @@ import org.opensearch.index.search.NestedHelper;
 import org.opensearch.index.search.OpenSearchToParentBlockJoinQuery;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.index.mapper.CompressionLevel;
 import org.opensearch.knn.index.query.rescore.RescoreContext;
 
 import java.io.IOException;
@@ -59,6 +60,7 @@ public abstract class BaseQueryFactory {
         private RescoreContext rescoreContext;
         private boolean expandNested;
         private boolean memoryOptimizedSearchEnabled;
+        private CompressionLevel compressionLevel;
 
         public Optional<QueryBuilder> getFilter() {
             return Optional.ofNullable(filter);

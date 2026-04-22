@@ -586,6 +586,7 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
                 .rescoreContext(processedRescoreContext)
                 .expandNested(expandNested == null ? false : expandNested)
                 .memoryOptimizedSearchEnabled(memoryOptimizedSearchEnabled)
+                .compressionLevel(knnMappingConfig.getCompressionLevel())
                 .build();
             return KNNQueryFactory.create(createQueryRequest);
         }

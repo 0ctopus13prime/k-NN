@@ -18,6 +18,7 @@ import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentReadState;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
@@ -26,18 +27,23 @@ import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.codec.KNNCodecTestUtil;
 import org.opensearch.knn.index.codec.nativeindex.AbstractNativeEnginesKnnVectorsReader;
+import org.opensearch.knn.index.codec.nativeindex.ErrorResidualRefiner;
+import org.opensearch.knn.index.codec.nativeindex.ResidualQuantizer;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.mapper.KNNVectorFieldMapper;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.VectorSearcherFactory;
 
 import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -241,7 +247,200 @@ public class Faiss1040ScalarQuantizedKnnVectorsReaderTests extends KNNTestCase {
         }
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // ErrorResidualRefiner: refine() and close() integration
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Verify the reader implements ErrorResidualRefiner.
+     */
+    @SneakyThrows
+    public void testImplementsErrorResidualRefiner() {
+        Faiss1040ScalarQuantizedKnnVectorsReader reader = createReader(
+            new FieldInfos(new FieldInfo[0]),
+            Collections.emptySet(),
+            mock(FlatVectorsReader.class)
+        );
+        assertTrue(reader instanceof ErrorResidualRefiner);
+        reader.close();
+    }
+
+    /**
+     * When no .ver file is loaded (errorResidualReader is null), refine() should throw
+     * IllegalStateException.
+     */
+    @SneakyThrows
+    public void testRefine_whenNoVerFile_thenThrowsIllegalState() {
+        // The mock directory has no .ver files, so errorResidualReader will be null
+        Faiss1040ScalarQuantizedKnnVectorsReader reader = createReader(
+            new FieldInfos(new FieldInfo[0]),
+            Collections.emptySet(),
+            mock(FlatVectorsReader.class)
+        );
+
+        expectThrows(
+            IllegalStateException.class,
+            () -> reader.refine("field", new float[] { 1.0f }, new int[] { 0 }, new float[] { 5.0f })
+        );
+        reader.close();
+    }
+
+    /**
+     * When errorResidualReader is available (injected via reflection), refine() should
+     * return ScoreDoc[] with corrected scores for all input documents.
+     *
+     * Setup:
+     *   dim=4, centroid=[0,0,0,0], query=[1,-1,1,-1]
+     *   q' = [1,-1,1,-1]
+     *
+     *   Vec0 block: packed nibbles [0,15,0,15], lower=-0.5, upper=0.5
+     *     → r=[-0.5, 0.5, -0.5, 0.5]
+     *     → correction = 1*(-0.5) + (-1)*0.5 + 1*(-0.5) + (-1)*0.5 = -2.0
+     *     → correctedScore = 10.0 + (-2.0) = 8.0
+     *
+     *   Vec1 block: all nibbles=8 (midpoint), lower=-1.0, upper=1.0
+     *     → r = -1.0 + 8*(2/15) ≈ 0.0667 for all dims
+     *     → correction = (1 + -1 + 1 + -1) * 0.0667 = 0
+     *     → correctedScore ≈ 20.0
+     */
+    @SneakyThrows
+    public void testRefine_withInjectedReader_thenReturnsRefinedScores() {
+        // Create mock ErrorResidualReader
+        ErrorResidualReader mockResidualReader = mock(ErrorResidualReader.class);
+        when(mockResidualReader.getDimension()).thenReturn(4);
+        when(mockResidualReader.getCentroid()).thenReturn(new float[] { 0f, 0f, 0f, 0f });
+
+        // Clone returns a mock IndexInput
+        IndexInput mockClone = mock(IndexInput.class);
+        when(mockResidualReader.cloneInput()).thenReturn(mockClone);
+
+        // Vec0 block: nibbles [0, 15, 0, 15], lower=-0.5, upper=0.5
+        byte[] block0 = buildBlock(new int[] { 0, 15, 0, 15 }, -0.5f, 0.5f, 0.0f, 30);
+        when(mockResidualReader.readBlock(mockClone, 0)).thenReturn(block0);
+        when(mockResidualReader.extractLower(block0)).thenReturn(-0.5f);
+        when(mockResidualReader.extractUpper(block0)).thenReturn(0.5f);
+
+        // Vec1 block: all nibbles = 8, lower=-1.0, upper=1.0
+        byte[] block1 = buildBlock(new int[] { 8, 8, 8, 8 }, -1.0f, 1.0f, 0.0f, 32);
+        when(mockResidualReader.readBlock(mockClone, 1)).thenReturn(block1);
+        when(mockResidualReader.extractLower(block1)).thenReturn(-1.0f);
+        when(mockResidualReader.extractUpper(block1)).thenReturn(1.0f);
+
+        // Create reader and inject the mock errorResidualReader via reflection
+        Faiss1040ScalarQuantizedKnnVectorsReader reader = createReader(
+            new FieldInfos(new FieldInfo[0]),
+            Collections.emptySet(),
+            mock(FlatVectorsReader.class)
+        );
+        Field errField = Faiss1040ScalarQuantizedKnnVectorsReader.class.getDeclaredField("errorResidualReader");
+        errField.setAccessible(true);
+        errField.set(reader, mockResidualReader);
+
+        // Call refine
+        float[] query = { 1.0f, -1.0f, 1.0f, -1.0f };
+        int[] docIds = { 0, 1 };
+        float[] phase1Scores = { 10.0f, 20.0f };
+
+        ScoreDoc[] result = reader.refine("field", query, docIds, phase1Scores);
+
+        // Verify results
+        assertEquals(2, result.length);
+        assertEquals(0, result[0].doc);
+        assertEquals(1, result[1].doc);
+
+        // Vec0: correction = -2.0, correctedScore = 8.0
+        assertEquals(8.0f, result[0].score, 0.1f);
+
+        // Vec1: correction ≈ 0 (q' sums to 0, so any uniform r gives ~0 correction)
+        assertEquals(20.0f, result[1].score, 0.2f);
+
+        // Verify the cloned IndexInput was closed (try-with-resources in refine())
+        verify(mockClone).close();
+
+        reader.close();
+        verify(mockResidualReader).close();
+    }
+
+    /**
+     * When docIds is empty, refine() should return an empty ScoreDoc[].
+     */
+    @SneakyThrows
+    public void testRefine_emptyDocIds_thenReturnsEmptyArray() {
+        ErrorResidualReader mockResidualReader = mock(ErrorResidualReader.class);
+        when(mockResidualReader.getDimension()).thenReturn(4);
+        when(mockResidualReader.getCentroid()).thenReturn(new float[] { 0f, 0f, 0f, 0f });
+
+        IndexInput mockClone = mock(IndexInput.class);
+        when(mockResidualReader.cloneInput()).thenReturn(mockClone);
+
+        Faiss1040ScalarQuantizedKnnVectorsReader reader = createReader(
+            new FieldInfos(new FieldInfo[0]),
+            Collections.emptySet(),
+            mock(FlatVectorsReader.class)
+        );
+        Field errField = Faiss1040ScalarQuantizedKnnVectorsReader.class.getDeclaredField("errorResidualReader");
+        errField.setAccessible(true);
+        errField.set(reader, mockResidualReader);
+
+        ScoreDoc[] result = reader.refine("field", new float[] { 1, 2, 3, 4 }, new int[0], new float[0]);
+
+        assertEquals(0, result.length);
+        verify(mockClone).close();
+        reader.close();
+    }
+
+    /**
+     * Verify that close() closes the errorResidualReader when it is present.
+     */
+    @SneakyThrows
+    public void testClose_closesErrorResidualReader() {
+        ErrorResidualReader mockResidualReader = mock(ErrorResidualReader.class);
+        FlatVectorsReader fvr = mock(FlatVectorsReader.class);
+
+        Faiss1040ScalarQuantizedKnnVectorsReader reader = createReader(
+            new FieldInfos(new FieldInfo[0]),
+            Collections.emptySet(),
+            fvr
+        );
+
+        // Inject mock errorResidualReader
+        Field errField = Faiss1040ScalarQuantizedKnnVectorsReader.class.getDeclaredField("errorResidualReader");
+        errField.setAccessible(true);
+        errField.set(reader, mockResidualReader);
+
+        reader.close();
+
+        verify(fvr).close();
+        verify(mockResidualReader).close();
+    }
+
     // --- helpers ---
+
+    /**
+     * Build a fake per-vector block (packed nibbles + 16B little-endian metadata).
+     * Used to set up mock ErrorResidualReader.readBlock() return values.
+     */
+    private static byte[] buildBlock(int[] nibbles, float lower, float upper, float correction, int componentSum) {
+        int dim = nibbles.length;
+        int packedBytes = (dim + 1) / 2;
+        byte[] block = new byte[packedBytes + ResidualQuantizer.PER_VECTOR_META_BYTES];
+
+        // Pack nibbles
+        for (int d = 0; d < dim; d += 2) {
+            int q0 = nibbles[d];
+            int q1 = (d + 1 < dim) ? nibbles[d + 1] : 0;
+            block[d / 2] = (byte) ((q1 << 4) | (q0 & 0x0F));
+        }
+
+        // Write metadata in little-endian
+        ByteBuffer meta = ByteBuffer.wrap(block, packedBytes, ResidualQuantizer.PER_VECTOR_META_BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        meta.putFloat(lower);
+        meta.putFloat(upper);
+        meta.putFloat(correction);
+        meta.putInt(componentSum);
+
+        return block;
+    }
 
     private static FieldInfo createFieldInfo(String name, KNNEngine engine, int fieldNo) {
         KNNCodecTestUtil.FieldInfoBuilder b = KNNCodecTestUtil.FieldInfoBuilder.builder(name).fieldNumber(fieldNo);

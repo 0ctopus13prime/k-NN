@@ -22,6 +22,7 @@ import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.join.BitSetProducer;
 import org.opensearch.common.StopWatch;
 import org.opensearch.knn.index.VectorDataType;
+import org.opensearch.knn.index.mapper.CompressionLevel;
 import org.opensearch.knn.index.query.memoryoptsearch.MemoryOptimizedKNNWeight;
 import org.opensearch.knn.index.query.rescore.RescoreContext;
 import org.opensearch.knn.profile.KNNProfileUtil;
@@ -64,6 +65,8 @@ public class KNNQuery extends Query {
     @Getter
     private boolean explain;
     private boolean isMemoryOptimizedSearch;
+    @Builder.Default
+    private CompressionLevel compressionLevel = CompressionLevel.NOT_CONFIGURED;
 
     // Note: ideally query should not have to deal with shard level information. Adding it for logging purposes only
     // TODO: ThreadContext does not work with logger, remove this from here once its figured out

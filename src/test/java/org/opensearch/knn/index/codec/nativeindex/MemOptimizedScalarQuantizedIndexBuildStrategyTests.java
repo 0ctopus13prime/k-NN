@@ -26,6 +26,7 @@ import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.StringHelper;
@@ -42,6 +43,9 @@ import org.opensearch.knn.index.vectorvalues.KNNFloatVectorValues;
 import org.opensearch.knn.index.vectorvalues.KNNVectorValuesFactory;
 import org.opensearch.knn.jni.JNIService;
 
+import org.apache.lucene.codecs.CodecUtil;
+
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -256,6 +260,34 @@ public class MemOptimizedScalarQuantizedIndexBuildStrategyTests extends KNNTestC
 
             // Step 3: Verify the .faiss file was written with non-zero size
             assertTrue("Faiss index file should have been written with non-zero size", directory.fileLength(faissFileName) > 0);
+
+            // Step 4: Verify the .ver residual file was created with correct header and size
+            final String residualFileName = SEGMENT_NAME + "_" + FIELD_NAME + ".ver";
+            assertTrue(
+                ".ver file should exist in directory",
+                Arrays.asList(directory.listAll()).contains(residualFileName)
+            );
+            assertTrue(".ver file should have non-zero size", directory.fileLength(residualFileName) > 0);
+
+            // Verify header fields: skip Lucene codec header, then read our 3 ints
+            final int packedResidualBytes = (dimension + 1) / 2;
+            final int expectedBytesPerBlock = packedResidualBytes + ResidualQuantizer.PER_VECTOR_META_BYTES;
+            try (IndexInput verInput = directory.openInput(residualFileName, IOContext.DEFAULT)) {
+                // Skip the Lucene index header
+                int codecHeaderLen = CodecUtil.indexHeaderLength(ResidualQuantizer.CODEC_NAME, FIELD_NAME);
+                verInput.seek(codecHeaderLen);
+
+                assertEquals("dimension", dimension, verInput.readInt());
+                assertEquals("numVectors", NUM_VECTORS, verInput.readInt());
+                assertEquals("bytesPerBlock", expectedBytesPerBlock, verInput.readInt());
+            }
+
+            // Verify total file size: codecHeader + 12 (our fields) + N * bytesPerBlock + CodecUtil footer (16 bytes)
+            long codecHeaderLen = CodecUtil.indexHeaderLength(ResidualQuantizer.CODEC_NAME, FIELD_NAME);
+            long expectedSize = codecHeaderLen + 12
+                + (long) NUM_VECTORS * expectedBytesPerBlock
+                + 16; // CodecUtil footer
+            assertEquals(".ver file size", expectedSize, directory.fileLength(residualFileName));
         }
     }
 

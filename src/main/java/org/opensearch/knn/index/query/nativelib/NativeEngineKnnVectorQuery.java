@@ -8,8 +8,11 @@ package org.opensearch.knn.index.query.nativelib;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.apache.lucene.codecs.KnnVectorsReader;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchNoDocsQuery;
@@ -26,6 +29,9 @@ import org.apache.lucene.search.knn.TopKnnCollectorManager;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOSupplier;
 import org.opensearch.common.StopWatch;
+import org.opensearch.common.lucene.Lucene;
+import org.opensearch.knn.index.codec.nativeindex.ErrorResidualRefiner;
+import org.opensearch.knn.index.mapper.CompressionLevel;
 import org.opensearch.knn.index.KNNSettings;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.query.KNNQuery;
@@ -120,7 +126,18 @@ public class NativeEngineKnnVectorQuery extends Query {
             }
 
             StopWatch stopWatch = new StopWatch().start();
-            perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
+            if (knnQuery.getCompressionLevel() == CompressionLevel.x32) {
+                perLeafResults = doRescoreWithErrorCorrection(
+                    indexSearcher,
+                    leafReaderContexts,
+                    perLeafResults,
+                    knnQuery.getField(),
+                    knnQuery.getQueryVector(),
+                    finalK
+                );
+            } else {
+                perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
+            }
             long rescoreTime = stopWatch.stop().totalTime().millis();
             log.debug(
                 "Rescoring results took {} ms. oversampled k:{}, segments:{}",
@@ -494,6 +511,71 @@ public class NativeEngineKnnVectorQuery extends Query {
             });
         }
         return indexSearcher.getTaskExecutor().invokeAll(rescoreTasks);
+    }
+
+    /**
+     * 2nd-phase rescoring using 4-bit quantized error residuals from the .ver file.
+     * Replaces {@link #doRescore} for x32 (SQ 1-bit) fields.
+     *
+     * <p>Only creates tasks for segments that have results from the 1st phase.
+     * Empty segments are passed through unchanged.
+     */
+    private List<PerLeafResult> doRescoreWithErrorCorrection(
+        final IndexSearcher indexSearcher,
+        List<LeafReaderContext> leafReaderContexts,
+        List<PerLeafResult> perLeafResults,
+        String field,
+        float[] queryVector,
+        int k
+    ) throws IOException {
+        List<Callable<PerLeafResult>> tasks = new ArrayList<>();
+        int[] taskIndices = new int[perLeafResults.size()];
+        int taskCount = 0;
+
+        for (int i = 0; i < perLeafResults.size(); i++) {
+            if (perLeafResults.get(i).getResult().scoreDocs.length > 0) {
+                taskIndices[taskCount++] = i;
+                final int idx = i;
+                final LeafReaderContext leaf = leafReaderContexts.get(idx);
+                tasks.add(() -> {
+                    PerLeafResult leafResult = perLeafResults.get(idx);
+
+                    SegmentReader segReader = Lucene.segmentReader(leaf.reader());
+                    KnnVectorsReader vectorsReader = ((PerFieldKnnVectorsFormat.FieldsReader) segReader.getVectorReader())
+                        .getFieldReader(field);
+                    ErrorResidualRefiner refiner = (ErrorResidualRefiner) vectorsReader;
+
+                    ScoreDoc[] scoreDocs = leafResult.getResult().scoreDocs;
+                    int[] docIds = new int[scoreDocs.length];
+                    float[] phase1Scores = new float[scoreDocs.length];
+                    for (int j = 0; j < scoreDocs.length; j++) {
+                        docIds[j] = scoreDocs[j].doc;
+                        phase1Scores[j] = scoreDocs[j].score;
+                    }
+
+                    ScoreDoc[] refined = refiner.refine(field, queryVector, docIds, phase1Scores);
+
+                    TopDocs refinedTopDocs = new TopDocs(
+                        new TotalHits(refined.length, leafResult.getResult().totalHits.relation()),
+                        refined
+                    );
+                    return new PerLeafResult(
+                        leafResult.getFilterBits(),
+                        leafResult.getFilterBitsCardinality(),
+                        refinedTopDocs,
+                        PerLeafResult.SearchMode.EXACT_SEARCH
+                    );
+                });
+            }
+        }
+
+        List<PerLeafResult> taskResults = indexSearcher.getTaskExecutor().invokeAll(tasks);
+
+        List<PerLeafResult> merged = new ArrayList<>(perLeafResults);
+        for (int t = 0; t < taskResults.size(); t++) {
+            merged.set(taskIndices[t], taskResults.get(t));
+        }
+        return merged;
     }
 
     private PerLeafResult searchLeaf(LeafReaderContext ctx, KNNWeight queryWeight, int k) throws IOException {

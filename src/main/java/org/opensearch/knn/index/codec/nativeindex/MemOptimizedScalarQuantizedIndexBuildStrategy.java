@@ -7,7 +7,10 @@ package org.opensearch.knn.index.codec.nativeindex;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.lucene104.QuantizedByteVectorValues;
+import org.apache.lucene.index.SegmentWriteState;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.VectorDataType;
@@ -160,6 +163,28 @@ public class MemOptimizedScalarQuantizedIndexBuildStrategy implements NativeInde
         // writeIndex takes ownership of the native pointer via unique_ptr in C++,
         // so the memory is freed regardless of success or failure — no cleanup needed here.
         writeIndex(indexMemoryAddress, indexInfo, indexParameters);
+
+        // Phase 4: write 4-bit quantized error residuals to a .ver file.
+        // The residual r = x' - Q(x') for each vector is quantized using per-vector bounds
+        // derived from the 1-bit correction factors (delta = upper - lower, bounds = [-delta/2, delta/2]).
+        // This enables 2nd-phase rescoring with 8x less IO than loading full-precision vectors.
+        // Both flush and merge paths call buildAndWriteIndex(), so the .ver file is created in both cases.
+        final SegmentWriteState state = indexInfo.getSegmentWriteState();
+        final String residualFileName = state.segmentInfo.name + "_" + indexInfo.getField()
+            + KNNConstants.RESIDUAL_FILE_EXTENSION;
+
+        try (IndexOutput residualOutput = state.directory.createOutput(residualFileName, state.context)) {
+            ResidualQuantizer.writeResidualFile(
+                residualOutput,
+                state,
+                indexInfo.getKnnVectorValuesSupplier(),
+                binarizedVectorValues,
+                binarizedVectorValues.getCentroid(),
+                knnVectorValues.dimension(),
+                binarizedVectorValues.size()
+            );
+            CodecUtil.writeFooter(residualOutput);
+        }
     }
 
     /**
