@@ -126,109 +126,14 @@ public class NativeEngineKnnVectorQuery extends Query {
             }
 
             StopWatch stopWatch = new StopWatch().start();
-            if (true && knnQuery.getCompressionLevel() == CompressionLevel.x32) {
-                // Run BOTH rescore paths and compare
-                // Save a copy of phase-1 results for the full-precision path
-                List<PerLeafResult> phase1Copy = new ArrayList<>();
-                for (PerLeafResult plr : perLeafResults) {
-                    ScoreDoc[] origDocs = plr.getResult().scoreDocs;
-                    ScoreDoc[] copy = new ScoreDoc[origDocs.length];
-                    for (int ci = 0; ci < origDocs.length; ci++) {
-                        copy[ci] = new ScoreDoc(origDocs[ci].doc, origDocs[ci].score);
-                    }
-                    TopDocs copyTd = new TopDocs(plr.getResult().totalHits, copy);
-                    phase1Copy.add(new PerLeafResult(plr.getFilterBits(), plr.getFilterBitsCardinality(), copyTd, plr.getSearchMode()));
-                }
-
-                // Error correction path
-                List<PerLeafResult> ecResults = doRescoreWithErrorCorrection(
-                    indexSearcher, leafReaderContexts, perLeafResults,
-                    knnQuery.getField(), knnQuery.getQueryVector()
+            if (knnQuery.getCompressionLevel() == CompressionLevel.x32) {
+                perLeafResults = doRescoreWithErrorCorrection(
+                    indexSearcher,
+                    leafReaderContexts,
+                    perLeafResults,
+                    knnQuery.getField(),
+                    knnQuery.getQueryVector()
                 );
-
-                // Full precision path (using the saved copy)
-                List<PerLeafResult> fpResults = doRescore(
-                    indexSearcher, leafReaderContexts, knnWeight, phase1Copy, finalK
-                );
-
-                // Compare: collect top-k from each path
-                // Merge EC results across segments
-                java.util.Map<Integer, Float> ecScoreMap = new java.util.HashMap<>();
-                for (int si = 0; si < ecResults.size(); si++) {
-                    int docBase = leafReaderContexts.get(si).docBase;
-                    for (ScoreDoc sd : ecResults.get(si).getResult().scoreDocs) {
-                        ecScoreMap.put(sd.doc + docBase, sd.score);
-                    }
-                }
-                // Merge FP results across segments
-                java.util.Map<Integer, Float> fpScoreMap = new java.util.HashMap<>();
-                for (int si = 0; si < fpResults.size(); si++) {
-                    int docBase = leafReaderContexts.get(si).docBase;
-                    for (ScoreDoc sd : fpResults.get(si).getResult().scoreDocs) {
-                        fpScoreMap.put(sd.doc + docBase, sd.score);
-                    }
-                }
-
-                // Get top-k from each
-                List<java.util.Map.Entry<Integer, Float>> ecSorted = new ArrayList<>(ecScoreMap.entrySet());
-                ecSorted.sort((a, b) -> Float.compare(b.getValue(), a.getValue()));
-                List<java.util.Map.Entry<Integer, Float>> fpSorted = new ArrayList<>(fpScoreMap.entrySet());
-                fpSorted.sort((a, b) -> Float.compare(b.getValue(), a.getValue()));
-
-                int topK = finalK;
-                java.util.Set<Integer> ecTopK = new java.util.LinkedHashSet<>();
-                for (int ti = 0; ti < Math.min(topK, ecSorted.size()); ti++) {
-                    ecTopK.add(ecSorted.get(ti).getKey());
-                }
-                java.util.Set<Integer> fpTopK = new java.util.LinkedHashSet<>();
-                for (int ti = 0; ti < Math.min(topK, fpSorted.size()); ti++) {
-                    fpTopK.add(fpSorted.get(ti).getKey());
-                }
-
-                // Compute overlap
-                java.util.Set<Integer> overlap = new java.util.HashSet<>(ecTopK);
-                overlap.retainAll(fpTopK);
-
-                log.info("[EC-VS-FP] k={}, ecCandidates={}, fpCandidates={}, ecTopK={}, fpTopK={}, overlap={}/{}",
-                    topK, ecScoreMap.size(), fpScoreMap.size(), ecTopK.size(), fpTopK.size(), overlap.size(), topK);
-
-                // Log top-k from each
-                StringBuilder ecStr = new StringBuilder("[EC-VS-FP] EC top-" + topK + ": ");
-                int idx = 0;
-                for (java.util.Map.Entry<Integer, Float> e : ecSorted) {
-                    if (idx >= topK) break;
-                    Float fpScore = fpScoreMap.get(e.getKey());
-                    ecStr.append(String.format("doc%d(ec=%.2f,fp=%s) ", e.getKey(), e.getValue(),
-                        fpScore != null ? String.format("%.2f", fpScore) : "N/A"));
-                    idx++;
-                }
-                log.info(ecStr.toString());
-
-                StringBuilder fpStr = new StringBuilder("[EC-VS-FP] FP top-" + topK + ": ");
-                idx = 0;
-                for (java.util.Map.Entry<Integer, Float> e : fpSorted) {
-                    if (idx >= topK) break;
-                    Float ecScore = ecScoreMap.get(e.getKey());
-                    fpStr.append(String.format("doc%d(fp=%.2f,ec=%s) ", e.getKey(), e.getValue(),
-                        ecScore != null ? String.format("%.2f", ecScore) : "N/A"));
-                    idx++;
-                }
-                log.info(fpStr.toString());
-
-                // Docs in FP top-k but not in EC top-k
-                java.util.Set<Integer> fpOnly = new java.util.LinkedHashSet<>(fpTopK);
-                fpOnly.removeAll(ecTopK);
-                if (fpOnly.isEmpty() == false) {
-                    StringBuilder missStr = new StringBuilder("[EC-VS-FP] In FP but not EC: ");
-                    for (int doc : fpOnly) {
-                        missStr.append(String.format("doc%d(fp=%.2f,ec=%s) ", doc, fpScoreMap.get(doc),
-                            ecScoreMap.containsKey(doc) ? String.format("%.2f", ecScoreMap.get(doc)) : "NOT_IN_CANDIDATES"));
-                    }
-                    log.info(missStr.toString());
-                }
-
-                // Use EC results
-                perLeafResults = ecResults;
             } else {
                 perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
             }

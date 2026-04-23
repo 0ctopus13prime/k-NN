@@ -18,6 +18,7 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 import org.opensearch.knn.common.FieldInfoExtractor;
+import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.codec.KNN990Codec.NativeEngines990KnnVectorsReader;
 import org.opensearch.knn.index.codec.nativeindex.AbstractNativeEnginesKnnVectorsReader;
 import org.opensearch.knn.index.codec.nativeindex.ErrorResidualRefiner;
@@ -156,6 +157,11 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
         // Precompute q' = query - centroid once for this query
         final float[] qPrime = ResidualQuantizer.computeQPrime(queryVector, errorResidualReader.getCentroid());
 
+        if (true) {
+            log.info("[EC-DEBUG] refine called: field={}, numCandidates={}, dimension={}, numVectors={}",
+                field, docIds.length, dimension, errorResidualReader.getNumVectors());
+        }
+
         // Clone IndexInput for thread-safe reads (each search thread gets its own clone)
         try (IndexInput clonedInput = errorResidualReader.cloneInput()) {
             ScoreDoc[] result = new ScoreDoc[docIds.length];
@@ -172,6 +178,27 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
                 float correctedScore = ResidualQuantizer.computeCorrectedScore(
                     qPrime, block, lower, upper, phase1Scores[i], dimension
                 );
+
+                if (true && i < 5) {
+                    float rawPhase1 = phase1Scores[i] >= 1.0f ? phase1Scores[i] - 1.0f : -(1.0f / phase1Scores[i] - 1.0f);
+                    float rawCorrected = correctedScore >= 1.0f ? correctedScore - 1.0f : -(1.0f / correctedScore - 1.0f);
+                    float correction = rawCorrected - rawPhase1;
+
+                    // Compute true score using getFloatVectorValues and KNNVectorSimilarityFunction
+                    float trueMipScore = Float.NaN;
+                    try {
+                        FloatVectorValues fvv = getFloatVectorValues(field);
+                        float[] fullVec = fvv.vectorValue(docIds[i]);
+                        trueMipScore = KNNVectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.compare(queryVector, fullVec);
+                    } catch (Exception e) {
+                        log.warn("[EC-DEBUG] Could not compute true score for docId={}", docIds[i], e);
+                    }
+
+                    log.info("[EC-DEBUG] candidate[{}]: docId={}, phase1Score={}, correctedScore={}, "
+                        + "trueMipScore={}, correctedVsTrueGap={}",
+                        i, docIds[i], phase1Scores[i], correctedScore,
+                        trueMipScore, Math.abs(correctedScore - trueMipScore));
+                }
 
                 result[i] = new ScoreDoc(docIds[i], correctedScore);
             }
