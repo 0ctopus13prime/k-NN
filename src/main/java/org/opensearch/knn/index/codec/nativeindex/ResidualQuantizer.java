@@ -406,9 +406,7 @@ public class ResidualQuantizer {
 
         for (int d = 0; d < dimension; d++) {
             // Unpack 4-bit nibble: even dim → low nibble, odd dim → high nibble
-            int nibble = (d % 2 == 0)
-                ? (packedResidual[d / 2] & 0x0F)
-                : ((packedResidual[d / 2] >>> 4) & 0x0F);
+            int nibble = (d % 2 == 0) ? (packedResidual[d / 2] & 0x0F) : ((packedResidual[d / 2] >>> 4) & 0x0F);
 
             // Dequantize and accumulate dot product with q'
             float r_d = lower + nibble * residualStep;
@@ -421,6 +419,72 @@ public class ResidualQuantizer {
         // For negative-corrected scores, the non-linear branch of scale() would compress them
         // into (0,1), destroying relative ordering. Direct addition preserves ranking.
         return phase1Score + correction;
+    }
+
+    /**
+     * Compute the corrected score using Idea-1: query error correction.
+     *
+     * <p>Decomposes {@code q' = r1 + Q_4bit(q')} and computes:
+     * <pre>
+     *   correction = &lt;Q_4bit(q'), dequant(Q_4bit(r))&gt;
+     *              + &lt;r1, dequant(Q_4bit(r)) + dequant(Q(x'))&gt;
+     *   finalScore = phase1Score + correction
+     * </pre>
+     * This corrects for both the query quantization error and the data quantization error.
+     *
+     * @param r1               query residual: q'_d - dequant(Q_4bit(q')_d), length = dimension
+     * @param q4Scratch        Q_4bit(q') raw per-dimension codes (0-15), length >= dimension
+     * @param q4Lower          query quantization lower interval
+     * @param q4Upper          query quantization upper interval
+     * @param packedResidual   Q_4bit(r) from .ver block (4-bit packed, low nibble first)
+     * @param rLower           per-vector residual lower interval (-delta/2)
+     * @param rUpper           per-vector residual upper interval (delta/2)
+     * @param binaryCode       Q(x') from .veb (1-bit packed, MSB-first)
+     * @param dataLower        per-vector 1-bit data lower interval
+     * @param dataDelta        per-vector 1-bit data delta (upper - lower)
+     * @param phase1Score      MIP-scaled score from 1st-phase approximate search
+     * @param dimension        vector dimensionality
+     * @return corrected score with both query and data error correction
+     */
+    public static float computeCorrectedScoreV2(
+        float[] r1,
+        byte[] q4Scratch,
+        float q4Lower,
+        float q4Upper,
+        byte[] packedResidual,
+        float rLower,
+        float rUpper,
+        byte[] binaryCode,
+        float dataLower,
+        float dataDelta,
+        float phase1Score,
+        int dimension
+    ) {
+        // Dequantization steps
+        float q4Step = (q4Upper - q4Lower) / 15.0f;
+        float rStep = (rUpper - rLower) / 15.0f;
+
+        float term1 = 0.0f; // <Q_4bit(q'), dequant(Q_4bit(r))>
+        float term2 = 0.0f; // <r1, dequant(Q_4bit(r)) + dequant(Q(x'))>
+
+        for (int d = 0; d < dimension; d++) {
+            // Dequantize Q_4bit(r)_d
+            int rNibble = (d % 2 == 0) ? (packedResidual[d / 2] & 0x0F) : ((packedResidual[d / 2] >>> 4) & 0x0F);
+            float rDeq = rLower + rNibble * rStep;
+
+            // Dequantize Q(x')_d from 1-bit binary code
+            int bit = unpackBit(binaryCode, d);
+            float xDeq = dataLower + bit * dataDelta;
+
+            // Dequantize Q_4bit(q')_d
+            float q4Deq = q4Lower + (q4Scratch[d] & 0xFF) * q4Step;
+
+            // Accumulate terms
+            term1 += q4Deq * rDeq;
+            term2 += r1[d] * (rDeq + xDeq);
+        }
+
+        return phase1Score + term1 + term2;
     }
 
     /**

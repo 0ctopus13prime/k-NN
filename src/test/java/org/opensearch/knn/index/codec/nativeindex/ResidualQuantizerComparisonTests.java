@@ -5,36 +5,11 @@
 
 package org.opensearch.knn.index.codec.nativeindex;
 
-import org.apache.lucene.codecs.CodecUtil;
-import org.apache.lucene.codecs.lucene104.QuantizedByteVectorValues;
-import org.apache.lucene.index.FieldInfos;
-import org.apache.lucene.index.SegmentInfo;
-import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.VectorSimilarityFunction;
-import org.apache.lucene.store.ByteBuffersDirectory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexInput;
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.Version;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
-import org.opensearch.knn.index.VectorDataType;
-import org.opensearch.knn.index.vectorvalues.KNNVectorValues;
-import org.opensearch.knn.index.vectorvalues.KNNVectorValuesFactory;
-import org.opensearch.knn.index.vectorvalues.TestVectorValues;
 import org.opensearch.test.OpenSearchTestCase;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.Collections;
-import java.util.List;
 import java.util.Random;
-import java.util.function.Supplier;
-
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * Comparison test: verifies our ResidualQuantizer pipeline produces the same residuals
@@ -83,7 +58,10 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
         byte[] quantizationScratch = new byte[discreteDims];
 
         OptimizedScalarQuantizer.QuantizationResult corrections = quantizer.scalarQuantize(
-            vecForPOC, quantizationScratch, (byte) 1, centroid
+            vecForPOC,
+            quantizationScratch,
+            (byte) 1,
+            centroid
         );
         // vecForPOC is now centered
 
@@ -117,11 +95,15 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
         // Compare residuals
         System.out.println("=== Residual comparison (first 16 dims) ===");
         for (int d = 0; d < Math.min(16, dimension); d++) {
-            System.out.printf("  dim %3d: POC=%.6f  Ours=%.6f  diff=%.9f  code=%d  unpackedBit=%d%n",
-                d, pocResiduals[d], ourResiduals[d],
+            System.out.printf(
+                "  dim %3d: POC=%.6f  Ours=%.6f  diff=%.9f  code=%d  unpackedBit=%d%n",
+                d,
+                pocResiduals[d],
+                ourResiduals[d],
                 Math.abs(pocResiduals[d] - ourResiduals[d]),
                 quantizationScratch[d] & 0xFF,
-                ResidualQuantizer.unpackBit(binaryCode, d));
+                ResidualQuantizer.unpackBit(binaryCode, d)
+            );
         }
 
         // Verify: raw code should match unpacked bit for every dimension
@@ -160,8 +142,14 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
             if ((pocScratch[d] & 0xFF) != (ourScratch[d] & 0xFF)) {
                 quantMismatches++;
                 if (quantMismatches <= 10) {
-                    System.out.printf("  QUANT MISMATCH dim %d: POC=%d Ours=%d  pocResidual=%.6f ourResidual=%.6f%n",
-                        d, pocScratch[d] & 0xFF, ourScratch[d] & 0xFF, pocResiduals[d], ourResiduals[d]);
+                    System.out.printf(
+                        "  QUANT MISMATCH dim %d: POC=%d Ours=%d  pocResidual=%.6f ourResidual=%.6f%n",
+                        d,
+                        pocScratch[d] & 0xFF,
+                        ourScratch[d] & 0xFF,
+                        pocResiduals[d],
+                        ourResiduals[d]
+                    );
                 }
             }
         }
@@ -214,9 +202,7 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
         }
         int discreteDims = ((dimension + 63) / 64) * 64;
         byte[] quantScratch = new byte[discreteDims];
-        OptimizedScalarQuantizer.QuantizationResult corrections = quantizer.scalarQuantize(
-            vecCopy, quantScratch, (byte) 1, centroid
-        );
+        OptimizedScalarQuantizer.QuantizationResult corrections = quantizer.scalarQuantize(vecCopy, quantScratch, (byte) 1, centroid);
         float lower = corrections.lowerInterval();
         float upper = corrections.upperInterval();
         float delta = upper - lower;
@@ -280,8 +266,13 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
             if (pocCode != ourNibble) {
                 nibbleMismatches++;
                 if (nibbleMismatches <= 10) {
-                    System.out.printf("  NIBBLE MISMATCH dim %d: POC=%d Ours=%d  residualCode=%d%n",
-                        d, pocCode, ourNibble, residualCodes[d] & 0xFF);
+                    System.out.printf(
+                        "  NIBBLE MISMATCH dim %d: POC=%d Ours=%d  residualCode=%d%n",
+                        d,
+                        pocCode,
+                        ourNibble,
+                        residualCodes[d] & 0xFF
+                    );
                 }
             }
         }
@@ -299,8 +290,15 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
                 if (pocCode != ourNibble) {
                     float pocDeq = -halfDelta + pocCode * step;
                     float ourDeq = -halfDelta + ourNibble * step;
-                    System.out.printf("  dim %3d: pocCode=%2d ourNibble=%2d  pocDeq=%.4f ourDeq=%.4f  q'=%.4f%n",
-                        d, pocCode, ourNibble, pocDeq, ourDeq, centeredQuery[d]);
+                    System.out.printf(
+                        "  dim %3d: pocCode=%2d ourNibble=%2d  pocDeq=%.4f ourDeq=%.4f  q'=%.4f%n",
+                        d,
+                        pocCode,
+                        ourNibble,
+                        pocDeq,
+                        ourDeq,
+                        centeredQuery[d]
+                    );
                     shown++;
                 }
             }
@@ -377,8 +375,14 @@ public class ResidualQuantizerComparisonTests extends OpenSearchTestCase {
     /**
      * POC's correction computation — extract codes MSB-first and compute dot product.
      */
-    private static float pocComputeCorrection(float[] centeredQuery, byte[] packedResidual,
-                                               int dimension, float rLow, float rHigh, int errorResidualBits) {
+    private static float pocComputeCorrection(
+        float[] centeredQuery,
+        byte[] packedResidual,
+        int dimension,
+        float rLow,
+        float rHigh,
+        int errorResidualBits
+    ) {
         float qDotResidual = 0f;
         int nSteps = (1 << errorResidualBits) - 1;
         float step = (nSteps > 0) ? (rHigh - rLow) / nSteps : 0f;

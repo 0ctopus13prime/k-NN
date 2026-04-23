@@ -62,11 +62,11 @@ public class ErrorCorrectionBuildIT extends KNNRestTestCase {
         addKNNDocs(INDEX_NAME, FIELD_NAME, TEST_DIMENSION, 0, NUM_DOCS);
 
         // 3. Force merge to single segment — this triggers the merge path which calls
-        //    buildAndWriteIndex() → Phase 4 writes .ver file
+        // buildAndWriteIndex() → Phase 4 writes .ver file
         forceMergeKnnIndex(INDEX_NAME, 1);
 
         // 4. Verify KNN search still works (regression check)
-        //    If .ver file creation broke the index, search would fail here.
+        // If .ver file creation broke the index, search would fail here.
         validateKNNSearch(INDEX_NAME, FIELD_NAME, TEST_DIMENSION, NUM_DOCS, K);
     }
 

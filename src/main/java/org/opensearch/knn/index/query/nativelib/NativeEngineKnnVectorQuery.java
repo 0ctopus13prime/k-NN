@@ -143,14 +143,16 @@ public class NativeEngineKnnVectorQuery extends Query {
 
                 // Error correction path
                 List<PerLeafResult> ecResults = doRescoreWithErrorCorrection(
-                    indexSearcher, leafReaderContexts, perLeafResults,
-                    knnQuery.getField(), knnQuery.getQueryVector(), finalK
+                    indexSearcher,
+                    leafReaderContexts,
+                    perLeafResults,
+                    knnQuery.getField(),
+                    knnQuery.getQueryVector(),
+                    finalK
                 );
 
                 // Full precision path (using the saved copy)
-                List<PerLeafResult> fpResults = doRescore(
-                    indexSearcher, leafReaderContexts, knnWeight, phase1Copy, finalK
-                );
+                List<PerLeafResult> fpResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, phase1Copy, finalK);
 
                 // Compare: collect top-k from each path
                 // Merge EC results across segments
@@ -190,8 +192,16 @@ public class NativeEngineKnnVectorQuery extends Query {
                 java.util.Set<Integer> overlap = new java.util.HashSet<>(ecTopK);
                 overlap.retainAll(fpTopK);
 
-                log.info("[EC-VS-FP] k={}, ecCandidates={}, fpCandidates={}, ecTopK={}, fpTopK={}, overlap={}/{}",
-                    topK, ecScoreMap.size(), fpScoreMap.size(), ecTopK.size(), fpTopK.size(), overlap.size(), topK);
+                log.info(
+                    "[EC-VS-FP] k={}, ecCandidates={}, fpCandidates={}, ecTopK={}, fpTopK={}, overlap={}/{}",
+                    topK,
+                    ecScoreMap.size(),
+                    fpScoreMap.size(),
+                    ecTopK.size(),
+                    fpTopK.size(),
+                    overlap.size(),
+                    topK
+                );
 
                 // Log top-k from each
                 StringBuilder ecStr = new StringBuilder("[EC-VS-FP] EC top-" + topK + ": ");
@@ -199,22 +209,36 @@ public class NativeEngineKnnVectorQuery extends Query {
                 for (java.util.Map.Entry<Integer, Float> e : ecSorted) {
                     if (idx >= topK) break;
                     Float fpScore = fpScoreMap.get(e.getKey());
-                    ecStr.append(String.format("doc%d(ec=%.2f,fp=%s) ", e.getKey(), e.getValue(),
-                        fpScore != null ? String.format("%.2f", fpScore) : "N/A"));
+                    ecStr.append(
+                        String.format(
+                            "doc%d(ec=%.2f,fp=%s)\n",
+                            e.getKey(),
+                            e.getValue(),
+                            fpScore != null ? String.format("%.2f", fpScore) : "N/A"
+                        )
+                    );
                     idx++;
                 }
                 log.info(ecStr.toString());
+                log.info("__________________________________________");
 
                 StringBuilder fpStr = new StringBuilder("[EC-VS-FP] FP top-" + topK + ": ");
                 idx = 0;
                 for (java.util.Map.Entry<Integer, Float> e : fpSorted) {
                     if (idx >= topK) break;
                     Float ecScore = ecScoreMap.get(e.getKey());
-                    fpStr.append(String.format("doc%d(fp=%.2f,ec=%s) ", e.getKey(), e.getValue(),
-                        ecScore != null ? String.format("%.2f", ecScore) : "N/A"));
+                    fpStr.append(
+                        String.format(
+                            "doc%d(fp=%.2f,ec=%s)\n",
+                            e.getKey(),
+                            e.getValue(),
+                            ecScore != null ? String.format("%.2f", ecScore) : "N/A"
+                        )
+                    );
                     idx++;
                 }
                 log.info(fpStr.toString());
+                log.info("__________________________________________");
 
                 // Docs in FP top-k but not in EC top-k
                 java.util.Set<Integer> fpOnly = new java.util.LinkedHashSet<>(fpTopK);
@@ -222,11 +246,37 @@ public class NativeEngineKnnVectorQuery extends Query {
                 if (fpOnly.isEmpty() == false) {
                     StringBuilder missStr = new StringBuilder("[EC-VS-FP] In FP but not EC: ");
                     for (int doc : fpOnly) {
-                        missStr.append(String.format("doc%d(fp=%.2f,ec=%s) ", doc, fpScoreMap.get(doc),
-                            ecScoreMap.containsKey(doc) ? String.format("%.2f", ecScoreMap.get(doc)) : "NOT_IN_CANDIDATES"));
+                        missStr.append(
+                            String.format(
+                                "doc%d(fp=%.2f,ec=%s)\n",
+                                doc,
+                                fpScoreMap.get(doc),
+                                ecScoreMap.containsKey(doc) ? String.format("%.2f", ecScoreMap.get(doc)) : "NOT_IN_CANDIDATES"
+                            )
+                        );
                     }
                     log.info(missStr.toString());
                 }
+                log.info("__________________________________________");
+
+                // Docs in EC top-k but not in FP top-k
+                java.util.Set<Integer> ecOnly = new java.util.LinkedHashSet<>(ecTopK);
+                ecOnly.removeAll(fpTopK);
+                if (ecOnly.isEmpty() == false) {
+                    StringBuilder missStr = new StringBuilder("[EC-VS-FP] In EC but not FP: ");
+                    for (int doc : ecOnly) {
+                        missStr.append(
+                            String.format(
+                                "doc%d(ec=%.2f,fp=%s)\n",
+                                doc,
+                                ecScoreMap.get(doc),
+                                fpScoreMap.containsKey(doc) ? String.format("%.2f", fpScoreMap.get(doc)) : "NOT_IN_CANDIDATES"
+                            )
+                        );
+                    }
+                    log.info(missStr.toString());
+                }
+                log.info("__________________________________________");
 
                 // Use FP results if /tmp/aaa exists, otherwise EC results
                 if (new java.io.File("/tmp/aaa").exists()) {
@@ -641,8 +691,9 @@ public class NativeEngineKnnVectorQuery extends Query {
                     PerLeafResult leafResult = perLeafResults.get(idx);
 
                     SegmentReader segReader = Lucene.segmentReader(leaf.reader());
-                    KnnVectorsReader vectorsReader = ((PerFieldKnnVectorsFormat.FieldsReader) segReader.getVectorReader())
-                        .getFieldReader(field);
+                    KnnVectorsReader vectorsReader = ((PerFieldKnnVectorsFormat.FieldsReader) segReader.getVectorReader()).getFieldReader(
+                        field
+                    );
                     ErrorResidualRefiner refiner = (ErrorResidualRefiner) vectorsReader;
 
                     ScoreDoc[] scoreDocs = leafResult.getResult().scoreDocs;

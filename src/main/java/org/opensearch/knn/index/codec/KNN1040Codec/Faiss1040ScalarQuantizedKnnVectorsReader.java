@@ -16,7 +16,9 @@ import org.apache.lucene.search.AcceptDocs;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.opensearch.knn.common.FieldInfoExtractor;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.codec.KNN990Codec.NativeEngines990KnnVectorsReader;
@@ -28,8 +30,6 @@ import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -153,67 +153,92 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
         }
 
         final int dimension = errorResidualReader.getDimension();
+        final float[] centroid = errorResidualReader.getCentroid();
+        final QuantizedByteVectorValues qbvv = errorResidualReader.getQuantizedByteVectorValues();
+        final OptimizedScalarQuantizer quantizer = errorResidualReader.getQuantizer();
 
-        // Precompute q' = query - centroid once for this query
-        final float[] qPrime = ResidualQuantizer.computeQPrime(queryVector, errorResidualReader.getCentroid());
+        // ── Once per query: quantize query to 4-bit and compute query residual r1 ──
+        // Copy query since scalarQuantize mutates in-place (centers it)
+        float[] queryCopy = ArrayUtil.copyOfSubArray(queryVector, 0, queryVector.length);
+        int discreteDims = ((dimension + 63) / 64) * 64;
+        byte[] q4Scratch = new byte[discreteDims];
 
-        if (true) {
-            int maxDocId = -1;
-            int minDocId = Integer.MAX_VALUE;
-            for (int docId : docIds) {
-                if (docId > maxDocId) maxDocId = docId;
-                if (docId < minDocId) minDocId = docId;
-            }
-            int numVectors = errorResidualReader.getNumVectors();
-            boolean hasOutOfBounds = maxDocId >= numVectors;
-            log.info("[EC-DEBUG] refine: field={}, numCandidates={}, numVectors={}, minDocId={}, maxDocId={}, OUT_OF_BOUNDS={}",
-                field, docIds.length, numVectors, minDocId, maxDocId, hasOutOfBounds);
-            if (hasOutOfBounds) {
-                int oobCount = 0;
-                for (int docId : docIds) {
-                    if (docId >= numVectors) oobCount++;
-                }
-                log.warn("[EC-DEBUG] {} out of {} docIds >= numVectors({}). These read WRONG data from .ver file!",
-                    oobCount, docIds.length, numVectors);
-            }
+        // scalarQuantize: centers queryCopy in-place, fills q4Scratch with per-dim 4-bit codes (0-15)
+        OptimizedScalarQuantizer.QuantizationResult qTerms = quantizer.scalarQuantize(queryCopy, q4Scratch, (byte) 4, centroid);
+        // queryCopy is now q' (centered query)
+        float q4Lower = qTerms.lowerInterval();
+        float q4Upper = qTerms.upperInterval();
+        float q4Step = (q4Upper - q4Lower) / 15.0f;
+
+        // Compute query residual: r1[d] = q'[d] - dequantize(Q_4bit(q')[d])
+        float[] r1 = new float[dimension];
+        for (int d = 0; d < dimension; d++) {
+            float q4Deq = q4Lower + (q4Scratch[d] & 0xFF) * q4Step;
+            r1[d] = queryCopy[d] - q4Deq;
         }
 
-        // Clone IndexInput for thread-safe reads (each search thread gets its own clone)
+        // ── Per candidate: compute V2 corrected score ──
         try (IndexInput clonedInput = errorResidualReader.cloneInput()) {
             ScoreDoc[] result = new ScoreDoc[docIds.length];
 
             for (int i = 0; i < docIds.length; i++) {
-                // Dense case: docId == ordinal
+                // Read 4-bit residual block from .ver
                 byte[] block = errorResidualReader.readBlock(clonedInput, docIds[i]);
+                float rLower = errorResidualReader.extractLower(block);
+                float rUpper = errorResidualReader.extractUpper(block);
 
-                // Extract per-vector lower/upper from the block metadata
-                float lower = errorResidualReader.extractLower(block);
-                float upper = errorResidualReader.extractUpper(block);
+                // Read 1-bit binary code + correction factors from .veb
+                byte[] binaryCode = qbvv.vectorValue(docIds[i]);
+                OptimizedScalarQuantizer.QuantizationResult dataTerms = qbvv.getCorrectiveTerms(docIds[i]);
+                float dataLower = dataTerms.lowerInterval();
+                float dataDelta = dataTerms.upperInterval() - dataLower;
 
-                // Compute corrected score: phase1Score + <q', Q_4(r)>
-                float correctedScore = ResidualQuantizer.computeCorrectedScore(
-                    qPrime, block, lower, upper, phase1Scores[i], dimension
+                float correctedScore = ResidualQuantizer.computeCorrectedScoreV2(
+                    r1,
+                    q4Scratch,
+                    q4Lower,
+                    q4Upper,
+                    block,
+                    rLower,
+                    rUpper,
+                    binaryCode,
+                    dataLower,
+                    dataDelta,
+                    phase1Scores[i],
+                    dimension
                 );
 
-                if (true && i < 5) {
-                    float rawPhase1 = phase1Scores[i] >= 1.0f ? phase1Scores[i] - 1.0f : -(1.0f / phase1Scores[i] - 1.0f);
-                    float rawCorrected = correctedScore >= 1.0f ? correctedScore - 1.0f : -(1.0f / correctedScore - 1.0f);
-                    float correction = rawCorrected - rawPhase1;
-
-                    // Compute true score using getFloatVectorValues and KNNVectorSimilarityFunction
+                if (false) {
+                    float rStep = (rUpper - rLower) / 15.0f;
+                    float term1 = 0f, term2 = 0f;
+                    for (int d = 0; d < dimension; d++) {
+                        int rNibble = (d % 2 == 0) ? (block[d / 2] & 0x0F) : ((block[d / 2] >>> 4) & 0x0F);
+                        float rDeq = rLower + rNibble * rStep;
+                        int bit = ResidualQuantizer.unpackBit(binaryCode, d);
+                        float xDeq = dataLower + bit * dataDelta;
+                        float q4Deq = q4Lower + (q4Scratch[d] & 0xFF) * q4Step;
+                        term1 += q4Deq * rDeq;
+                        term2 += r1[d] * (rDeq + xDeq);
+                    }
                     float trueMipScore = Float.NaN;
                     try {
                         FloatVectorValues fvv = getFloatVectorValues(field);
                         float[] fullVec = fvv.vectorValue(docIds[i]);
                         trueMipScore = KNNVectorSimilarityFunction.MAXIMUM_INNER_PRODUCT.compare(queryVector, fullVec);
                     } catch (Exception e) {
-                        log.warn("[EC-DEBUG] Could not compute true score for docId={}", docIds[i], e);
+                        log.warn("[EC-V2] Could not compute true score for docId={}", docIds[i]);
                     }
-
-                    log.info("[EC-DEBUG] candidate[{}]: docId={}, phase1Score={}, correctedScore={}, "
-                        + "trueMipScore={}, correctedVsTrueGap={}",
-                        i, docIds[i], phase1Scores[i], correctedScore,
-                        trueMipScore, Math.abs(correctedScore - trueMipScore));
+                    float gap = Math.abs(correctedScore - trueMipScore);
+                    log.info(
+                        "[EC-V2] docId={}, phase1={}, term1={}, term2={}, corrected={}, true={}, gap={}",
+                        docIds[i],
+                        phase1Scores[i],
+                        term1,
+                        term2,
+                        correctedScore,
+                        trueMipScore,
+                        gap
+                    );
                 }
 
                 result[i] = new ScoreDoc(docIds[i], correctedScore);
@@ -257,7 +282,14 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
 
                     String verFileName = state.segmentInfo.name + "_" + fi.getName() + ".ver";
                     if (Arrays.asList(state.directory.listAll()).contains(verFileName)) {
-                        return new ErrorResidualReader(state.directory, state.segmentInfo.name, fi.getName(), centroid);
+                        return new ErrorResidualReader(
+                            state.directory,
+                            state.segmentInfo.name,
+                            fi.getName(),
+                            centroid,
+                            qbvv,
+                            qbvv.getQuantizer()
+                        );
                     }
                 }
             }

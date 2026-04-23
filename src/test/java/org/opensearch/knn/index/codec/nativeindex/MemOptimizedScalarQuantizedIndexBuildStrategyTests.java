@@ -263,10 +263,7 @@ public class MemOptimizedScalarQuantizedIndexBuildStrategyTests extends KNNTestC
 
             // Step 4: Verify the .ver residual file was created with correct header and size
             final String residualFileName = SEGMENT_NAME + "_" + FIELD_NAME + ".ver";
-            assertTrue(
-                ".ver file should exist in directory",
-                Arrays.asList(directory.listAll()).contains(residualFileName)
-            );
+            assertTrue(".ver file should exist in directory", Arrays.asList(directory.listAll()).contains(residualFileName));
             assertTrue(".ver file should have non-zero size", directory.fileLength(residualFileName) > 0);
 
             // Verify header fields: skip Lucene codec header, then read our 3 ints
@@ -284,9 +281,7 @@ public class MemOptimizedScalarQuantizedIndexBuildStrategyTests extends KNNTestC
 
             // Verify total file size: codecHeader + 12 (our fields) + N * bytesPerBlock + CodecUtil footer (16 bytes)
             long codecHeaderLen = CodecUtil.indexHeaderLength(ResidualQuantizer.CODEC_NAME, FIELD_NAME);
-            long expectedSize = codecHeaderLen + 12
-                + (long) NUM_VECTORS * expectedBytesPerBlock
-                + 16; // CodecUtil footer
+            long expectedSize = codecHeaderLen + 12 + (long) NUM_VECTORS * expectedBytesPerBlock + 16; // CodecUtil footer
             assertEquals(".ver file size", expectedSize, directory.fileLength(residualFileName));
         }
     }

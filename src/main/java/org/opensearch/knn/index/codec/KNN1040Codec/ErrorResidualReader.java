@@ -7,16 +7,16 @@ package org.opensearch.knn.index.codec.KNN1040Codec;
 
 import lombok.Getter;
 import org.apache.lucene.codecs.CodecUtil;
+import org.apache.lucene.codecs.lucene104.QuantizedByteVectorValues;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.opensearch.knn.index.codec.nativeindex.ResidualQuantizer;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 
 /**
  * Reads and provides access to the {@code .ver} (vector error residual) file for a single field.
@@ -85,6 +85,14 @@ public class ErrorResidualReader implements Closeable {
     @Getter
     private final float[] centroid;
 
+    /** Access to 1-bit quantized vectors and their correction factors for Idea-1 scoring. */
+    @Getter
+    private final QuantizedByteVectorValues quantizedByteVectorValues;
+
+    /** Quantizer for query quantization at search time. */
+    @Getter
+    private final OptimizedScalarQuantizer quantizer;
+
     /** The underlying file handle. Cloned per search thread via {@link #cloneInput()}. */
     private final IndexInput verInput;
 
@@ -95,25 +103,29 @@ public class ErrorResidualReader implements Closeable {
      * the format-specific fields (dimension, numVectors, bytesPerBlock) and records the
      * data start offset for ordinal-based seeks.
      *
-     * @param directory   segment directory containing the .ver file
-     * @param segmentName segment name (e.g., "_0")
-     * @param fieldName   the knn vector field name
-     * @param centroid    centroid vector from QuantizedByteVectorValues
+     * @param directory                 segment directory containing the .ver file
+     * @param segmentName              segment name (e.g., "_0")
+     * @param fieldName                the knn vector field name
+     * @param centroid                 centroid vector from QuantizedByteVectorValues
+     * @param quantizedByteVectorValues access to 1-bit quantized vectors for Idea-1 scoring
+     * @param quantizer                scalar quantizer for query quantization at search time
      * @throws IOException if the file cannot be opened or the header/footer is invalid
      */
-    public ErrorResidualReader(Directory directory, String segmentName, String fieldName, float[] centroid) throws IOException {
+    public ErrorResidualReader(
+        Directory directory,
+        String segmentName,
+        String fieldName,
+        float[] centroid,
+        QuantizedByteVectorValues quantizedByteVectorValues,
+        OptimizedScalarQuantizer quantizer
+    ) throws IOException {
         final String fileName = segmentName + "_" + fieldName + ".ver";
         this.verInput = directory.openInput(fileName, IOContext.DEFAULT);
 
         // Validate the codec header (magic, codec name, version) without checking segment ID.
         // checkHeader consumes: magic(4) + codec name length(2) + codec name bytes + version(4).
         // After this call, the file pointer is positioned right before the segment ID.
-        CodecUtil.checkHeader(
-            verInput,
-            ResidualQuantizer.CODEC_NAME,
-            ResidualQuantizer.VERSION_CURRENT,
-            ResidualQuantizer.VERSION_CURRENT
-        );
+        CodecUtil.checkHeader(verInput, ResidualQuantizer.CODEC_NAME, ResidualQuantizer.VERSION_CURRENT, ResidualQuantizer.VERSION_CURRENT);
         // Skip segment ID (16 bytes) written by writeIndexHeader
         verInput.skipBytes(StringHelper.ID_LENGTH);
         // Skip suffix: 1 byte length + that many suffix bytes (handles any suffix length)
@@ -130,6 +142,8 @@ public class ErrorResidualReader implements Closeable {
         this.dataStartOffset = verInput.getFilePointer();
 
         this.centroid = centroid;
+        this.quantizedByteVectorValues = quantizedByteVectorValues;
+        this.quantizer = quantizer;
 
         // Validate footer for data integrity (checksum)
         CodecUtil.checksumEntireFile(verInput);
@@ -201,10 +215,8 @@ public class ErrorResidualReader implements Closeable {
      * Read a little-endian float from a byte array at the given offset.
      */
     private static float readFloatLE(byte[] buffer, int offset) {
-        int bits = (buffer[offset] & 0xFF)
-            | ((buffer[offset + 1] & 0xFF) << 8)
-            | ((buffer[offset + 2] & 0xFF) << 16)
-            | ((buffer[offset + 3] & 0xFF) << 24);
+        int bits = (buffer[offset] & 0xFF) | ((buffer[offset + 1] & 0xFF) << 8) | ((buffer[offset + 2] & 0xFF) << 16) | ((buffer[offset + 3]
+            & 0xFF) << 24);
         return Float.intBitsToFloat(bits);
     }
 }

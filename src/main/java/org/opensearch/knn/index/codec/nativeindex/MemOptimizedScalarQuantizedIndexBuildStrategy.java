@@ -170,8 +170,7 @@ public class MemOptimizedScalarQuantizedIndexBuildStrategy implements NativeInde
         // This enables 2nd-phase rescoring with 8x less IO than loading full-precision vectors.
         // Both flush and merge paths call buildAndWriteIndex(), so the .ver file is created in both cases.
         final SegmentWriteState state = indexInfo.getSegmentWriteState();
-        final String residualFileName = state.segmentInfo.name + "_" + indexInfo.getField()
-            + KNNConstants.RESIDUAL_FILE_EXTENSION;
+        final String residualFileName = state.segmentInfo.name + "_" + indexInfo.getField() + KNNConstants.RESIDUAL_FILE_EXTENSION;
 
         try (IndexOutput residualOutput = state.directory.createOutput(residualFileName, state.context)) {
             ResidualQuantizer.writeResidualFile(
