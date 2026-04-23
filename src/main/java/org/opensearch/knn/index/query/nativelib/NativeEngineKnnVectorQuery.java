@@ -14,6 +14,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.HitQueue;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
@@ -143,7 +144,7 @@ public class NativeEngineKnnVectorQuery extends Query {
                 // Error correction path
                 List<PerLeafResult> ecResults = doRescoreWithErrorCorrection(
                     indexSearcher, leafReaderContexts, perLeafResults,
-                    knnQuery.getField(), knnQuery.getQueryVector()
+                    knnQuery.getField(), knnQuery.getQueryVector(), finalK
                 );
 
                 // Full precision path (using the saved copy)
@@ -624,7 +625,8 @@ public class NativeEngineKnnVectorQuery extends Query {
         List<LeafReaderContext> leafReaderContexts,
         List<PerLeafResult> perLeafResults,
         String field,
-        float[] queryVector
+        float[] queryVector,
+        int k
     ) throws IOException {
         List<Callable<PerLeafResult>> tasks = new ArrayList<>();
         int[] taskIndices = new int[perLeafResults.size()];
@@ -653,9 +655,20 @@ public class NativeEngineKnnVectorQuery extends Query {
 
                     ScoreDoc[] refined = refiner.refine(field, queryVector, docIds, phase1Scores);
 
+                    // Per-segment top-k using HitQueue (min-heap, same as ExactSearcher)
+                    int segK = Math.min(k, refined.length);
+                    HitQueue hitQueue = new HitQueue(segK, true);
+                    for (ScoreDoc sd : refined) {
+                        hitQueue.insertWithOverflow(sd);
+                    }
+                    ScoreDoc[] topKDocs = new ScoreDoc[hitQueue.size()];
+                    for (int ti = topKDocs.length - 1; ti >= 0; ti--) {
+                        topKDocs[ti] = hitQueue.pop();
+                    }
+
                     TopDocs refinedTopDocs = new TopDocs(
-                        new TotalHits(refined.length, leafResult.getResult().totalHits.relation()),
-                        refined
+                        new TotalHits(topKDocs.length, leafResult.getResult().totalHits.relation()),
+                        topKDocs
                     );
                     return new PerLeafResult(
                         leafResult.getFilterBits(),
