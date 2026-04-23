@@ -227,8 +227,13 @@ public class NativeEngineKnnVectorQuery extends Query {
                     log.info(missStr.toString());
                 }
 
-                // Use EC results
-                perLeafResults = ecResults;
+                // Use FP results if /tmp/aaa exists, otherwise EC results
+                if (new java.io.File("/tmp/aaa").exists()) {
+                    log.info("[EC-VS-FP] Using FP results (file /tmp/aaa exists)");
+                    perLeafResults = fpResults;
+                } else {
+                    perLeafResults = ecResults;
+                }
             } else {
                 perLeafResults = doRescore(indexSearcher, leafReaderContexts, knnWeight, perLeafResults, finalK);
             }
