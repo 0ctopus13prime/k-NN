@@ -158,8 +158,24 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
         final float[] qPrime = ResidualQuantizer.computeQPrime(queryVector, errorResidualReader.getCentroid());
 
         if (true) {
-            log.info("[EC-DEBUG] refine called: field={}, numCandidates={}, dimension={}, numVectors={}",
-                field, docIds.length, dimension, errorResidualReader.getNumVectors());
+            int maxDocId = -1;
+            int minDocId = Integer.MAX_VALUE;
+            for (int docId : docIds) {
+                if (docId > maxDocId) maxDocId = docId;
+                if (docId < minDocId) minDocId = docId;
+            }
+            int numVectors = errorResidualReader.getNumVectors();
+            boolean hasOutOfBounds = maxDocId >= numVectors;
+            log.info("[EC-DEBUG] refine: field={}, numCandidates={}, numVectors={}, minDocId={}, maxDocId={}, OUT_OF_BOUNDS={}",
+                field, docIds.length, numVectors, minDocId, maxDocId, hasOutOfBounds);
+            if (hasOutOfBounds) {
+                int oobCount = 0;
+                for (int docId : docIds) {
+                    if (docId >= numVectors) oobCount++;
+                }
+                log.warn("[EC-DEBUG] {} out of {} docIds >= numVectors({}). These read WRONG data from .ver file!",
+                    oobCount, docIds.length, numVectors);
+            }
         }
 
         // Clone IndexInput for thread-safe reads (each search thread gets its own clone)
