@@ -415,9 +415,12 @@ public class ResidualQuantizer {
             correction += qPrime[d] * r_d;
         }
 
-        // Unscale MIP score → raw dot product, add correction, re-scale
-        float rawDot = unscaleMaxInnerProductScore(phase1Score);
-        return scaleMaxInnerProductScore(rawDot + correction);
+        // Add correction directly to the MIP-scaled phase-1 score.
+        // For positive dot products (score >= 1), MIP scaling is linear (dp + 1), so adding
+        // the correction directly is equivalent to unscale → add → scale.
+        // For negative-corrected scores, the non-linear branch of scale() would compress them
+        // into (0,1), destroying relative ordering. Direct addition preserves ranking.
+        return phase1Score + correction;
     }
 
     /**
