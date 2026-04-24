@@ -105,15 +105,21 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
      */
     @Override
     public void warmUp(final String fieldName) throws IOException {
-        // Warm up full-precision vectors
-        // We cannot rely on WarmupUtil, which extracts the IndexInput from vector values and reads through it.
-        // Because, the IndexInput returned by vector values is backed by quantized vectors.
-        // Therefore, to warm up full-precision vectors, we need to load them explicitly as below.
-        final ScalarQuantizedFloatVectorValues vectorValues = (ScalarQuantizedFloatVectorValues) flatVectorsReader.getFloatVectorValues(
-            fieldName
-        );
-        for (int i = 0; i < vectorValues.size(); ++i) {
-            vectorValues.vectorValue(i);
+        if (errorResidualReader != null) {
+            // Warm up .ver file — rescore uses error residuals instead of full-precision vectors,
+            // so skip warming up full-precision vectors to avoid unnecessary IO
+            try (IndexInput clonedInput = errorResidualReader.cloneInput()) {
+                for (int i = 0; i < errorResidualReader.getNumVectors(); i++) {
+                    errorResidualReader.readBlock(clonedInput, i);
+                }
+            }
+        } else {
+            // No .ver file — warm up full-precision vectors for full-precision rescore path
+            final ScalarQuantizedFloatVectorValues vectorValues = (ScalarQuantizedFloatVectorValues) flatVectorsReader
+                .getFloatVectorValues(fieldName);
+            for (int i = 0; i < vectorValues.size(); ++i) {
+                vectorValues.vectorValue(i);
+            }
         }
 
         final VectorSearcher memoryOptimizedSearcher = loadMemoryOptimizedSearcherIfRequired(fieldInfos.fieldInfo(fieldName));
