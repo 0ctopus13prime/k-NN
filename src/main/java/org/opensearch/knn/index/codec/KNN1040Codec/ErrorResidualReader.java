@@ -176,6 +176,15 @@ public class ErrorResidualReader implements Closeable {
         return block;
     }
 
+    public void prefetch(IndexInput input, int ordinal) {
+        final long offset = dataStartOffset + (long) ordinal * bytesPerBlock;
+        try {
+            input.prefetch(offset, bytesPerBlock);
+        } catch (IOException e) {
+            // Prefetch is a hint — failure is not fatal
+        }
+    }
+
     /**
      * Extract the per-vector lowerInterval from a block read by {@link #readBlock}.
      * The lower interval is stored as a little-endian float at offset {@code packedResidualBytes}.

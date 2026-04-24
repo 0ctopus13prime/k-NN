@@ -158,6 +158,11 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
 
         // Clone IndexInput for thread-safe reads (each search thread gets its own clone)
         try (IndexInput clonedInput = errorResidualReader.cloneInput()) {
+            // Prefetch
+            for (int i = 0; i < docIds.length; i++) {
+                errorResidualReader.prefetch(clonedInput, docIds[i]);
+            }
+
             ScoreDoc[] result = new ScoreDoc[docIds.length];
 
             for (int i = 0; i < docIds.length; i++) {
