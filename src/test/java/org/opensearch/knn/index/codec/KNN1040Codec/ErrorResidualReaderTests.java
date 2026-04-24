@@ -64,7 +64,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
         ByteBuffersDirectory dir = new ByteBuffersDirectory();
         writeVerFile(dir, vectors, centroid, new float[] { 0.0f, 0.0f }, new float[] { 1.0f, 1.0f });
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             assertEquals(4, reader.getDimension());
             assertEquals(2, reader.getNumVectors());
             assertEquals(18, reader.getBytesPerBlock());  // packedResidual(2) + meta(16)
@@ -86,7 +86,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
         // Use the 7-arg SegmentWriteState constructor which sets segmentSuffix = FIELD_NAME
         writeVerFileWithSuffix(dir, vectors, centroid, new float[] { 0.0f }, new float[] { 1.0f }, FIELD_NAME);
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             assertEquals(4, reader.getDimension());
             assertEquals(1, reader.getNumVectors());
             assertEquals(2 + 16, reader.getBytesPerBlock());
@@ -126,7 +126,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
             new byte[][] { new byte[] { (byte) 0xA0 }, new byte[] { (byte) 0xF0 } }
         );
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             try (IndexInput cloned = reader.cloneInput()) {
                 // --- Vec0 block ---
                 byte[] block0 = reader.readBlock(cloned, 0);
@@ -165,7 +165,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
         ByteBuffersDirectory dir = new ByteBuffersDirectory();
         writeVerFile(dir, vectors, centroid, new float[] { 0.0f }, new float[] { 1.0f });
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             assertEquals(5, reader.getDimension());
             assertEquals(3, reader.getPackedResidualBytes());          // ceil(5/2)
             assertEquals(3 + 16, reader.getBytesPerBlock());
@@ -209,7 +209,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
             new byte[][] { new byte[] { (byte) 0xA0 }, new byte[] { (byte) 0xF0 } }
         );
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             try (IndexInput clone1 = reader.cloneInput(); IndexInput clone2 = reader.cloneInput()) {
                 // Read vec1 from clone1, then vec0 from clone2 — interleaved, independent seeks
                 byte[] block1 = reader.readBlock(clone1, 1);
@@ -237,7 +237,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
         ByteBuffersDirectory dir = new ByteBuffersDirectory();
         writeVerFile(dir, vectors, centroid, new float[] { 0.0f }, new float[] { 1.0f });
 
-        ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid);
+        ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT);
         reader.close();
 
         expectThrows(AlreadyClosedException.class, reader::cloneInput);
@@ -269,7 +269,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
 
         float[] expectedResiduals = { -0.5f, 0.5f, -0.5f, 0.5f };
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             try (IndexInput cloned = reader.cloneInput()) {
                 byte[] block = reader.readBlock(cloned, 0);
 
@@ -310,7 +310,7 @@ public class ErrorResidualReaderTests extends OpenSearchTestCase {
             new byte[][] { new byte[] { (byte) 0xA0 } }
         );
 
-        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid)) {
+        try (ErrorResidualReader reader = new ErrorResidualReader(dir, SEGMENT_NAME, FIELD_NAME, centroid, IOContext.DEFAULT)) {
             try (IndexInput cloned = reader.cloneInput()) {
                 byte[] block = reader.readBlock(cloned, 0);
 

@@ -219,7 +219,7 @@ public class Faiss1040ScalarQuantizedKnnVectorsReader extends AbstractNativeEngi
 
                     String verFileName = state.segmentInfo.name + "_" + fi.getName() + ".ver";
                     if (Arrays.asList(state.directory.listAll()).contains(verFileName)) {
-                        return new ErrorResidualReader(state.directory, state.segmentInfo.name, fi.getName(), centroid);
+                        return new ErrorResidualReader(state.directory, state.segmentInfo.name, fi.getName(), centroid, state.context);
                     }
                 }
             }

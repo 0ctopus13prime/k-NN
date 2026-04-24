@@ -7,7 +7,10 @@ package org.opensearch.knn.index.codec.KNN1040Codec;
 
 import lombok.Getter;
 import org.apache.lucene.codecs.CodecUtil;
+import org.apache.lucene.store.DataAccessHint;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FileDataHint;
+import org.apache.lucene.store.FileTypeHint;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.StringHelper;
@@ -99,11 +102,13 @@ public class ErrorResidualReader implements Closeable {
      * @param segmentName segment name (e.g., "_0")
      * @param fieldName   the knn vector field name
      * @param centroid    centroid vector from QuantizedByteVectorValues
+     * @param ioContext   IO context for opening the file (caller should provide random access hints)
      * @throws IOException if the file cannot be opened or the header/footer is invalid
      */
-    public ErrorResidualReader(Directory directory, String segmentName, String fieldName, float[] centroid) throws IOException {
+    public ErrorResidualReader(Directory directory, String segmentName, String fieldName, float[] centroid, IOContext ioContext)
+        throws IOException {
         final String fileName = segmentName + "_" + fieldName + ".ver";
-        this.verInput = directory.openInput(fileName, IOContext.DEFAULT);
+        this.verInput = directory.openInput(fileName, ioContext.withHints(FileTypeHint.DATA, FileDataHint.KNN_VECTORS, DataAccessHint.RANDOM));
 
         // Validate the codec header (magic, codec name, version) without checking segment ID.
         // checkHeader consumes: magic(4) + codec name length(2) + codec name bytes + version(4).
