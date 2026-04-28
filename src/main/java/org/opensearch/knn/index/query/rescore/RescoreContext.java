@@ -13,7 +13,7 @@ import lombok.Getter;
 @Builder
 @EqualsAndHashCode
 public final class RescoreContext {
-    public static final float FAISS_SCALAR_QUANTIZED_INDEX_OVERSAMPLE_FACTOR = 2.0f;
+    public static final float FAISS_SCALAR_QUANTIZED_INDEX_OVERSAMPLE_FACTOR = 3.0f;
 
     public static final float DEFAULT_OVERSAMPLE_FACTOR = 1.0f;
     public static final float MAX_OVERSAMPLE_FACTOR = 100.0f;
