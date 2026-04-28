@@ -121,7 +121,7 @@ public class NativeEngineKnnVectorQuery extends Query {
             perLeafResults = doSearch(indexSearcher, leafReaderContexts, knnWeight, finalK);
         } else {
             perLeafResults = doSearch(indexSearcher, leafReaderContexts, knnWeight, firstPassKFor2PhaseSearch);
-            if (isShardLevelRescoringDisabled == false) {
+            if (false && isShardLevelRescoringDisabled == false) {
                 ResultUtil.reduceToTopK(perLeafResults, firstPassKFor2PhaseSearch);
             }
 
