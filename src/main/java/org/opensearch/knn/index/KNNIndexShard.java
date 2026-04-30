@@ -59,6 +59,8 @@ public class KNNIndexShard {
     private final NativeMemoryCacheManager nativeMemoryCacheManager;
     private static final String INDEX_SHARD_CLEAR_CACHE_SEARCHER = "knn-clear-cache";
 
+    public static volatile boolean ENABLE_EC = false;
+
     /**
      * Constructor to generate KNNIndexShard. We do not perform validation that the index the shard is from
      * is in fact a k-NN Index (index.knn = true). This may make sense to add later, but for now the operations for
@@ -87,6 +89,9 @@ public class KNNIndexShard {
      * @throws IOException Thrown when getting the HNSW Paths to be loaded in
      */
     public void warmup() throws IOException {
+        ENABLE_EC = new java.io.File("/home/ec2-user/efs/tmp/enable-ec").exists();
+        log.info("[KNN] ENABLE_EC={}", ENABLE_EC);
+
         final String indexName = indexShard.shardId().getIndexName();
         log.info("[KNN] Warming up index: [{}]", indexName);
 

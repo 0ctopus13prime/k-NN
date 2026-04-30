@@ -30,6 +30,7 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOSupplier;
 import org.opensearch.common.StopWatch;
 import org.opensearch.common.lucene.Lucene;
+import org.opensearch.knn.index.KNNIndexShard;
 import org.opensearch.knn.index.codec.nativeindex.ErrorResidualRefiner;
 import org.opensearch.knn.index.mapper.CompressionLevel;
 import org.opensearch.knn.index.KNNSettings;
@@ -126,7 +127,7 @@ public class NativeEngineKnnVectorQuery extends Query {
             }
 
             StopWatch stopWatch = new StopWatch().start();
-            if (knnQuery.getCompressionLevel() == CompressionLevel.x32) {
+            if (KNNIndexShard.ENABLE_EC && knnQuery.getCompressionLevel() == CompressionLevel.x32) {
                 perLeafResults = doRescoreWithErrorCorrection(
                     indexSearcher,
                     leafReaderContexts,
