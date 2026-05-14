@@ -123,10 +123,10 @@ public class RescoreRadialSearchQuery extends Query {
         if (rewritten != innerQuery) {
             return new RescoreRadialSearchQuery(
                 innerQuery.rewrite(indexSearcher),
-                field,
-                queryVector,
-                radius,
-                memoryOptimizedSearchEnabled
+                                                field,
+                                                queryVector,
+                                                radius,
+                                                memoryOptimizedSearchEnabled
             );
         } else {
             return this;
@@ -246,7 +246,25 @@ public class RescoreRadialSearchQuery extends Query {
                     final ExactSearcher exactSearcher = new ExactSearcher(ModelDao.OpenSearchKNNModelDao.getInstance());
                     final TopDocs rescored = exactSearcher.searchLeaf(context, exactSearcherContext);
 
-                    // 5. Return scorer over rescored results
+                    // 5. Log rescore stats to CSV for research (one file per thread to avoid contention)
+                    final int firstPassCount = firstPassResults.scoreDocs.length;
+                    final int rescoredCount = rescored.scoreDocs.length;
+                    final int excludedCount = firstPassCount - rescoredCount;
+                    String researchDir =
+                        new java.io.File("/home/ec2-user/efs/tmp/research").isDirectory() ? "/home/ec2-user/efs/tmp/research" : "/tmp/research";
+                    try {
+                        new java.io.File(researchDir).mkdirs();
+                        String fileName =
+                            researchDir + "/rescore_stats_" + Thread.currentThread().getId() + "_" + System.nanoTime() + ".csv";
+                        try (java.io.FileWriter fw = new java.io.FileWriter(fileName)) {
+                            fw.write("first_pass_count,excluded_count\n");
+                            fw.write(firstPassCount + "," + excludedCount + "\n");
+                        }
+                    } catch (Exception e) {
+                        // Silently ignore file write errors in research mode
+                    }
+
+                    // 6. Return scorer over rescored results
                     return new KNNScorer(rescored, boost);
                 }
 
