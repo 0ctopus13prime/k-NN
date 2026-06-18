@@ -71,8 +71,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
         } else {
             // Radius search
             this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
-                DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * query.getRadius(),
-                query.getRadius(),
+                DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * (query.getRadius() * 0.97F),
+                query.getRadius() * 0.97F,
                 visitLimit
             );
         }
