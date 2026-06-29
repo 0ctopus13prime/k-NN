@@ -504,7 +504,9 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
                 );
             }
             if (memoryOptimizedSearchEnabled) {
-                radius = MemoryOptimizedSearchScoreConverter.scoreToRadialThreshold(this.minScore, spaceType);
+                // TMP
+                radius = this.minScore;
+                // radius = MemoryOptimizedSearchScoreConverter.scoreToRadialThreshold(this.minScore, spaceType);
             } else {
                 radius = knnEngine.scoreToRadialThreshold(this.minScore, spaceType);
             }
