@@ -37,6 +37,8 @@ import org.opensearch.lucene.ReentrantKnnCollectorManager;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.AccessController;
+import java.security.PrivilegedExceptionAction;
 
 import static org.opensearch.knn.common.KNNConstants.DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO;
 import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
@@ -72,7 +74,9 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             }
         } else {
             try {
-                final float threshold = Float.parseFloat(Files.readString(Path.of("/home/ec2-user/efs/tmp/recall_threshold")).trim());
+                final float threshold =
+                    AccessController.doPrivileged((PrivilegedExceptionAction<Float>) () -> Float.parseFloat(Files.readString(Path.of(
+                        "/home/ec2-user/efs/tmp/recall_threshold")).trim()));
 
                 // Radius search
                 this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
@@ -80,7 +84,7 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
                     query.getRadius() * threshold,
                     visitLimit
                 );
-            } catch (IOException e) {
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
