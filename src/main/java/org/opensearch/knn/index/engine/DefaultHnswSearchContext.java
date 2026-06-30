@@ -23,7 +23,7 @@ public final class DefaultHnswSearchContext implements KNNLibrarySearchContext {
         )
         .put(
             MethodParameter.TMP_MIN_SCORE_THRESHOLD.getName(),
-            new Parameter.DoubleParameter(MethodParameter.TMP_MIN_SCORE_THRESHOLD.getName(), null, (value, context) -> true)
+            new Parameter.StringParameter(MethodParameter.TMP_MIN_SCORE_THRESHOLD.getName(), null, (value, context) -> true)
         )
         .build();
 

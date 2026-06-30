@@ -74,7 +74,7 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             if (thresholdParam == null) {
                 throw new IllegalArgumentException("_TMP_MIN_SCORE_THRESHOLD method parameter is required for radius search");
             }
-            final float threshold = ((Number) thresholdParam).floatValue();
+            final float threshold = Float.parseFloat(thresholdParam.toString());
 
             // Radius search
             this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
