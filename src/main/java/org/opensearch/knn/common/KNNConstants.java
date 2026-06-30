@@ -127,6 +127,7 @@ public class KNNConstants {
     public static final String INDEX_DESCRIPTION_PARAMETER = "index_description";
     public static final String METHOD_ENCODER_PARAMETER = "encoder";
     public static final String METHOD_PARAMETER_NPROBES = "nprobes";
+    public static final String METHOD_PARAMETER_MIN_SCORE_THERSHOLD = "_TMP_MIN_SCORE_THRESHOLD";
     public static final String ENCODER_FLAT = "flat";
     public static final String ENCODER_PQ = "pq";
     public static final String ENCODER_BINARY = "binary";

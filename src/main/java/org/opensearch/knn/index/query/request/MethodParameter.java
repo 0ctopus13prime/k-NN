@@ -21,8 +21,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_EF_SEARCH;
+import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_MIN_SCORE_THERSHOLD;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_NPROBES;
 import static org.opensearch.knn.index.query.KNNQueryBuilder.EF_SEARCH_FIELD;
+import static org.opensearch.knn.index.query.KNNQueryBuilder.MIN_SCORE_THRESHOLD_FIELD;
 import static org.opensearch.knn.index.query.KNNQueryBuilder.NPROBE_FIELD;
 
 /**
@@ -68,6 +70,18 @@ public enum MethodParameter {
             ValidationException validationException = new ValidationException();
             validationException.addValidationError(METHOD_PARAMETER_NPROBES + " should be greater than 0");
             return validationException;
+        }
+    },
+
+    TMP_MIN_SCORE_THRESHOLD(METHOD_PARAMETER_MIN_SCORE_THERSHOLD, Version.V_3_7_0, MIN_SCORE_THRESHOLD_FIELD) {
+        @Override
+        public String parse(Object value) {
+            return value.toString();
+        }
+
+        @Override
+        public ValidationException validate(Object value) {
+            return null;
         }
     };
 
