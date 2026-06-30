@@ -35,10 +35,6 @@ import org.opensearch.lucene.OptimisticKnnCollectorManager;
 import org.opensearch.lucene.ReentrantKnnCollectorManager;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.security.AccessController;
-import java.security.PrivilegedExceptionAction;
 
 import static org.opensearch.knn.common.KNNConstants.DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO;
 import static org.opensearch.knn.plugin.stats.KNNCounter.GRAPH_QUERY_ERRORS;
@@ -73,20 +69,19 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
                 this.knnCollectorManager = new DiversifyingNearestChildrenKnnCollectorManager(k, query.getParentsFilter(), searcher);
             }
         } else {
-            try {
-                final float threshold =
-                    AccessController.doPrivileged((PrivilegedExceptionAction<Float>) () -> Float.parseFloat(Files.readString(Path.of(
-                        "/home/ec2-user/efs/tmp/recall_threshold")).trim()));
-
-                // Radius search
-                this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
-                    DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * (query.getRadius() * threshold),
-                    query.getRadius() * threshold,
-                    visitLimit
-                );
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            final Object thresholdParam =
+                query.getMethodParameters() != null ? query.getMethodParameters().get("_TMP_MIN_SCORE_THRESHOLD") : null;
+            if (thresholdParam == null) {
+                throw new IllegalArgumentException("_TMP_MIN_SCORE_THRESHOLD method parameter is required for radius search");
             }
+            final float threshold = ((Number) thresholdParam).floatValue();
+
+            // Radius search
+            this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
+                DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * (query.getRadius() * threshold),
+                query.getRadius() * threshold,
+                visitLimit
+            );
         }
     }
 
