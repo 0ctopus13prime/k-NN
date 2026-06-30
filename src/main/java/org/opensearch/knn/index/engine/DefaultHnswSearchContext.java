@@ -21,6 +21,10 @@ public final class DefaultHnswSearchContext implements KNNLibrarySearchContext {
             MethodParameter.EF_SEARCH.getName(),
             new Parameter.IntegerParameter(MethodParameter.EF_SEARCH.getName(), null, (value, context) -> true)
         )
+        .put(
+            MethodParameter.TMP_MIN_SCORE_THRESHOLD.getName(),
+            new Parameter.DoubleParameter(MethodParameter.TMP_MIN_SCORE_THRESHOLD.getName(), null, (value, context) -> true)
+        )
         .build();
 
     @Override
