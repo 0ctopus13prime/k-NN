@@ -20,7 +20,11 @@ import java.util.List;
 public class RadiusVectorSimilarityCollector extends AbstractKnnCollector {
     private static final KnnSearchStrategy.Hnsw DEFAULT_STRATEGY = new KnnSearchStrategy.Hnsw(0);
 
+    // Original thresholds as constructed. Immutable, referenced only for logging / recomputation.
     private final float traversalSimilarity, resultSimilarity;
+    // Quantization-slack applied on top of the constructed thresholds. See {@link #applySlack(float)}.
+    // Kept mutable + separate from the original thresholds so re-applying slack does not compound.
+    private float slack;
     private float maxSimilarity;
     private final List<ScoreDoc> scoreDocList;
 
@@ -41,14 +45,44 @@ public class RadiusVectorSimilarityCollector extends AbstractKnnCollector {
         }
         this.traversalSimilarity = traversalSimilarity;
         this.resultSimilarity = resultSimilarity;
+        this.slack = 0f;
         this.maxSimilarity = Float.NEGATIVE_INFINITY;
         this.scoreDocList = new ArrayList<>();
+    }
+
+    /**
+     * Widen the collector's accept net by a quantization-slack factor {@code eps ∈ [0, 1)}.
+     * Both the traversal and result thresholds become {@code threshold * (1 - eps)}.
+     *
+     * <p>Intended use: the vector searcher (which knows the segment's quantization error
+     * distribution) calls this at query time so that borderline docs whose quantized score
+     * dipped below {@code min_score} are still accepted. A rescore pass at the caller filters
+     * out the resulting false accepts.
+     *
+     * <p>Safe to call more than once — each call replaces the slack, so slacks do not compound.
+     *
+     * @param eps slack in {@code [0, 1)}. {@code 0} disables the widening entirely.
+     * @throws IllegalArgumentException if {@code eps} is outside {@code [0, 1)} or {@code NaN}.
+     */
+    public void applySlack(float eps) {
+        if (Float.isNaN(eps) || eps < 0f || eps >= 1f) {
+            throw new IllegalArgumentException("eps must be in [0, 1), got: " + eps);
+        }
+        this.slack = eps;
+    }
+
+    private float effectiveTraversalSimilarity() {
+        return traversalSimilarity * (1f - slack);
+    }
+
+    private float effectiveResultSimilarity() {
+        return resultSimilarity * (1f - slack);
     }
 
     @Override
     public boolean collect(int docId, float similarity) {
         maxSimilarity = Math.max(maxSimilarity, similarity);
-        if (similarity >= resultSimilarity) {
+        if (similarity >= effectiveResultSimilarity()) {
             scoreDocList.add(new ScoreDoc(docId, similarity));
         }
         return true;
@@ -56,7 +90,7 @@ public class RadiusVectorSimilarityCollector extends AbstractKnnCollector {
 
     @Override
     public float minCompetitiveSimilarity() {
-        return Math.min(traversalSimilarity, maxSimilarity);
+        return Math.min(effectiveTraversalSimilarity(), maxSimilarity);
     }
 
     @Override

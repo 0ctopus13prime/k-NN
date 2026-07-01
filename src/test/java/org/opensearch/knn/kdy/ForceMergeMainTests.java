@@ -108,22 +108,11 @@ public class ForceMergeMainTests extends KNNTestCase {
                 .setUseCompoundFile(false);
             try (IndexWriter writer = new IndexWriter(directory, cfg)) {
                 final int before = writer.getDocStats().numDocs;
-                log.info(
-                    "[shard-{}] forceMerge start: dir={}, target={}, docs={}",
-                    shardId,
-                    shardDir,
-                    TARGET_SEGMENTS,
-                    before
-                );
+                log.info("[shard-{}] forceMerge start: dir={}, target={}, docs={}", shardId, shardDir, TARGET_SEGMENTS, before);
                 writer.forceMerge(TARGET_SEGMENTS, true);
                 writer.commit();
                 final long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-                log.info(
-                    "[shard-{}] forceMerge done:  target={}, elapsed={} ms",
-                    shardId,
-                    TARGET_SEGMENTS,
-                    elapsedMs
-                );
+                log.info("[shard-{}] forceMerge done:  target={}, elapsed={} ms", shardId, TARGET_SEGMENTS, elapsedMs);
             }
         }
     }

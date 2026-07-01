@@ -369,12 +369,12 @@ public class ErrorDistributionMainTests extends KNNTestCase {
             final int doc = values.ordToDoc(ord);
 
             // Build the quantized ADC scorer for "query = v". Internally this:
-            //   1. 4-bit quantizes v against the segment centroid using OptimizedScalarQuantizer
-            //   2. Computes the query's (lowerInterval, upperInterval, additionalCorrection,
-            //      quantizedComponentSum) so the per-doc 1-bit code is enough to compute a
-            //      Lucene-normalized similarity score
-            //   3. Returns a VectorScorer whose .iterator() walks docs in order and whose
-            //      .score() returns the ADC score for the current doc.
+            // 1. 4-bit quantizes v against the segment centroid using OptimizedScalarQuantizer
+            // 2. Computes the query's (lowerInterval, upperInterval, additionalCorrection,
+            // quantizedComponentSum) so the per-doc 1-bit code is enough to compute a
+            // Lucene-normalized similarity score
+            // 3. Returns a VectorScorer whose .iterator() walks docs in order and whose
+            // .score() returns the ADC score for the current doc.
             // This is the exact code path the radial-search KnnCollector consumes — so the
             // error we measure here is the error the collector compares against min_score.
             final FloatVectorValues scorerValues = values.copy();
@@ -497,9 +497,9 @@ public class ErrorDistributionMainTests extends KNNTestCase {
 
         // Pre-materialize query vectors on the main thread, BEFORE submitting workers.
         // Two reasons:
-        //   1. FloatVectorValues.vectorValue() returns an internal buffer that is overwritten
-        //      on the next call. .clone() snapshots the vector so worker threads see stable q.
-        //   2. We do not want to share the `template` cursor across workers.
+        // 1. FloatVectorValues.vectorValue() returns an internal buffer that is overwritten
+        // on the next call. .clone() snapshots the vector so worker threads see stable q.
+        // 2. We do not want to share the `template` cursor across workers.
         final float[][] queryVectors = new float[queryOrds.length][];
         for (int i = 0; i < queryOrds.length; i++) {
             queryVectors[i] = template.vectorValue(queryOrds[i]).clone();
@@ -594,7 +594,6 @@ public class ErrorDistributionMainTests extends KNNTestCase {
         return acc;
     }
 
-
     /* =========================================================================================
      * Sampling
      * =========================================================================================
@@ -606,7 +605,8 @@ public class ErrorDistributionMainTests extends KNNTestCase {
     private static int[] sampleOrds(int n, int k, long seed) {
         if (k >= n) {
             final int[] all = new int[n];
-            for (int i = 0; i < n; i++) all[i] = i;
+            for (int i = 0; i < n; i++)
+                all[i] = i;
             return all;
         }
         final SplittableRandom rng = new SplittableRandom(seed);
@@ -619,7 +619,8 @@ public class ErrorDistributionMainTests extends KNNTestCase {
         }
         final int[] out = new int[picked.size()];
         int idx = 0;
-        for (final int v : picked) out[idx++] = v;
+        for (final int v : picked)
+            out[idx++] = v;
         return out;
     }
 
@@ -694,7 +695,8 @@ public class ErrorDistributionMainTests extends KNNTestCase {
             }
             this.minErr = Math.min(this.minErr, other.minErr);
             this.maxErr = Math.max(this.maxErr, other.maxErr);
-            for (int i = 0; i < hist.length; i++) hist[i] += other.hist[i];
+            for (int i = 0; i < hist.length; i++)
+                hist[i] += other.hist[i];
 
             // Reservoir merge: treat other's sampled entries as another stream of records.
             if (reservoir.length > 0 && other.reservoir.length > 0) {
@@ -898,16 +900,7 @@ public class ErrorDistributionMainTests extends KNNTestCase {
                 hiPct = (lo + HIST_BIN_WIDTH) * 100;
             }
             final double pct = 100.0 * acc.hist[b] / acc.count;
-            log.info(
-                String.format(
-                    Locale.ROOT,
-                    "CSV,%s,%s,%d,%.6f,",
-                    fmtCsvBound(loPct),
-                    fmtCsvBound(hiPct),
-                    acc.hist[b],
-                    pct
-                )
-            );
+            log.info(String.format(Locale.ROOT, "CSV,%s,%s,%d,%.6f,", fmtCsvBound(loPct), fmtCsvBound(hiPct), acc.hist[b], pct));
         }
     }
 
@@ -985,13 +978,7 @@ public class ErrorDistributionMainTests extends KNNTestCase {
         }
     }
 
-    private static void logParameters(
-        Path dataDir,
-        String vectorField,
-        SpaceType spaceType,
-        int numCores,
-        float scoreBandLow
-    ) {
+    private static void logParameters(Path dataDir, String vectorField, SpaceType spaceType, int numCores, float scoreBandLow) {
         log.info("=== ErrorDistributionMain parameters ===");
         log.info("  DATA_DIR                  = {}", dataDir);
         log.info("  VECTOR_FIELD              = {}", vectorField);

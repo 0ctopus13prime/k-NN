@@ -115,14 +115,12 @@ public class ValidatorMainTests extends KNNTestCase {
             final int workerCount = Math.min(NUM_CORES, numQueries);
             log.info("Running {} queries across {} worker thread(s)", numQueries, workerCount);
 
-            final ExecutorService pool = Executors.newFixedThreadPool(
-                workerCount, r -> {
-                    final Thread t = new Thread(r);
-                    t.setName("validator-" + t.threadId());
-                    t.setDaemon(true);
-                    return t;
-                }
-            );
+            final ExecutorService pool = Executors.newFixedThreadPool(workerCount, r -> {
+                final Thread t = new Thread(r);
+                t.setName("validator-" + t.threadId());
+                t.setDaemon(true);
+                return t;
+            });
             try {
                 final List<Callable<Void>> tasks = new ArrayList<>(numQueries);
                 for (int q = 0; q < numQueries; q++) {
@@ -179,8 +177,12 @@ public class ValidatorMainTests extends KNNTestCase {
         double[] recallsOut,
         AtomicBoolean rescoreEverActed
     ) throws IOException {
-        final FloatVectorSimilarityQuery vectorQuery =
-            new FloatVectorSimilarityQuery(VECTOR_FIELD, query, TRAVERSAL_RATIO * MIN_SCORE, MIN_SCORE);
+        final FloatVectorSimilarityQuery vectorQuery = new FloatVectorSimilarityQuery(
+            VECTOR_FIELD,
+            query,
+            TRAVERSAL_RATIO * MIN_SCORE,
+            MIN_SCORE
+        );
         final TopDocs hits = searcher.search(vectorQuery, UNBOUNDED_HITS);
 
         final Set<Integer> resultIds;
@@ -247,7 +249,8 @@ public class ValidatorMainTests extends KNNTestCase {
                 values = leafCtx.reader().getFloatVectorValues(VECTOR_FIELD);
                 if (values == null) {
                     throw new IllegalStateException(
-                        "Leaf " + leafIdx + " has no '" + VECTOR_FIELD + "' vector values, but search returned doc " + sd.doc);
+                        "Leaf " + leafIdx + " has no '" + VECTOR_FIELD + "' vector values, but search returned doc " + sd.doc
+                    );
                 }
                 iterator = values.iterator();
             }
@@ -255,8 +258,16 @@ public class ValidatorMainTests extends KNNTestCase {
             final int advanced = iterator.advance(localDoc);
             if (advanced != localDoc) {
                 throw new IllegalStateException(
-                    "Vector iterator could not locate doc " + sd.doc + " (leaf " + leafIdx + ", localDoc " + localDoc + ", advanced to "
-                    + advanced + ")");
+                    "Vector iterator could not locate doc "
+                        + sd.doc
+                        + " (leaf "
+                        + leafIdx
+                        + ", localDoc "
+                        + localDoc
+                        + ", advanced to "
+                        + advanced
+                        + ")"
+                );
             }
             final float[] original = values.vectorValue(iterator.index());
             final float trueSimilarity = SIMILARITY.compare(query, original);
@@ -324,7 +335,8 @@ public class ValidatorMainTests extends KNNTestCase {
         final double[] sorted = recalls.clone();
         Arrays.sort(sorted);
         double sum = 0.0;
-        for (final double r : recalls) sum += r;
+        for (final double r : recalls)
+            sum += r;
         final double avg = sum / recalls.length;
         final int n = sorted.length;
         final double median = (n % 2 == 1) ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;

@@ -76,10 +76,27 @@ public class IndexingMainTests extends KNNTestCase {
     private static final int HNSW_M = 16;
     private static final int HNSW_EF_CONSTRUCTION = 256;
     private static final int HNSW_EF_SEARCH = 256;
-    private static final String FAISS_PARAMETERS_JSON =
-        "{" + "\"index_description\":\"BHNSW" + HNSW_M + ",Flat\"," + "\"spaceType\":\"" + SPACE_TYPE.getValue() + "\","
-        + "\"name\":\"hnsw\"," + "\"data_type\":\"float\"," + "\"parameters\":{" + "\"ef_search\":" + HNSW_EF_SEARCH + ","
-        + "\"ef_construction\":" + HNSW_EF_CONSTRUCTION + "," + "\"m\":" + HNSW_M + "," + "\"encoder\":{\"name\":\"sq\",\"bits\":1}" + "}"
+    private static final String FAISS_PARAMETERS_JSON = "{"
+        + "\"index_description\":\"BHNSW"
+        + HNSW_M
+        + ",Flat\","
+        + "\"spaceType\":\""
+        + SPACE_TYPE.getValue()
+        + "\","
+        + "\"name\":\"hnsw\","
+        + "\"data_type\":\"float\","
+        + "\"parameters\":{"
+        + "\"ef_search\":"
+        + HNSW_EF_SEARCH
+        + ","
+        + "\"ef_construction\":"
+        + HNSW_EF_CONSTRUCTION
+        + ","
+        + "\"m\":"
+        + HNSW_M
+        + ","
+        + "\"encoder\":{\"name\":\"sq\",\"bits\":1}"
+        + "}"
         + "}";
 
     private static final String ID_FIELD = "_id";
@@ -245,7 +262,8 @@ public class IndexingMainTests extends KNNTestCase {
 
     private sealed interface Task permits BulkRequest, PoisonPill {}
 
-    private record VectorRecord(String docId, float[] vector) {}
+    private record VectorRecord(String docId, float[] vector) {
+    }
 
     private static final class BulkRequest implements Task {
         final int shardId;
@@ -387,32 +405,59 @@ public class IndexingMainTests extends KNNTestCase {
     }
 
     private static void deleteRecursively(Path path) throws IOException {
-        Files.walkFileTree(
-            path, new java.nio.file.SimpleFileVisitor<>() {
-                @Override
-                public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs)
-                    throws IOException {
-                    Files.delete(file);
-                    return java.nio.file.FileVisitResult.CONTINUE;
-                }
-
-                @Override
-                public java.nio.file.FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                    if (exc != null) throw exc;
-                    Files.delete(dir);
-                    return java.nio.file.FileVisitResult.CONTINUE;
-                }
+        Files.walkFileTree(path, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes attrs)
+                throws IOException {
+                Files.delete(file);
+                return java.nio.file.FileVisitResult.CONTINUE;
             }
-        );
+
+            @Override
+            public java.nio.file.FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                if (exc != null) throw exc;
+                Files.delete(dir);
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     private static void writeParametersJson(Path path) throws IOException {
-        final String json =
-            "{\n" + "  \"rootDir\": \"" + ROOT_DIR + "\",\n" + "  \"numShards\": " + NUM_SHARDS + ",\n" + "  \"hdf5Path\": \"" + HDF5_PATH
-            + "\",\n" + "  \"numCores\": " + NUM_CORES + ",\n" + "  \"numDocs\": " + (NUM_DOCS < 0 ? "null" : NUM_DOCS) + ",\n"
-            + "  \"queueSize\": " + QUEUE_SIZE + ",\n" + "  \"spaceType\": \"" + SPACE_TYPE.getValue() + "\",\n" + "  \"similarity\": \""
-            + SIMILARITY.name() + "\",\n" + "  \"hnswM\": " + HNSW_M + ",\n" + "  \"hnswEfConstruction\": " + HNSW_EF_CONSTRUCTION + ",\n"
-            + "  \"hnswEfSearch\": " + HNSW_EF_SEARCH + ",\n" + "  \"vectorFormat\": \"Faiss1040ScalarQuantizedKnnVectorsFormat\"\n"
+        final String json = "{\n"
+            + "  \"rootDir\": \""
+            + ROOT_DIR
+            + "\",\n"
+            + "  \"numShards\": "
+            + NUM_SHARDS
+            + ",\n"
+            + "  \"hdf5Path\": \""
+            + HDF5_PATH
+            + "\",\n"
+            + "  \"numCores\": "
+            + NUM_CORES
+            + ",\n"
+            + "  \"numDocs\": "
+            + (NUM_DOCS < 0 ? "null" : NUM_DOCS)
+            + ",\n"
+            + "  \"queueSize\": "
+            + QUEUE_SIZE
+            + ",\n"
+            + "  \"spaceType\": \""
+            + SPACE_TYPE.getValue()
+            + "\",\n"
+            + "  \"similarity\": \""
+            + SIMILARITY.name()
+            + "\",\n"
+            + "  \"hnswM\": "
+            + HNSW_M
+            + ",\n"
+            + "  \"hnswEfConstruction\": "
+            + HNSW_EF_CONSTRUCTION
+            + ",\n"
+            + "  \"hnswEfSearch\": "
+            + HNSW_EF_SEARCH
+            + ",\n"
+            + "  \"vectorFormat\": \"Faiss1040ScalarQuantizedKnnVectorsFormat\"\n"
             + "}\n";
         Files.writeString(path, json, StandardCharsets.UTF_8);
     }
