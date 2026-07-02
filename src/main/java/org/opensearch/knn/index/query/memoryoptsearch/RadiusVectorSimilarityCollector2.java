@@ -23,17 +23,7 @@ public class RadiusVectorSimilarityCollector2 extends AbstractKnnCollector {
     private final float traversalSimilarity, resultSimilarity;
     private float maxSimilarity;
     private final List<ScoreDoc> scoreDocList;
-
-    /**
-     * Perform a similarity-based graph search using the default HNSW strategy.
-     *
-     * @param traversalSimilarity (lower) similarity score for graph traversal.
-     * @param resultSimilarity    (higher) similarity score for result collection.
-     * @param visitLimit          limit on number of nodes to visit.
-     */
-    public RadiusVectorSimilarityCollector2(float traversalSimilarity, float resultSimilarity, long visitLimit) {
-        this(traversalSimilarity, resultSimilarity, visitLimit, DEFAULT_STRATEGY);
-    }
+    private final float slack;
 
     /**
      * Perform a similarity-based graph search. The graph is traversed till better scoring nodes are
@@ -54,7 +44,8 @@ public class RadiusVectorSimilarityCollector2 extends AbstractKnnCollector {
         float traversalSimilarity,
         float resultSimilarity,
         long visitLimit,
-        KnnSearchStrategy searchStrategy
+        KnnSearchStrategy searchStrategy,
+        float slack
     ) {
         super(1, visitLimit, searchStrategy);
         if (traversalSimilarity > resultSimilarity) {
@@ -64,20 +55,29 @@ public class RadiusVectorSimilarityCollector2 extends AbstractKnnCollector {
         this.resultSimilarity = resultSimilarity;
         this.maxSimilarity = Float.NEGATIVE_INFINITY;
         this.scoreDocList = new ArrayList<>();
+        this.slack = slack;
     }
 
     @Override
     public boolean collect(int docId, float similarity) {
         maxSimilarity = Math.max(maxSimilarity, similarity);
-        if (similarity >= resultSimilarity) {
+        if (similarity >= effectiveResultSimilarity()) {
             scoreDocList.add(new ScoreDoc(docId, similarity));
         }
         return true;
     }
 
+    private float effectiveResultSimilarity() {
+        return resultSimilarity * (1f - slack);
+    }
+
+    private float effectiveTraversalSimilarity() {
+        return traversalSimilarity * (1f - slack);
+    }
+
     @Override
     public float minCompetitiveSimilarity() {
-        return Math.min(traversalSimilarity, maxSimilarity);
+        return Math.min(effectiveTraversalSimilarity(), maxSimilarity);
     }
 
     @Override

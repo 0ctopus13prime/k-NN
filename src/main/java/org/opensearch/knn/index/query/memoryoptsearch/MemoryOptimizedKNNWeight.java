@@ -73,6 +73,13 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
                 this.knnCollectorManager = new DiversifyingNearestChildrenKnnCollectorManager(k, query.getParentsFilter(), searcher);
             }
         } else {
+            final Object thresholdParam =
+                query.getMethodParameters() != null ? query.getMethodParameters().get("_TMP_MIN_SCORE_THRESHOLD") : null;
+            if (thresholdParam == null) {
+                throw new IllegalArgumentException("_TMP_MIN_SCORE_THRESHOLD method parameter is required for radius search");
+            }
+            final float threshold = Float.parseFloat(thresholdParam.toString());
+
             // Radius search.
             // Forward the incoming searchStrategy so that a re-entrant (seeded) radial search can begin
             // the graph traversal from pre-computed entry points instead of the default entry node.
@@ -80,7 +87,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
                 DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * query.getRadius(),
                 query.getRadius(),
                 visitLimit,
-                searchStrategy
+                searchStrategy,
+                threshold
             );
         }
     }
@@ -121,12 +129,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
 
                     // Should never occur, safety if ever any other quantization is added
                     throw new IllegalStateException(
-                        "VectorDataType for transfer acquired ["
-                        + quantizationService.getVectorDataTypeForTransfer(fieldInfo)
-                        + "] while it is expected to get ["
-                        + VectorDataType.BINARY
-                        + "]"
-                    );
+                        "VectorDataType for transfer acquired [" + quantizationService.getVectorDataTypeForTransfer(fieldInfo)
+                        + "] while it is expected to get [" + VectorDataType.BINARY + "]");
                 }
 
                 if (knnQuery.getVectorDataType() == VectorDataType.BINARY || knnQuery.getVectorDataType() == VectorDataType.BYTE) {
@@ -205,35 +209,42 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
 
         // Phase 1: top-k ANN with k = ef_search to find seed entry points.
         final int efSearch = IndexHyperParametersUtil.getHNSWEFSearchValue(knnQuery.getMethodParameters(), knnQuery.getIndexName());
-        final KnnCollector seedCollector = new TopKnnCollectorManager(efSearch, searcher).newCollector(
-            visitedLimit,
-            DEFAULT_HNSW_SEARCH_STRATEGY,
-            context
-        );
+        final KnnCollector seedCollector =
+            new TopKnnCollectorManager(efSearch, searcher).newCollector(visitedLimit, DEFAULT_HNSW_SEARCH_STRATEGY, context);
         searchVector(targetVector, seedCollector, acceptDocs, reader);
         final TopDocs seedTopDocs = seedCollector.topDocs();
 
         // Phase 2: radial search, seeded from phase-1 results when available.
         final KnnCollectorManager radialCollectorManager;
         if (seedTopDocs != null && seedTopDocs.scoreDocs.length > 0) {
-            radialCollectorManager = new ReentrantKnnCollectorManager(
-                knnCollectorManager,
-                Map.of(context.ord, seedTopDocs),
-                targetVector,
-                knnQuery.getField()
-            );
+            radialCollectorManager =
+                new ReentrantKnnCollectorManager(knnCollectorManager, Map.of(context.ord, seedTopDocs), targetVector, knnQuery.getField());
         } else {
             radialCollectorManager = knnCollectorManager;
         }
 
-        return queryIndex(targetVector, cardinality, cardinality, context, filterIdsBitSet, reader, knnEngine, spaceType, radialCollectorManager);
+        return queryIndex(
+            targetVector,
+            cardinality,
+            cardinality,
+            context,
+            filterIdsBitSet,
+            reader,
+            knnEngine,
+            spaceType,
+            radialCollectorManager
+        );
     }
 
     /**
      * Issues the vector search against the segment using the given collector.
      */
-    private void searchVector(final Object targetVector, final KnnCollector collector, final AcceptDocs acceptDocs, final SegmentReader reader)
-        throws IOException {
+    private void searchVector(
+        final Object targetVector,
+        final KnnCollector collector,
+        final AcceptDocs acceptDocs,
+        final SegmentReader reader
+    ) throws IOException {
         assert (targetVector instanceof float[] || targetVector instanceof byte[]);
         if (targetVector instanceof float[] floatTargetVector) {
             reader.getVectorReader().search(knnQuery.getField(), floatTargetVector, collector, acceptDocs);
@@ -252,9 +263,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
         final KNNEngine knnEngine,
         final SpaceType spaceType
     ) throws IOException {
-        final KnnCollectorManager collectorManager = reentrantKNNCollectorManager != null
-                                                     ? reentrantKNNCollectorManager
-                                                     : knnCollectorManager;
+        final KnnCollectorManager collectorManager =
+            reentrantKNNCollectorManager != null ? reentrantKNNCollectorManager : knnCollectorManager;
         return queryIndex(
             targetVector,
             cardinality,
