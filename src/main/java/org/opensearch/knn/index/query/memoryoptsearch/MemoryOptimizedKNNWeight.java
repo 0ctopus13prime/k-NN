@@ -77,10 +77,16 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             final float threshold = Float.parseFloat(thresholdParam.toString());
 
             // Radius search
-            this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
+            // this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
+            //     DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * (query.getRadius() * threshold),
+            //     query.getRadius() * threshold,
+            //     visitLimit
+            // );
+            this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector1(
                 DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * (query.getRadius() * threshold),
                 query.getRadius() * threshold,
-                visitLimit
+                visitLimit,
+                threshold
             );
         }
     }
