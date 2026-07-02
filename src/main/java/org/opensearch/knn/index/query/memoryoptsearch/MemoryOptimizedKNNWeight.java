@@ -69,12 +69,12 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
                 this.knnCollectorManager = new DiversifyingNearestChildrenKnnCollectorManager(k, query.getParentsFilter(), searcher);
             }
         } else {
-            // final Object thresholdParam =
-            // query.getMethodParameters() != null ? query.getMethodParameters().get("_TMP_MIN_SCORE_THRESHOLD") : null;
-            // if (thresholdParam == null) {
-            // throw new IllegalArgumentException("_TMP_MIN_SCORE_THRESHOLD method parameter is required for radius search");
-            // }
-            // final float threshold = Float.parseFloat(thresholdParam.toString());
+            final Object thresholdParam =
+                query.getMethodParameters() != null ? query.getMethodParameters().get("_TMP_MIN_SCORE_THRESHOLD") : null;
+            if (thresholdParam == null) {
+                throw new IllegalArgumentException("_TMP_MIN_SCORE_THRESHOLD method parameter is required for radius search");
+            }
+            final float threshold = Float.parseFloat(thresholdParam.toString());
 
             // Radius search
             // this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector(
@@ -85,7 +85,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
             this.knnCollectorManager = (visitLimit, searchStrategy, context) -> new RadiusVectorSimilarityCollector1(
                 DEFAULT_LUCENE_RADIAL_SEARCH_TRAVERSAL_SIMILARITY_RATIO * query.getRadius(),
                 query.getRadius(),
-                visitLimit
+                visitLimit,
+                threshold
             );
         }
     }
@@ -126,12 +127,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
 
                     // Should never occur, safety if ever any other quantization is added
                     throw new IllegalStateException(
-                        "VectorDataType for transfer acquired ["
-                            + quantizationService.getVectorDataTypeForTransfer(fieldInfo)
-                            + "] while it is expected to get ["
-                            + VectorDataType.BINARY
-                            + "]"
-                    );
+                        "VectorDataType for transfer acquired [" + quantizationService.getVectorDataTypeForTransfer(fieldInfo)
+                        + "] while it is expected to get [" + VectorDataType.BINARY + "]");
                 }
 
                 if (knnQuery.getVectorDataType() == VectorDataType.BINARY || knnQuery.getVectorDataType() == VectorDataType.BYTE) {
@@ -204,9 +201,8 @@ public class MemoryOptimizedKNNWeight extends KNNWeight {
         }
 
         // Create a collector + bitset
-        final KnnCollectorManager collectorManager = reentrantKNNCollectorManager != null
-            ? reentrantKNNCollectorManager
-            : knnCollectorManager;
+        final KnnCollectorManager collectorManager =
+            reentrantKNNCollectorManager != null ? reentrantKNNCollectorManager : knnCollectorManager;
         final KnnCollector knnCollector = collectorManager.newCollector(visitedLimit, DEFAULT_HNSW_SEARCH_STRATEGY, context);
         final AcceptDocs acceptDocs = getAcceptedDocs(reader, cardinality, filterIdsBitSet);
 

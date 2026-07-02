@@ -29,7 +29,7 @@ public class RadiusVectorSimilarityCollector1 extends AbstractKnnCollector {
     private final List<ScoreDoc> scoreDocList;
     private float minCompetitiveSimilarity;
 
-    public RadiusVectorSimilarityCollector1(float traversalSimilarity, float resultSimilarity, long visitLimit) {
+    public RadiusVectorSimilarityCollector1(float traversalSimilarity, float resultSimilarity, long visitLimit, float threshold) {
         // TODO: add search strategy support
         super(1, visitLimit, DEFAULT_STRATEGY);
         if (traversalSimilarity > resultSimilarity) {
@@ -37,30 +37,9 @@ public class RadiusVectorSimilarityCollector1 extends AbstractKnnCollector {
         }
         this.decay = DEFAULT_DECAY;
         this.resultSimilarity = resultSimilarity;
-        this.slack = 0f;
+        this.slack = 1 - threshold;
         this.scoreDocList = new ArrayList<>();
         this.minCompetitiveSimilarity = Math.nextUp(Float.NEGATIVE_INFINITY);
-    }
-
-    /**
-     * Widen the collector's accept net by a quantization-slack factor {@code eps ∈ [0, 1)}.
-     * Both the traversal and result thresholds become {@code threshold * (1 - eps)}.
-     *
-     * <p>Intended use: the vector searcher (which knows the segment's quantization error
-     * distribution) calls this at query time so that borderline docs whose quantized score
-     * dipped below {@code min_score} are still accepted. A rescore pass at the caller filters
-     * out the resulting false accepts.
-     *
-     * <p>Safe to call more than once — each call replaces the slack, so slacks do not compound.
-     *
-     * @param eps slack in {@code [0, 1)}. {@code 0} disables the widening entirely.
-     * @throws IllegalArgumentException if {@code eps} is outside {@code [0, 1)} or {@code NaN}.
-     */
-    public void applySlack(float eps) {
-        if (Float.isNaN(eps) || eps < 0f || eps >= 1f) {
-            throw new IllegalArgumentException("eps must be in [0, 1), got: " + eps);
-        }
-        this.slack = eps;
     }
 
     private float effectiveResultSimilarity() {
