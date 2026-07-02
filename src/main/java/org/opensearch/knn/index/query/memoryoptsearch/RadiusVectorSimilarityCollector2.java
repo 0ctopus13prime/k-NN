@@ -45,7 +45,7 @@ public class RadiusVectorSimilarityCollector2 extends AbstractKnnCollector {
         float resultSimilarity,
         long visitLimit,
         KnnSearchStrategy searchStrategy,
-        float slack
+        float threshold
     ) {
         super(1, visitLimit, searchStrategy);
         if (traversalSimilarity > resultSimilarity) {
@@ -55,7 +55,8 @@ public class RadiusVectorSimilarityCollector2 extends AbstractKnnCollector {
         this.resultSimilarity = resultSimilarity;
         this.maxSimilarity = Float.NEGATIVE_INFINITY;
         this.scoreDocList = new ArrayList<>();
-        this.slack = slack;
+        // Ex: threshold = 97% -> 3% slack
+        this.slack = 1 - threshold;
     }
 
     @Override
