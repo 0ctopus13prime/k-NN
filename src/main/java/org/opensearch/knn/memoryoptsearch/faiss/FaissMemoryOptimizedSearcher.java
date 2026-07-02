@@ -28,6 +28,7 @@ import org.opensearch.knn.common.FieldInfoExtractor;
 import org.opensearch.knn.common.RobustUniqueRandomIterator;
 import org.opensearch.knn.index.KNNVectorSimilarityFunction;
 import org.opensearch.knn.index.query.memoryoptsearch.RadiusVectorSimilarityCollector;
+import org.opensearch.knn.index.query.memoryoptsearch.RadiusVectorSimilarityCollector1;
 import org.opensearch.knn.index.util.WarmupUtil;
 import org.opensearch.knn.memoryoptsearch.VectorSearcher;
 import org.opensearch.knn.memoryoptsearch.faiss.cagra.FaissCagraHNSW;
@@ -270,7 +271,10 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
         if (eps <= 0f) {
             return;
         }
-        if (knnCollector instanceof RadiusVectorSimilarityCollector radialKnnCollector) {
+        // if (knnCollector instanceof RadiusVectorSimilarityCollector radialKnnCollector) {
+        //     radialKnnCollector.applySlack(eps);
+        // }
+        if (knnCollector instanceof RadiusVectorSimilarityCollector1 radialKnnCollector) {
             radialKnnCollector.applySlack(eps);
         }
     }
