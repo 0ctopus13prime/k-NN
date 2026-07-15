@@ -17,7 +17,7 @@ import java.util.List;
 public class RadiusVectorSimilarityCollector1 extends AbstractKnnCollector {
     private static final KnnSearchStrategy.Hnsw DEFAULT_STRATEGY = new KnnSearchStrategy.Hnsw(0);
 
-    private static final float DEFAULT_DECAY = 0.5f;
+    private static final float DEFAULT_DECAY = 0.3f;
     private static final float DECAY_MAX_QUALITY = 1f;
 
     // Original thresholds as constructed. Immutable, referenced only for logging / recomputation.
