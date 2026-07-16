@@ -47,7 +47,7 @@ public class FaissMemoryOptimizedSearcher implements VectorSearcher {
     /** Max number of proxy-query pairs to sample when estimating quantization slack. */
     private static final int EPS_SAMPLE_SIZE = 10_000;
     /** Percentile of positive-tail rel_err used as the slack. p99 keeps 99% of border docs from being wrongly rejected. */
-    private static final double EPS_PERCENTILE = 0.9;
+    private static final double EPS_PERCENTILE = 0.95;
     /** RNG seed for reproducible proxy-query sampling. */
     private static final long EPS_SEED = 42L;
     /** Fixed slack when we can't measure — 0 = behave identically to the pre-slack code path. */
