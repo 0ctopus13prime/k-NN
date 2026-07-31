@@ -86,6 +86,38 @@ public class FaissScalarQuantizedBulkSimdScorerTests extends KNNTestCase {
         }
     }
 
+    @Test
+    public void testSQCosineScoringWithJavaArray() {
+        doTestWithJavaArrayExpType(VectorSimilarityFunction.COSINE, Arrays.asList(1, 7, 56, 57, 77, 128, 512, 777, 1024));
+    }
+
+    @Test
+    public void testSQEuclideanScoringWithJavaArray() {
+        doTestWithJavaArrayExpType(VectorSimilarityFunction.EUCLIDEAN, Arrays.asList(1, 7, 77, 128, 512, 777, 1024, 10240));
+    }
+
+    @Test
+    public void testSQMaxInnerProductScoringWithJavaArray() {
+        doTestWithJavaArrayExpType(VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT, Arrays.asList(1, 7, 77, 128, 512, 777, 1024, 10240));
+    }
+
+    /**
+     * Runs the truth-comparison test with the 'JavaArray' POC experiment path
+     * ({@link KNN1040ScalarQuantizedVectorScorer#EXP_TYPE}), restoring the baseline afterwards.
+     */
+    private void doTestWithJavaArrayExpType(final VectorSimilarityFunction similarityFunction, final Iterable<Integer> dimensions) {
+        final String previousExpType = KNN1040ScalarQuantizedVectorScorer.EXP_TYPE;
+        KNN1040ScalarQuantizedVectorScorer.EXP_TYPE = "JavaArray";
+        try {
+            for (int dim : dimensions) {
+                System.out.println("Dimension=" + dim);
+                doTest(similarityFunction, dim);
+            }
+        } finally {
+            KNN1040ScalarQuantizedVectorScorer.EXP_TYPE = previousExpType;
+        }
+    }
+
     @SneakyThrows
     private void doTest(final VectorSimilarityFunction similarityFunction, final int dimension) {
         final ScalarEncoding encoding = ScalarEncoding.SINGLE_BIT_QUERY_NIBBLE;

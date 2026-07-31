@@ -20,6 +20,7 @@ import org.opensearch.index.engine.Engine;
 import org.opensearch.index.mapper.MapperService;
 import org.opensearch.index.shard.IndexShard;
 import org.opensearch.knn.common.FieldInfoExtractor;
+import org.opensearch.knn.index.codec.KNN1040Codec.KNN1040ScalarQuantizedVectorScorer;
 import org.opensearch.knn.index.codec.util.NativeMemoryCacheKeyHelper;
 import org.opensearch.knn.index.engine.KNNEngine;
 import org.opensearch.knn.index.engine.qframe.QuantizationConfig;
@@ -32,6 +33,10 @@ import org.opensearch.knn.index.query.SegmentLevelQuantizationInfo;
 import org.opensearch.knn.index.warmup.MemoryOptimizedSearchWarmup;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.AccessController;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -90,6 +95,10 @@ public class KNNIndexShard {
         final String indexName = indexShard.shardId().getIndexName();
         log.info("[KNN] Warming up index: [{}]", indexName);
 
+        // POC hack: pick the bulk SIMD experiment mode ('MMap' | 'Fallback' | 'JavaArray') from
+        // /tmp/bulk-simd-experiment. Defaults to 'MMap' (baseline) when the file is missing/empty.
+        loadBulkSimdExperimentType();
+
         final MapperService mapperService = indexShard.mapperService();
 
         try (Engine.Searcher searcher = indexShard.acquireSearcher("knn-warmup-mem")) {
@@ -115,6 +124,30 @@ public class KNNIndexShard {
             log.error("Failed warm-up index: [{}]", indexName, e);
             throw e;
         }
+    }
+
+    /**
+     * POC hack: reads /tmp/bulk-simd-experiment and sets
+     * {@link KNN1040ScalarQuantizedVectorScorer#EXP_TYPE}. Valid contents are 'MMap', 'Fallback'
+     * and 'JavaArray'. Falls back to 'MMap' (baseline behavior) when the file is missing, empty
+     * or unreadable.
+     */
+    private void loadBulkSimdExperimentType() {
+        String expType = "MMap";
+        try {
+            final String content = AccessController.doPrivileged(
+                (PrivilegedExceptionAction<String>) () -> new String(Files.readAllBytes(Paths.get("/tmp/bulk-simd-experiment")))
+            ).trim();
+            log.info("[KNN] Exp type in file -> [{}]", content);
+            if (content.isEmpty() == false) {
+                expType = content;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            log.info("[KNN] Could not read /tmp/bulk-simd-experiment, defaulting EXP_TYPE to 'MMap'.");
+        }
+        KNN1040ScalarQuantizedVectorScorer.EXP_TYPE = expType;
+        log.info("[KNN] Bulk SIMD experiment type set to [{}]", expType);
     }
 
     private void warmUpOffHeapIndex(final List<EngineFileContext> engineFileContexts, final Directory directory) {

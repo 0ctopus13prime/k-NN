@@ -39,6 +39,30 @@ JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_sc
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSQSearchContext
   (JNIEnv *, jclass, jbyteArray, jfloat, jfloat, jfloat, jint, jlongArray, jint, jint, jfloat);
 
+/*
+ * Class:     org_opensearch_knn_jni_SimdVectorComputeService
+ * Method:    saveSQSearchContext2
+ * Signature: ([BFFFIIIF)V
+ */
+JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_saveSQSearchContext2
+  (JNIEnv *, jclass, jbyteArray, jfloat, jfloat, jfloat, jint, jint, jint, jfloat);
+
+/*
+ * Class:     org_opensearch_knn_jni_SimdVectorComputeService
+ * Method:    scoreSimilarityInBulk2
+ * Signature: ([B[FI)F
+ */
+JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scoreSimilarityInBulk2
+  (JNIEnv *, jclass, jbyteArray, jfloatArray, jint);
+
+/*
+ * Class:     org_opensearch_knn_jni_SimdVectorComputeService
+ * Method:    scoreSimilarity2
+ * Signature: ([B)F
+ */
+JNIEXPORT jfloat JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_scoreSimilarity2
+  (JNIEnv *, jclass, jbyteArray);
+
 #ifdef __cplusplus
 }
 #endif

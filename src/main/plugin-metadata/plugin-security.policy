@@ -12,4 +12,5 @@ grant {
     permission java.net.SocketPermission "*", "connect,resolve";
     permission java.lang.RuntimePermission "accessDeclaredMembers";
     permission java.io.FilePermission "/proc/cpuinfo", "read";
+    permission java.io.FilePermission "/tmp/bulk-simd-experiment", "read";
 };
