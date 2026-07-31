@@ -96,7 +96,7 @@ public class KNNIndexShard {
         log.info("[KNN] Warming up index: [{}]", indexName);
 
         // POC hack: pick the bulk SIMD experiment mode ('MMap' | 'Fallback' | 'JavaArray') from
-        // /tmp/bulk-simd-experiment. Defaults to 'MMap' (baseline) when the file is missing/empty.
+        // /home/ec2-user/efs/tmp/bulk-simd-experiment. Defaults to 'MMap' (baseline) when the file is missing/empty.
         loadBulkSimdExperimentType();
 
         final MapperService mapperService = indexShard.mapperService();
@@ -127,7 +127,7 @@ public class KNNIndexShard {
     }
 
     /**
-     * POC hack: reads /tmp/bulk-simd-experiment and sets
+     * POC hack: reads /home/ec2-user/efs/tmp/bulk-simd-experiment and sets
      * {@link KNN1040ScalarQuantizedVectorScorer#EXP_TYPE}. Valid contents are 'MMap', 'Fallback'
      * and 'JavaArray'. Falls back to 'MMap' (baseline behavior) when the file is missing, empty
      * or unreadable.
@@ -136,7 +136,7 @@ public class KNNIndexShard {
         String expType = "MMap";
         try {
             final String content = AccessController.doPrivileged(
-                (PrivilegedExceptionAction<String>) () -> new String(Files.readAllBytes(Paths.get("/tmp/bulk-simd-experiment")))
+                (PrivilegedExceptionAction<String>) () -> new String(Files.readAllBytes(Paths.get("/home/ec2-user/efs/tmp/bulk-simd-experiment")))
             ).trim();
             log.info("[KNN] Exp type in file -> [{}]", content);
             if (content.isEmpty() == false) {
@@ -144,7 +144,7 @@ public class KNNIndexShard {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            log.info("[KNN] Could not read /tmp/bulk-simd-experiment, defaulting EXP_TYPE to 'MMap'.");
+            log.info("[KNN] Could not read /home/ec2-user/efs/tmp/bulk-simd-experiment, defaulting EXP_TYPE to 'MMap'.");
         }
         KNN1040ScalarQuantizedVectorScorer.EXP_TYPE = expType;
         log.info("[KNN] Bulk SIMD experiment type set to [{}]", expType);
