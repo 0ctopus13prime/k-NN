@@ -74,22 +74,19 @@ public enum ScalarBitEncoding {
     FOUR_BIT((byte) 4, (byte) 4) {
         @Override
         public void packDoc(byte[] raw, byte[] packed, int dimension) {
-            // Transpose into 4 nibble stripes for SIMD-friendly dot product
-            int stripeSize = (dimension + 7) / 8;
-            for (int i = 0; i < dimension; i++) {
-                int val = raw[i] & 0x0F;
-                int byteIdx = i / 8;
-                int bitIdx = 7 - (i % 8);
-                if ((val & 1) != 0) packed[byteIdx] |= (byte) (1 << bitIdx);
-                if ((val & 2) != 0) packed[stripeSize + byteIdx] |= (byte) (1 << bitIdx);
-                if ((val & 4) != 0) packed[2 * stripeSize + byteIdx] |= (byte) (1 << bitIdx);
-                if ((val & 8) != 0) packed[3 * stripeSize + byteIdx] |= (byte) (1 << bitIdx);
+            // Split-half nibbles, identical to Lucene104 PACKED_NIBBLE (OffHeapScalarQuantizedVectorValues.packNibbles):
+            // high nibble of byte i = code[i], low nibble = code[i + half]. An odd dimension pads the missing low
+            // nibble with code 0, which contributes nothing to the dot product.
+            int half = (dimension + 1) / 2;
+            for (int i = 0; i < half; i++) {
+                int lo = (i + half < dimension) ? (raw[i + half] & 0x0F) : 0;
+                packed[i] = (byte) (((raw[i] & 0x0F) << 4) | lo);
             }
         }
 
         @Override
         public int docPackedBytes(int dimension) {
-            return ((dimension + 7) / 8) * 4;
+            return (dimension + 1) / 2;
         }
     };
 

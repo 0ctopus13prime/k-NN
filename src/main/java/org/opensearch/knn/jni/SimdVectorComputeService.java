@@ -75,24 +75,47 @@ public class SimdVectorComputeService {
     // ===== ClusterANN bulk operations (pure functions, no state, thread-safe) =====
 
     /**
-     * Batch quantized dot product for block-columnar ADC scoring.
-     * Supports 1-bit, 2-bit, and 4-bit document quantization against 4-bit query.
+     * Batch quantized dot product for block-columnar ADC scoring. Supports 1-bit, 2-bit, and 4-bit document
+     * quantization against a 4-bit query; the native side batches several documents per SIMD pass and shares the
+     * query loads across them.
      *
-     * @param queryTransposed 4-bit query transposed into bit planes
-     * @param docCodesBatch   contiguous packed codes (numVectors × bytesPerCode)
-     * @param results         output raw dot products
-     * @param bytesPerCode    packed bytes per vector
-     * @param numVectors      vectors to score (≤ 32)
-     * @param docBits         quantization bits (1, 2, or 4)
+     * <ul>
+     *   <li>1-bit / 2-bit: documents are transposed bit planes ({@code packAsBinary} / {@code transposeDibit}), the
+     *       query is transposed with {@code OptimizedScalarQuantizer.transposeHalfByte} into 4 planes. Same math as
+     *       {@code VectorUtil.int4BitDotProduct} / {@code int4DibitDotProduct}. Query length
+     *       {@code >= 4 * (bytesPerCode / docBits)}.</li>
+     *   <li>4-bit: documents are split-half nibbles ({@code ScalarBitEncoding.FOUR_BIT}, the Lucene104
+     *       {@code PACKED_NIBBLE} layout), the query is unpacked 4-bit codes zero padded to {@code 2 * bytesPerCode}.
+     *       Same math as {@code QuantizedVectorReader.int4NibbleDotProduct}. Uses VNNI / udot where available.</li>
+     * </ul>
+     *
+     * <p>For {@code k in [0, numOffsets)}: {@code results[offsets[k]] = dot(query, record offsets[k])}.
+     * Entries of {@code results} not addressed by {@code offsets} are left untouched. Offsets are validated natively;
+     * an out-of-range offset throws instead of reading out of bounds.
+     *
+     * @param query           quantized query in the layout described above
+     * @param docCodesBatch   contiguous packed codes, one record of {@code bytesPerCode} bytes per vector
+     * @param offsets         record indexes (into {@code docCodesBatch}) to score
+     * @param numOffsets      number of valid entries in {@code offsets}
+     * @param results         output raw dot products, indexed by record index
+     * @param bytesPerCode    packed bytes per vector ({@code ScalarBitEncoding.docPackedBytes(dim)})
+     * @param docBits         document quantization bits (1, 2, or 4)
      */
     public static native void bulkQuantizedDotProduct(
-        byte[] queryTransposed,
+        byte[] query,
         byte[] docCodesBatch,
+        int[] offsets,
+        int numOffsets,
         float[] results,
         int bytesPerCode,
-        int numVectors,
         int docBits
     );
+
+    /**
+     * Name of the compiled-in kernel behind {@link #bulkQuantizedDotProduct}: {@code avx512}, {@code avx2},
+     * {@code neon} or {@code scalar}. Diagnostic only.
+     */
+    public static native String bulkQuantizedDotProductKernel();
 
     /**
      * Compute distances from one vector to multiple centroids.

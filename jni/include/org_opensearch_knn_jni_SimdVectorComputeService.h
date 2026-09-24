@@ -42,10 +42,18 @@ JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_save
 /*
  * Class:     org_opensearch_knn_jni_SimdVectorComputeService
  * Method:    bulkQuantizedDotProduct
- * Signature: ([B[B[FIII)V
+ * Signature: ([B[B[II[FII)V
  */
 JNIEXPORT void JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_bulkQuantizedDotProduct
-  (JNIEnv *, jclass, jbyteArray, jbyteArray, jfloatArray, jint, jint, jint);
+  (JNIEnv *, jclass, jbyteArray, jbyteArray, jintArray, jint, jfloatArray, jint, jint);
+
+/*
+ * Class:     org_opensearch_knn_jni_SimdVectorComputeService
+ * Method:    bulkQuantizedDotProductKernel
+ * Signature: ()Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_org_opensearch_knn_jni_SimdVectorComputeService_bulkQuantizedDotProductKernel
+  (JNIEnv *, jclass);
 
 /*
  * Class:     org_opensearch_knn_jni_SimdVectorComputeService

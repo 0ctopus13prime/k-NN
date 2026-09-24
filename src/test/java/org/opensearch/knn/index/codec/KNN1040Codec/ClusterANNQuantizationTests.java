@@ -9,6 +9,7 @@ import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.opensearch.knn.KNNTestCase;
 import org.opensearch.knn.index.clusterann.codec.*;
+import org.opensearch.knn.jni.SimdVectorComputeService;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import java.util.Random;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
@@ -158,25 +159,43 @@ public class ClusterANNQuantizationTests extends KNNTestCase {
         assertEquals((byte) 0x00, packed[3]); // bit3 stripe
     }
 
-    public void testInt4NibbleDotProduct_identity() {
-        // Query and doc both all 15 → dot = 8 * 15 * 15 = 1800
-        byte[] queryTransposed = new byte[4];
-        byte[] docTransposed = new byte[4];
-        for (int i = 0; i < 4; i++) {
-            queryTransposed[i] = (byte) 0xFF;
-            docTransposed[i] = (byte) 0xFF;
-        }
+    public void testPackNibbles_splitHalf() {
+        // 8 dims, codes 1..8 -> byte i = code[i] << 4 | code[i + 4], identical to Lucene104 packNibbles.
+        byte[] raw = { 1, 2, 3, 4, 5, 6, 7, 8 };
+        byte[] packed = new byte[4];
+        ScalarBitEncoding.FOUR_BIT.packDoc(raw, packed, 8);
+        assertEquals((byte) 0x15, packed[0]);
+        assertEquals((byte) 0x26, packed[1]);
+        assertEquals((byte) 0x37, packed[2]);
+        assertEquals((byte) 0x48, packed[3]);
+    }
 
-        long dot = QuantizedVectorReader.int4NibbleDotProduct(queryTransposed, docTransposed);
-        // Per byte position: sum of all 16 cross-products with 8 bits each
-        // = 8*(1+2+4+8+2+4+8+16+4+8+16+32+8+16+32+64) = 8*225 = 1800
+    public void testPackNibbles_oddDimensionPadsLowNibble() {
+        // 5 dims -> half = 3 -> 3 bytes; the last byte's low nibble (dim 5) does not exist and must be 0.
+        byte[] raw = { 15, 14, 13, 12, 11 };
+        byte[] packed = new byte[3];
+        ScalarBitEncoding.FOUR_BIT.packDoc(raw, packed, 5);
+        assertEquals(3, ScalarBitEncoding.FOUR_BIT.docPackedBytes(5));
+        assertEquals((byte) 0xFC, packed[0]); // 15 | 12
+        assertEquals((byte) 0xEB, packed[1]); // 14 | 11
+        assertEquals((byte) 0xD0, packed[2]); // 13 | pad
+    }
+
+    public void testInt4NibbleDotProduct_identity() {
+        // 8 dims, query and doc both all 15 -> dot = 8 * 15 * 15 = 1800
+        byte[] queryUnpacked = new byte[8];
+        java.util.Arrays.fill(queryUnpacked, (byte) 15);
+        byte[] docPacked = new byte[4];
+        java.util.Arrays.fill(docPacked, (byte) 0xFF);
+
+        long dot = QuantizedVectorReader.int4NibbleDotProduct(queryUnpacked, docPacked);
         assertEquals(1800L, dot);
     }
 
     public void testInt4NibbleDotProduct_zeros() {
-        byte[] queryTransposed = new byte[4];
-        byte[] docTransposed = new byte[4];
-        long dot = QuantizedVectorReader.int4NibbleDotProduct(queryTransposed, docTransposed);
+        byte[] queryUnpacked = new byte[8];
+        byte[] docPacked = new byte[4];
+        long dot = QuantizedVectorReader.int4NibbleDotProduct(queryUnpacked, docPacked);
         assertEquals(0L, dot);
     }
 
@@ -249,16 +268,11 @@ public class ClusterANNQuantizationTests extends KNNTestCase {
             rawQuery[i] = (byte) (rng.nextInt(16)); // 0-15
         }
 
-        // Pack
-        int stripeSize = (DIM + 7) / 8;
-        byte[] packedDoc = new byte[stripeSize * 4];
-        OptimizedScalarQuantizer.transposeHalfByte(rawDoc, packedDoc);
+        // Pack doc as split-half nibbles; the query stays unpacked (one code per dimension)
+        byte[] packedDoc = new byte[ScalarBitEncoding.FOUR_BIT.docPackedBytes(DIM)];
+        ScalarBitEncoding.FOUR_BIT.packDoc(rawDoc, packedDoc, DIM);
 
-        byte[] queryTransposed = new byte[stripeSize * 4];
-        OptimizedScalarQuantizer.transposeHalfByte(rawQuery, queryTransposed);
-
-        // Dot product via bit manipulation
-        long bitDot = QuantizedVectorReader.int4NibbleDotProduct(queryTransposed, packedDoc);
+        long bitDot = QuantizedVectorReader.int4NibbleDotProduct(rawQuery, packedDoc);
 
         // Brute force reference
         long expected = 0;
@@ -267,6 +281,138 @@ public class ClusterANNQuantizationTests extends KNNTestCase {
         }
 
         assertEquals("4-bit roundtrip dot product mismatch", expected, bitDot);
+    }
+
+    // ========== Native bulk dot product (jni/src/simd/similarity_function/clusterann_batch_dot_product.cpp) ==========
+
+    private static boolean nativeBulkDotAvailable() {
+        try {
+            SimdVectorComputeService.bulkQuantizedDotProductKernel();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** Pack per-dimension codes the way QuantizedVectorWriter does: bit planes for 1/2 bits, nibbles for 4. */
+    private static byte[] packDoc(byte[] raw, int docBits) {
+        int dim = raw.length;
+        byte[] packed = new byte[ScalarBitEncoding.fromDocBits(docBits).docPackedBytes(dim)];
+        switch (docBits) {
+            case 1 -> OptimizedScalarQuantizer.packAsBinary(raw, packed);
+            case 2 -> OptimizedScalarQuantizer.transposeDibit(raw, packed);
+            default -> ScalarBitEncoding.FOUR_BIT.packDoc(raw, packed, dim);
+        }
+        return packed;
+    }
+
+    /** Prepare the query the way QuantizedVectorReader does: 4 transposed planes for 1/2 bits, unpacked codes for 4. */
+    private static byte[] packQuery(byte[] rawQuery, int docBits) {
+        int dim = rawQuery.length;
+        if (docBits == 4) {
+            byte[] q = new byte[2 * ScalarBitEncoding.FOUR_BIT.docPackedBytes(dim)];
+            System.arraycopy(rawQuery, 0, q, 0, dim);
+            return q;
+        }
+        byte[] transposed = new byte[((dim + 7) / 8) * 4];
+        OptimizedScalarQuantizer.transposeHalfByte(rawQuery, transposed);
+        return transposed;
+    }
+
+    /** Java reference used by QuantizedVectorReader for each docBits. */
+    private static long javaDot(byte[] query, byte[] packedDoc, int docBits) {
+        return switch (docBits) {
+            case 1 -> VectorUtil.int4BitDotProduct(query, packedDoc);
+            case 2 -> VectorUtil.int4DibitDotProduct(query, packedDoc);
+            default -> QuantizedVectorReader.int4NibbleDotProduct(query, packedDoc);
+        };
+    }
+
+    public void testNativeBulkDotProduct_matchesJava() {
+        assumeTrue("native SIMD library not available (jni/build/release)", nativeBulkDotAvailable());
+        Random rng = new Random(SEED);
+        int[] dims = { 8, 100, 129, 768, 1024 };
+        for (int docBits : new int[] { 1, 2, 4 }) {
+            for (int dim : dims) {
+                int bytesPerCode = ScalarBitEncoding.fromDocBits(docBits).docPackedBytes(dim);
+                for (int n : new int[] { 1, 3, 4, 7, 8, 9, 17, 32, 33 }) {
+                    byte[] rawQuery = new byte[dim];
+                    for (int i = 0; i < dim; i++) rawQuery[i] = (byte) rng.nextInt(16);
+                    byte[] queryTransposed = packQuery(rawQuery, docBits);
+
+                    byte[] block = new byte[n * bytesPerCode];
+                    byte[][] docs = new byte[n][];
+                    for (int v = 0; v < n; v++) {
+                        byte[] raw = new byte[dim];
+                        for (int i = 0; i < dim; i++) raw[i] = (byte) rng.nextInt(1 << docBits);
+                        docs[v] = packDoc(raw, docBits);
+                        System.arraycopy(docs[v], 0, block, v * bytesPerCode, bytesPerCode);
+                    }
+
+                    // Score a shuffled subset; untouched slots must keep their sentinel.
+                    int[] offsets = new int[n];
+                    int count = 0;
+                    for (int v = 0; v < n; v++) if (v == 0 || rng.nextInt(4) != 0) offsets[count++] = v;
+                    for (int i = count - 1; i > 0; i--) {
+                        int j = rng.nextInt(i + 1);
+                        int t = offsets[i]; offsets[i] = offsets[j]; offsets[j] = t;
+                    }
+                    float[] results = new float[n];
+                    java.util.Arrays.fill(results, -1f);
+
+                    SimdVectorComputeService.bulkQuantizedDotProduct(queryTransposed, block, offsets, count, results, bytesPerCode, docBits);
+
+                    boolean[] scored = new boolean[n];
+                    for (int k = 0; k < count; k++) scored[offsets[k]] = true;
+                    for (int v = 0; v < n; v++) {
+                        String ctx = "docBits=" + docBits + " dim=" + dim + " n=" + n + " v=" + v;
+                        if (!scored[v]) {
+                            assertEquals("untouched slot overwritten " + ctx, -1f, results[v], 0f);
+                            continue;
+                        }
+                        long expected = javaDot(queryTransposed, docs[v], docBits);
+                        assertEquals("native vs java mismatch " + ctx, expected, (long) results[v]);
+                    }
+                }
+            }
+        }
+    }
+
+    public void testNativeBulkDotProduct_allMaxCodes() {
+        assumeTrue("native SIMD library not available (jni/build/release)", nativeBulkDotAvailable());
+        // Overflow guard: query all 15, docs all (2^bits - 1), large dimension.
+        int dim = 4096;
+        byte[] rawQuery = new byte[dim];
+        java.util.Arrays.fill(rawQuery, (byte) 15);
+        for (int docBits : new int[] { 1, 2, 4 }) {
+            byte[] queryTransposed = packQuery(rawQuery, docBits);
+            byte[] raw = new byte[dim];
+            java.util.Arrays.fill(raw, (byte) ((1 << docBits) - 1));
+            byte[] doc = packDoc(raw, docBits);
+            int n = 8;
+            byte[] block = new byte[n * doc.length];
+            for (int v = 0; v < n; v++) System.arraycopy(doc, 0, block, v * doc.length, doc.length);
+            int[] offsets = new int[n];
+            for (int v = 0; v < n; v++) offsets[v] = v;
+            float[] results = new float[n];
+            SimdVectorComputeService.bulkQuantizedDotProduct(queryTransposed, block, offsets, n, results, doc.length, docBits);
+            long expected = (long) dim * 15 * ((1 << docBits) - 1);
+            for (int v = 0; v < n; v++) assertEquals("docBits=" + docBits, expected, (long) results[v]);
+        }
+    }
+
+    public void testNativeBulkDotProduct_rejectsBadOffsets() {
+        assumeTrue("native SIMD library not available (jni/build/release)", nativeBulkDotAvailable());
+        int dim = 64, docBits = 4, bytesPerCode = ScalarBitEncoding.FOUR_BIT.docPackedBytes(dim);
+        byte[] query = new byte[2 * bytesPerCode];
+        byte[] block = new byte[2 * bytesPerCode];
+        float[] results = new float[2];
+        expectThrows(Exception.class, () ->
+            SimdVectorComputeService.bulkQuantizedDotProduct(query, block, new int[] { 0, 2 }, 2, results, bytesPerCode, docBits));
+        expectThrows(Exception.class, () ->
+            SimdVectorComputeService.bulkQuantizedDotProduct(query, block, new int[] { -1 }, 1, results, bytesPerCode, docBits));
+        expectThrows(Exception.class, () ->
+            SimdVectorComputeService.bulkQuantizedDotProduct(query, block, new int[] { 0 }, 1, results, bytesPerCode, 3));
     }
 
     // ========== Validation ==========

@@ -122,7 +122,11 @@ public final class QuantizedVectorWriter implements Closeable {
         } else if (docBits == 2) {
             OptimizedScalarQuantizer.transposeDibit(scratch, packed);
         } else {
-            OptimizedScalarQuantizer.transposeHalfByte(scratch, packed);
+            // Lucene104 PACKED_NIBBLE layout: byte i = code[i] << 4 | code[i + half]. Two full 4-bit codes per
+            // byte, so the native VNNI / udot kernel multiplies nibbles directly (see
+            // jni/src/simd/similarity_function/clusterann_batch_dot_product.cpp). Lucene's own packNibbles is
+            // package-private, hence the copy in ScalarBitEncoding.
+            ScalarBitEncoding.FOUR_BIT.packDoc(scratch, packed, dimension);
         }
         System.arraycopy(packed, 0, flatCodesBuf, offset, packedBytes);
 
@@ -151,9 +155,8 @@ public final class QuantizedVectorWriter implements Closeable {
         }
     }
 
+    /** Packed code bytes per vector; must agree with {@link ScalarBitEncoding#docPackedBytes}. */
     public static int packedBytesPerVector(int dimension, int bits) {
-        if (bits == 1) return (dimension + 7) / 8;
-        if (bits == 2) return ((dimension + 7) / 8) * 2;
-        return ((dimension + 7) / 8) * 4;
+        return ScalarBitEncoding.fromDocBits(bits).docPackedBytes(dimension);
     }
 }
