@@ -921,12 +921,13 @@ public class KNNSettings {
             return KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX2_DISABLED);
         } catch (Exception e) {
             // In some UTs we identified that cluster setting is not set properly an leads to NPE. This check will avoid
-            // those cases and will still return the default value.
+            // those cases and will still return the default value. One line, no stack trace: this fires at
+            // native-library load in every plain JUnit JVM and LuceneTestCase limits a test's stdout/stderr to 8 KB.
             log.warn(
-                "Unable to get setting value {} from cluster settings. Using default value as {}",
+                "Unable to get setting value {} from cluster settings ({}). Using default value as {}",
                 KNN_FAISS_AVX2_DISABLED,
-                KNN_DEFAULT_FAISS_AVX2_DISABLED_VALUE,
-                e
+                e.toString(),
+                KNN_DEFAULT_FAISS_AVX2_DISABLED_VALUE
             );
             return KNN_DEFAULT_FAISS_AVX2_DISABLED_VALUE;
         }
@@ -941,21 +942,45 @@ public class KNNSettings {
     }
 
     public static boolean isFaissAVX512Disabled() {
-        return parseBoolean(
-            Objects.requireNonNullElse(
-                KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
+        try {
+            return parseBoolean(
+                Objects.requireNonNullElse(
+                    KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_DISABLED),
+                    KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
+                ).toString()
+            );
+        } catch (Exception e) {
+            // Same guard as isFaissAVX2Disabled: without an initialised cluster service (plain JUnit tests that load the
+            // native SIMD library, e.g. the ClusterANN kernel tests) the lookup NPEs; fall back to the default.
+            // One line, no stack trace: this fires at native-library load in every plain JUnit JVM and LuceneTestCase
+            // limits a test's stdout/stderr to 8 KB.
+            log.warn(
+                "Unable to get setting value {} from cluster settings ({}). Using default value as {}",
+                KNN_FAISS_AVX512_DISABLED,
+                e.toString(),
                 KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE
-            ).toString()
-        );
+            );
+            return KNN_DEFAULT_FAISS_AVX512_DISABLED_VALUE;
+        }
     }
 
     public static boolean isFaissAVX512SPRDisabled() {
-        return parseBoolean(
-            Objects.requireNonNullElse(
-                KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_SPR_DISABLED),
+        try {
+            return parseBoolean(
+                Objects.requireNonNullElse(
+                    KNNSettings.state().getSettingValue(KNNSettings.KNN_FAISS_AVX512_SPR_DISABLED),
+                    KNN_DEFAULT_FAISS_AVX512_SPR_DISABLED_VALUE
+                ).toString()
+            );
+        } catch (Exception e) {
+            log.warn(
+                "Unable to get setting value {} from cluster settings ({}). Using default value as {}",
+                KNN_FAISS_AVX512_SPR_DISABLED,
+                e.toString(),
                 KNN_DEFAULT_FAISS_AVX512_SPR_DISABLED_VALUE
-            ).toString()
-        );
+            );
+            return KNN_DEFAULT_FAISS_AVX512_SPR_DISABLED_VALUE;
+        }
     }
 
     public static Integer getFilteredExactSearchThreshold(final String indexName) {

@@ -38,6 +38,9 @@ public class ScalarQuantizedBlockScorer implements BlockVectorScorer {
 
     private final SQScanContext quantizedQuery;
 
+    /** Σᵢaᵢbᵢ per block position, filled by {@link #rawDots} before the epilogue runs. Sized to one block. */
+    private final float[] rawDotScratch;
+
     public ScalarQuantizedBlockScorer(
         ScalarQuantizedBlockReader reader,
         SQScanContext queryContext,
@@ -65,6 +68,7 @@ public class ScalarQuantizedBlockScorer implements BlockVectorScorer {
         this.packedBytes = encoding.getDocPackedLength(dimension);
         this.queryPackedBytes = encoding.getQueryPackedLength(dimension);
         this.quantizedQuery = queryContext;
+        this.rawDotScratch = new float[reader.blockSize()];
 
         this.queryNorm = sim == VectorSimilarityFunction.EUCLIDEAN ? (float) Math.sqrt(queryContext.correction()) : 0f;
     }
@@ -93,11 +97,15 @@ public class ScalarQuantizedBlockScorer implements BlockVectorScorer {
         final float qScaleCompSum = quantizedQuery.scale() * quantizedQuery.componentSum(); // s_q * Σᵢbᵢ
         final float centroidDotProductMinusNorm = quantizedQuery.correction() - quantizedQuery.centroidNormSq(); // ⟨q,c⟩ − ‖c‖²
 
+        // Σᵢaᵢbᵢ for every wanted position, computed up front so the 4-bit nibble codes can go through the native
+        // batched kernel in one call per block. The epilogue below is unchanged either way, so scores are identical.
+        final int wanted = rawDots(validPos, codes, positions);
+
         int scored = 0;
-        int index = validPos.nextSetBit(0);
         float maxScore = Float.NEGATIVE_INFINITY;
-        while (index != DocIdSetIterator.NO_MORE_DOCS) {
-            float rawDot = dotProduct(codes, index * packedBytes);    // Σᵢaᵢbᵢ
+        for (int w = 0; w < wanted; w++) {
+            final int index = positions[w];
+            float rawDot = rawDotScratch[index];                          // Σᵢaᵢbᵢ
             float docScale = (upper[index] - lower[index]) * step();  // s_d = (u_d - l_d)/ 2^(bits-1);
 
             // ⟨q−c, v−c⟩ from the four-term expansion of Σᵢ(l_q + s_q·bᵢ)(l_d + s_d·aᵢ). Three of the four
@@ -141,14 +149,39 @@ public class ScalarQuantizedBlockScorer implements BlockVectorScorer {
             if (adc > maxScore) {
                 maxScore = adc;
             }
-
-            // nextSetBit asserts its argument is inside the set, so the last position needs the explicit stop.
-            int next = index + 1;
-            index = next < validPos.length() ? validPos.nextSetBit(next) : DocIdSetIterator.NO_MORE_DOCS;
         }
 
         out.setSize(scored);
         return maxScore;
+    }
+
+    /**
+     * Fills {@code positions[0..n)} with the set bits of {@code validPos} in ascending order and
+     * {@link #rawDotScratch}{@code [position]} with {@code Σᵢaᵢbᵢ} for each of them; returns {@code n}.
+     *
+     * <p>4-bit nibble codes take the native batched kernel when it is available ({@link NativeInt4DotProduct#AVAILABLE});
+     * everything else, and the fallback, is the scalar {@link #dotProduct}.
+     */
+    private int rawDots(final FixedBitSet validPos, final byte[] codes, final int[] positions) {
+        int n = 0;
+        int index = validPos.nextSetBit(0);
+        while (index != DocIdSetIterator.NO_MORE_DOCS) {
+            positions[n++] = index;
+            // nextSetBit asserts its argument is inside the set, so the last position needs the explicit stop.
+            int next = index + 1;
+            index = next < validPos.length() ? validPos.nextSetBit(next) : DocIdSetIterator.NO_MORE_DOCS;
+        }
+        if (n == 0) {
+            return 0;
+        }
+        if (!asymmetric && NativeInt4DotProduct.AVAILABLE) {
+            NativeInt4DotProduct.bulk(quantizedQuery.transposed(), codes, positions, n, rawDotScratch, packedBytes, docBits);
+            return n;
+        }
+        for (int w = 0; w < n; w++) {
+            rawDotScratch[positions[w]] = dotProduct(codes, positions[w] * packedBytes);
+        }
+        return n;
     }
 
     /**

@@ -608,6 +608,9 @@ tasks.register('clusterAnnTest', Test) {
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform()
     systemProperty 'tests.security.manager', 'false'
+    // Same native library location as the `test` task, so the ClusterANN native bulk dot product
+    // (NativeInt4DotProduct) is exercised here rather than silently falling back to Java.
+    systemProperty "java.library.path", "$rootDir/jni/build/release"
     include '**/clusterann/**'
     // The OpenSearch build plugin points every Test task at build/testrun/<task>; the component test resolves its
     // suite file, baselines and corpus cache relative to the project root (same as in formats), so run from there.
@@ -618,10 +621,15 @@ tasks.register('clusterAnnTest', Test) {
     //   -Dknn.update=true   rewrite the suite's baseline CSV with this run's measurements
     //   -Dknn.jfr=true      record a JFR profile per scenario into build/jfr (knn.jfr.dir, knn.jfr.settings)
     //   -Dknn.corpus.dir    where downloaded .hdf5 corpora are cached (default src/test/resources/dataset)
+    //   -Dknn.heap=10g      test JVM heap (the Cohere bench harness needs ~10g for 100k vectors)
+    // -Dclusterann.* is passed through as well (e.g. -Dclusterann.native.dot=false to force the Java dot product).
     System.properties.each { k, v ->
-        if (k.toString().startsWith('knn.')) {
+        if (k.toString().startsWith('knn.') || k.toString().startsWith('clusterann.')) {
             systemProperty k.toString(), v.toString()
         }
+    }
+    if (System.getProperty('knn.heap') != null) {
+        maxHeapSize = System.getProperty('knn.heap')
     }
 }
 

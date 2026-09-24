@@ -1,0 +1,8 @@
+label=native-100k bits=4 space=MAXIMUM_INNER_PRODUCT count=100000 queries=220 k=100
+native dot product: true (kernel=neon/neon-dotprod)
+loaded 100000 base + 220 query vectors, dim=768 in 24.1s
+ground truth (brute force) in 2.9s
+indexed + forceMerge(1) in 13.1s; files: _0_ClusterANN1040KnnVectorsFormat_0.clam=1MB _0_ClusterANN1040KnnVectorsFormat_0.clap=77MB _0_ClusterANN1040KnnVectorsFormat_0.vec=292MB total=373MB
+queries timed=200 (after 20 warm-up)
+recall@100: mean=0.8032 min=0.360
+latency us: p50=2138 p90=3186 p99=3808 mean=2236 max=4415
