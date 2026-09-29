@@ -17,9 +17,14 @@ import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.VectorEncoding;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.IntObjectHashMap;
 import org.apache.lucene.search.AcceptDocs;
 import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
+import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Bits;
@@ -32,9 +37,12 @@ import org.opensearch.knn.clusterann.read.ScanParams;
 import org.opensearch.knn.clusterann.read.orchestration.CentroidPlanner;
 import org.opensearch.knn.clusterann.read.orchestration.ClusterSearcher;
 import org.opensearch.knn.clusterann.read.orchestration.PlanParams;
+import org.opensearch.knn.clusterann.read.orchestration.RadialCandidateCollector;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Per-segment {@link KnnVectorsReader} for {@link KNN1030ClusterANNVectorsFormat}.
@@ -254,6 +262,82 @@ public class KNN1030ClusterANNVectorsReader extends KnnVectorsReader {
         fieldClusters.rotation().rotate(query, scanQuery);
 
         ClusterSearcher.search(fieldClusters, probes, ScanParams.of(scanQuery), translatedKnnCollector, acceptedOrds);
+    }
+
+    /**
+     * Radial search: every accepted vector whose exact similarity to {@code query} is at least {@code resultSimilarity}.
+     *
+     * <p>Two phases. The scan scores quantized codes, which are estimates, so it collects every vector whose estimate
+     * clears a relaxed threshold: the exact threshold widened by {@code admissionSlack} in the raw metric (see
+     * {@link RadialCandidateCollector#admissionThreshold}). The survivors are then scored against the stored
+     * full-precision vectors, and only those at or above {@code resultSimilarity} are returned, with their exact scores.
+     * Precision is therefore exact; recall depends on the estimates and the slack.
+     *
+     * <p>The candidate set is capped at {@code maxCandidates} per segment. A hit cap is reported as
+     * {@link TotalHits.Relation#GREATER_THAN_OR_EQUAL_TO} on the returned {@code totalHits}.
+     *
+     * @param fieldName        the vector field
+     * @param query            the query vector, un-rotated: the reader rotates it for the scan, the exact pass uses it as is
+     * @param resultSimilarity the exact score a vector must reach to be returned
+     * @param admissionSlack   relative slack in the raw metric (distance or dot product) an estimate may fall short of the
+     *                         exact threshold by and still be rescored; {@code >= 0}
+     * @param maxCandidates    most vectors rescored per segment
+     * @param acceptDocs       documents allowed to match, or {@code null} for all
+     * @return matching documents in segment-local doc ids with their exact scores, in no particular order
+     */
+    public TopDocs searchRadial(
+        final String fieldName,
+        final float[] query,
+        final float resultSimilarity,
+        final float admissionSlack,
+        final int maxCandidates,
+        final AcceptDocs acceptDocs
+    ) throws IOException {
+        if (fieldName == null || query == null) {
+            throw new IllegalArgumentException("fieldName and query cannot be null");
+        }
+        if (admissionSlack < 0f) {
+            throw new IllegalArgumentException("admissionSlack must be >= 0, got: " + admissionSlack);
+        }
+
+        final Clusters fieldClusters = clusters(fieldName);
+        if (fieldClusters == null || fieldClusters.numVectors() == 0) {
+            return TopDocsCollector.EMPTY_TOPDOCS;
+        }
+
+        final LongValues ordToDoc = fieldClusters.ordToDoc();
+        final Bits acceptedOrds = buildAcceptedOrds(acceptDocs, ordToDoc, fieldClusters.numVectors());
+
+        // Phase 1: quantized scan into a relaxed-threshold candidate set. Ordinals come back, not doc ids, because the
+        // exact pass reads vectors by ordinal.
+        final int[] probes = CentroidPlanner.plan(fieldClusters, query, PlanParams.of(fieldClusters.numClusters()));
+        final float[] scanQuery = new float[query.length];
+        fieldClusters.rotation().rotate(query, scanQuery);
+        final VectorSimilarityFunction similarity = fieldInfos.fieldInfo(fieldName).getVectorSimilarityFunction();
+        final RadialCandidateCollector candidates = new RadialCandidateCollector(
+            RadialCandidateCollector.admissionThreshold(similarity, resultSimilarity, admissionSlack),
+            maxCandidates
+        );
+        ClusterSearcher.search(fieldClusters, probes, ScanParams.of(scanQuery), candidates, acceptedOrds);
+
+        // Phase 2: exact scores against the stored vectors decide membership.
+        final ScoreDoc[] estimated = candidates.topDocs().scoreDocs;
+        if (estimated.length == 0) {
+            return TopDocsCollector.EMPTY_TOPDOCS;
+        }
+        final FloatVectorValues vectors = rawFlatVectorsReader.getFloatVectorValues(fieldName);
+        final List<ScoreDoc> hits = new ArrayList<>(estimated.length);
+        for (final ScoreDoc candidate : estimated) {
+            final int ord = candidate.doc;
+            final float exact = similarity.compare(query, vectors.vectorValue(ord));
+            if (exact >= resultSimilarity) {
+                hits.add(new ScoreDoc(Math.toIntExact(ordToDoc.get(ord)), exact));
+            }
+        }
+        final TotalHits.Relation relation = candidates.truncated()
+            ? TotalHits.Relation.GREATER_THAN_OR_EQUAL_TO
+            : TotalHits.Relation.EQUAL_TO;
+        return new TopDocs(new TotalHits(hits.size(), relation), hits.toArray(new ScoreDoc[0]));
     }
 
     private Bits buildAcceptedOrds(AcceptDocs acceptDocs, LongValues ordToDoc, int numVectors) throws IOException {

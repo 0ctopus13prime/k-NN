@@ -180,3 +180,61 @@ git submodule update --init --recursive
   -Dknn.clusterann.bench.label=native-100k -Dknn.clusterann.bench.out=$PWD/kdy/bench-100k-native.txt -Dknn.heap=10g
 #   add -Dclusterann.native.dot=false for the Java baseline
 ```
+
+## Radial search backport (`3-5-cluster-ann-radial`, 2026-09-29)
+
+Radial (`max_distance` / `min_score`) search did not exist for ClusterANN on `3-5-cluster-ann`: the query builder
+rejected it ("Engine [UNDEFINED] does not support radial search"), the cluster query factory read only `k`, and the
+reader had no threshold path. The POC (`kdy/cluster-ann-poc`, navneet1v `cluster-ann` @ a422a2ae) supported it via
+Lucene's `FloatVectorSimilarityQuery` plus a reader branch that ran the ADC scan into a fixed top-100 collector and
+exact-rescored those 100. On Cohere 100k that gave 100% recall for radii of 10 and ~95% for 50, but a hard cap of 100
+results per segment (recall 0.33 for a 300-document radius).
+
+Backport design (dedicated query, no collector-type sniffing):
+
+- `KNNQueryBuilder`: cluster ANN fields pass the radial engine check; the radius converts with the Lucene engine's
+  formulas (`KNNEngine.LUCENE.distanceToRadialThreshold` / `scoreToRadialThreshold`), because cluster ANN scores are
+  Lucene-style similarities (L2 `1/(1+d)`, MIP `dot+1` or `1/(1-dot)`, cosine `(1+cos)/2`), the same scale the block
+  scorer and `VectorSimilarityFunction.compare` produce.
+- `RNNQueryFactory`: a cluster ANN field gets `ClusterANNRadialQuery(field, vector, resultSimilarity, filter, shardId)`.
+- `ClusterANNRadialQuery` / `ClusterANNRadialWeight` (`index/query/clusterann`): per segment, builds `AcceptDocs` from
+  the filter (conjoined with `FieldExistsQuery`, as `ClusterANNQuery` does), unwraps the leaf to the per-field
+  `KNN1030ClusterANNVectorsReader` and calls `searchRadial`. Memoised per leaf, `KNNScorer` replays the hits, `explain`
+  reports the exact score. Nested fields are not supported (same as the Lucene engine's radial search).
+- `KNN1030ClusterANNVectorsReader.searchRadial(field, query, resultSimilarity, admissionSlack, maxCandidates, acceptDocs)`:
+  phase 1 runs the normal probe plan + `ClusterSearcher.search` into a `RadialCandidateCollector` (new,
+  `clusterann/read/orchestration`) that admits every vector whose *quantized* score clears the exact threshold widened
+  by a relative slack in the raw metric (10% more distance for L2, 10% less dot product for MIP, 0.1 less cosine;
+  `RadialCandidateCollector.admissionThreshold`), bounded by `maxCandidates` (weakest dropped first, `truncated()` reported as
+  `TotalHits.Relation.GREATER_THAN_OR_EQUAL_TO`); phase 2 scores the candidates against the stored full-precision vectors
+  and keeps those at or above `resultSimilarity`. Precision is therefore exact; recall depends on the estimates and the
+  slack. The native nibble kernel runs in phase 1 as for top-k.
+- Knobs (JVM properties, read once): `clusterann.radial.admission_slack` (default 0.05, scale-free across metrics) and
+  `clusterann.radial.max_candidates` (default 10000 per segment). A first version used a plain fraction of the score
+  (0.8x); on MIP scores around 140 that admitted nearly every probed vector and the exact pass ran to the cap every
+  query (~10 ms p50 on Cohere 100k), which is why the slack moved into the raw metric.
+- Why not Lucene's `FloatVectorSimilarityQuery`: its `VectorSimilarityCollector` is package-private, reports `k()=1`, its
+  `minCompetitiveSimilarity()` is `-inf` until the first hit, and a search timeout wraps it in a decorator, so the reader
+  could not reliably tell a radial request from a top-k one nor read the threshold.
+
+Tests: `RadialCandidateCollectorTests` (JUnit 5), `ClusterANNRadialQueryTests` (2 segments, 8 Gaussian blobs,
+4-bit: exact scores, recall >= 0.9 at radii of 10 and 300, a 400-doc radius returns > 300, cap honoured, filters,
+self-only radius, explain, equals), `ClusterANNRadialQueryBuilderTests` (max_distance / min_score on L2 and inner
+product build the radial query with the expected thresholds; k still builds the rescore query). The Cohere harness has
+an opt-in radial pass: `-Dknn.clusterann.bench.radial=true` (ranks 10 / 100 / 1000, recall, precision, latency).
+
+Cohere 100k (768d, MIP, 4-bit, native NEON kernel, one segment, 50 queries per radius; radii chosen at exact ranks
+10 / 100 / 1000). Precision was 1.0 in every run (the membership decision is exact):
+
+| admission slack | recall r=10 | recall r=100 | recall r=1000 | p50 us r=10 | p50 us r=100 | p50 us r=1000 |
+|---|---|---|---|---|---|---|
+| 0.8x score ratio (first version) | 0.968 | 0.934 | 0.865 | 20647 | 10219 | 10646 |
+| 0.10 | 0.968 | 0.934 | 0.865 | 6792 | 9473 | 10215 |
+| 0.05 (default) | 0.968 | 0.934 | 0.865 | 3812 | 4950 | 9019 |
+| 0.03 | 0.968 | 0.934 | 0.865 | 3328 | 3946 | 6213 |
+| 0.00 | 0.870 | 0.847 | 0.805 | 3406 | 3289 | 4367 |
+
+Recall is flat from 0.03 up, so the remaining misses are clusters the planner did not probe, not admission; below
+~0.03 the estimates start dropping true neighbours. Default set to 0.05. For reference the top-k scan on the same index
+runs at 2.7 ms p50, and the POC's radial path measured 15 to 50 ms per query with a hard 100-per-segment cap.
+Reports: `kdy/bench-3-5-100k-radial*.txt`.

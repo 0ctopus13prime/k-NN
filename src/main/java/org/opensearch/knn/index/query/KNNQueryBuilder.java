@@ -478,8 +478,11 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
             }
         }
 
+        // ClusterANN is engineless (engine UNDEFINED) and answers radial search through its own query, see
+        // RNNQueryFactory; its scores are Lucene-style, so the radius converts with the Lucene engine's formulas below.
+        final boolean clusterANNField = knnVectorFieldType.isClusterANN();
         if (this.maxDistance != null || this.minScore != null) {
-            if (!ENGINES_SUPPORTING_RADIAL_SEARCH.contains(knnEngine)) {
+            if (!ENGINES_SUPPORTING_RADIAL_SEARCH.contains(knnEngine) && clusterANNField == false) {
                 throw new UnsupportedOperationException(
                     String.format(Locale.ROOT, "Engine [%s] does not support radial search", knnEngine)
                 );
@@ -504,6 +507,8 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
             }
             if (memoryOptimizedSearchEnabled) {
                 radius = MemoryOptimizedSearchScoreConverter.distanceToRadialThreshold(this.maxDistance, spaceType);
+            } else if (clusterANNField) {
+                radius = KNNEngine.LUCENE.distanceToRadialThreshold(this.maxDistance, spaceType);
             } else {
                 radius = knnEngine.distanceToRadialThreshold(this.maxDistance, spaceType);
             }
@@ -517,6 +522,8 @@ public class KNNQueryBuilder extends AbstractQueryBuilder<KNNQueryBuilder> imple
             }
             if (memoryOptimizedSearchEnabled) {
                 radius = MemoryOptimizedSearchScoreConverter.scoreToRadialThreshold(this.minScore, spaceType);
+            } else if (clusterANNField) {
+                radius = KNNEngine.LUCENE.scoreToRadialThreshold(this.minScore, spaceType);
             } else {
                 radius = knnEngine.scoreToRadialThreshold(this.minScore, spaceType);
             }

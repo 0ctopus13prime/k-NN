@@ -18,9 +18,12 @@ import org.apache.lucene.search.FloatVectorSimilarityQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.join.BitSetProducer;
 import org.opensearch.index.IndexSettings;
+import org.opensearch.index.mapper.MappedFieldType;
 import org.opensearch.index.query.QueryShardContext;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.engine.KNNEngine;
+import org.opensearch.knn.index.mapper.KNNVectorFieldType;
+import org.opensearch.knn.index.query.clusterann.ClusterANNRadialQuery;
 
 /**
  * Class to create radius nearest neighbor queries
@@ -73,6 +76,14 @@ public class RNNQueryFactory extends BaseQueryFactory {
         final Query filterQuery = getFilterQuery(createQueryRequest);
         final Map<String, ?> methodParameters = createQueryRequest.getMethodParameters();
         final boolean memoryOptimizedSearchEnabled = createQueryRequest.isMemoryOptimizedSearchEnabled();
+
+        // ClusterANN is engineless: no native index to hand a radius to, and Lucene's similarity query cannot reach the
+        // codec reader's two-phase radial path. Its own query does; the radius is already a Lucene-style similarity.
+        if (isClusterANNField(createQueryRequest)) {
+            final int shardId = createQueryRequest.getContext().map(QueryShardContext::getShardId).orElse(-1);
+            log.debug("Creating ClusterANN radial query for field:{}, resultSimilarity:{}", fieldName, radius);
+            return new ClusterANNRadialQuery(fieldName, vector, radius, filterQuery, shardId);
+        }
 
         if (KNNEngine.getEnginesThatCreateCustomSegmentFiles().contains(createQueryRequest.getKnnEngine())) {
             BitSetProducer parentFilter = null;
@@ -137,6 +148,17 @@ public class RNNQueryFactory extends BaseQueryFactory {
             resultSimilarity,
             filterQuery
         );
+    }
+
+    /**
+     * Whether the query is against a ClusterANN field. Read from the mapping, because ClusterANN has no engine: it is an
+     * engineless method and the method name is the only thing that identifies it. Same test as {@code KNNQueryFactory}.
+     */
+    private static boolean isClusterANNField(final CreateQueryRequest createQueryRequest) {
+        final MappedFieldType fieldType = createQueryRequest.getContext()
+            .map(context -> context.fieldMapper(createQueryRequest.getFieldName()))
+            .orElse(null);
+        return fieldType instanceof KNNVectorFieldType knnVectorFieldType && knnVectorFieldType.isClusterANN();
     }
 
     /**

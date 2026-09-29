@@ -22,6 +22,7 @@ import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.util.VectorUtil;
 import org.opensearch.knn.clusterann.read.block.scalar.NativeInt4DotProduct;
+import org.opensearch.knn.index.query.clusterann.ClusterANNRadialQuery;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -146,6 +147,50 @@ public class ClusterANNCohereBenchTests extends LuceneTestCase {
                         Arrays.stream(lat).average().orElse(0) / 1e3,
                         lat[lat.length - 1] / 1e3
                     );
+                }
+
+                // 5. Optional radial pass (-Dknn.clusterann.bench.radial=true): thresholds taken at exact ranks, so "truth" is
+                // the set of docs at or above the rank-th best exact score. Reports recall, precision (1.0 expected: the
+                // membership decision is exact) and latency per rank.
+                if (Boolean.parseBoolean(System.getProperty("knn.clusterann.bench.radial", "false"))) {
+                    int radialQueries = Math.min(queries.length, Integer.getInteger("knn.clusterann.bench.radial.queries", 50));
+                    for (int rank : new int[] { 10, 100, 1000 }) {
+                        double recallSum = 0, precisionSum = 0;
+                        long[] rlat = new long[radialQueries];
+                        long returnedSum = 0;
+                        for (int q = 0; q < radialQueries; q++) {
+                            float[] scores = new float[base.length];
+                            for (int i = 0; i < base.length; i++)
+                                scores[i] = sim.compare(queries[q], base[i]);
+                            float[] sorted = scores.clone();
+                            Arrays.sort(sorted);
+                            float threshold = (sorted[base.length - rank] + sorted[base.length - rank - 1]) / 2f;
+                            Set<Integer> inRadius = new HashSet<>();
+                            for (int i = 0; i < base.length; i++)
+                                if (scores[i] >= threshold) inRadius.add(i);
+                            long s = System.nanoTime();
+                            TopDocs td = searcher.search(new ClusterANNRadialQuery(FIELD, queries[q], threshold, null, 0), base.length);
+                            rlat[q] = System.nanoTime() - s;
+                            int hit = 0;
+                            for (ScoreDoc sd : td.scoreDocs)
+                                if (inRadius.contains(sd.doc)) hit++;
+                            recallSum += inRadius.isEmpty() ? 0 : hit / (double) inRadius.size();
+                            precisionSum += td.scoreDocs.length == 0 ? 1 : hit / (double) td.scoreDocs.length;
+                            returnedSum += td.scoreDocs.length;
+                        }
+                        Arrays.sort(rlat);
+                        log(
+                            report,
+                            "radial rank=%d: recall=%.4f precision=%.4f avgReturned=%.1f latency us: p50=%.0f p90=%.0f p99=%.0f",
+                            rank,
+                            recallSum / radialQueries,
+                            precisionSum / radialQueries,
+                            returnedSum / (double) radialQueries,
+                            pct(rlat, 0.50) / 1e3,
+                            pct(rlat, 0.90) / 1e3,
+                            pct(rlat, 0.99) / 1e3
+                        );
+                    }
                 }
             }
         }

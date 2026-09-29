@@ -1,0 +1,11 @@
+label=3-5-radial-100k-slack0.03 bits=4 space=MAXIMUM_INNER_PRODUCT count=100000 queries=220 k=100
+native dot product: true (kernel=neon/neon-dotprod)
+loaded 100000 base + 220 query vectors, dim=768 in 18.6s
+ground truth (brute force) in 4.5s
+indexed + forceMerge(1) in 22.3s; files: _0.clac=1MB _0.clam=0MB _0.clap=77MB _0.vec=292MB total=371MB
+queries timed=200 (after 20 warm-up)
+recall@100: mean=0.8846 min=0.570
+latency us: p50=2633 p90=2945 p99=3314 mean=2637 max=3400
+radial rank=10: recall=0.9680 precision=1.0000 avgReturned=9.7 latency us: p50=3328 p90=3632 p99=13225
+radial rank=100: recall=0.9342 precision=1.0000 avgReturned=93.4 latency us: p50=3946 p90=4331 p99=4818
+radial rank=1000: recall=0.8650 precision=1.0000 avgReturned=865.0 latency us: p50=6213 p90=7123 p99=8112
